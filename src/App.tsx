@@ -33,7 +33,7 @@ export default function App() {
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
-    year: true,
+    year: false,
     ratings: true
   });
 
