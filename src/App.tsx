@@ -2,12 +2,13 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   Search, 
   ChevronDown, 
+  ChevronRight,
   Grid, 
   List, 
   Star, 
   Clock, 
   Film, 
-  LayoutGrid,
+  Library,
   Filter,
   Settings,
   Check,
@@ -26,11 +27,19 @@ export default function App() {
   const [selectedRatings, setSelectedRatings] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [posterSize, setPosterSize] = useState(160);
-  const [activeTab, setActiveTab] = useState('Library');
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
+  const [expandedSections, setExpandedSections] = useState({
+    genre: true,
+    year: true,
+    ratings: true
+  });
+
+  const toggleSection = (section: keyof typeof expandedSections) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
 
   const allUniqueGenres = useMemo(() => {
     const set = new Set<string>();
@@ -134,72 +143,122 @@ export default function App() {
             <div className="w-3 h-3 rounded-full bg-[#28c840]" />
           </div>
 
-          <div className="mb-6 space-y-1">
-            <div className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base bg-white/10 text-white">
-              <LayoutGrid size={18} />
-              Library
-            </div>
-          </div>
-
           <nav className="space-y-6">
             <div>
-              <button className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group">
+              <button 
+                onClick={() => toggleSection('genre')}
+                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+              >
                 <span className="flex items-center gap-2">
-                  <ChevronDown size={14} />
+                  <motion.div
+                    animate={{ rotate: expandedSections.genre ? 90 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronRight size={14} />
+                  </motion.div>
                   Genre
                 </span>
               </button>
-              <ul className="space-y-0.5">
-                {genres.map(genre => (
-                  <li key={genre}>
-                    <Checkbox 
-                      label={genre}
-                      checked={selectedGenres.includes(genre)}
-                      onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <motion.div
+                initial={false}
+                animate={{ 
+                  height: expandedSections.genre ? 'auto' : 0,
+                  opacity: expandedSections.genre ? 1 : 0,
+                  marginBottom: expandedSections.genre ? 12 : 0
+                }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <ul className="space-y-0.5">
+                  {genres.map(genre => (
+                    <li key={genre}>
+                      <Checkbox 
+                        label={genre}
+                        checked={selectedGenres.includes(genre)}
+                        onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
             </div>
 
             <div>
-              <button className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3">
+              <button 
+                onClick={() => toggleSection('year')}
+                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+              >
                 <span className="flex items-center gap-2">
-                  <ChevronDown size={14} />
+                  <motion.div
+                    animate={{ rotate: expandedSections.year ? 90 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronRight size={14} />
+                  </motion.div>
                   Year
                 </span>
               </button>
-              <ul className="space-y-0.5">
-                {years.map(year => (
-                  <li key={year}>
-                    <Checkbox 
-                      label={year}
-                      checked={selectedYears.includes(year)}
-                      onClick={() => toggleFilter(selectedYears, year, setSelectedYears)}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <motion.div
+                initial={false}
+                animate={{ 
+                  height: expandedSections.year ? 'auto' : 0,
+                  opacity: expandedSections.year ? 1 : 0,
+                  marginBottom: expandedSections.year ? 12 : 0
+                }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <ul className="space-y-0.5">
+                  {years.map(year => (
+                    <li key={year}>
+                      <Checkbox 
+                        label={year}
+                        checked={selectedYears.includes(year)}
+                        onClick={() => toggleFilter(selectedYears, year, setSelectedYears)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
             </div>
 
             <div>
-              <button className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3">
+              <button 
+                onClick={() => toggleSection('ratings')}
+                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+              >
                 <span className="flex items-center gap-2">
-                  <ChevronDown size={14} />
+                  <motion.div
+                    animate={{ rotate: expandedSections.ratings ? 90 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronRight size={14} />
+                  </motion.div>
                   Ratings
                 </span>
               </button>
-              <ul className="space-y-0.5">
-                {ratings.map(rating => (
-                  <li key={rating}>
-                    <Checkbox 
-                      label={`${rating} ${rating === 1 ? 'star' : 'stars'}`}
-                      checked={selectedRatings.includes(rating)}
-                      onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <motion.div
+                initial={false}
+                animate={{ 
+                  height: expandedSections.ratings ? 'auto' : 0,
+                  opacity: expandedSections.ratings ? 1 : 0,
+                  marginBottom: expandedSections.ratings ? 12 : 0
+                }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <ul className="space-y-0.5">
+                  {ratings.map(rating => (
+                    <li key={rating}>
+                      <Checkbox 
+                        label={`${rating} ${rating === 1 ? 'star' : 'stars'}`}
+                        checked={selectedRatings.includes(rating)}
+                        onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
             </div>
           </nav>
         </div>
@@ -209,7 +268,7 @@ export default function App() {
             onClick={resetFilters}
             className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base text-white/60 hover:bg-white/5 transition-colors"
           >
-            <LayoutGrid size={18} />
+            <Film size={18} />
             All Films
           </button>
           <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base text-white/60 hover:bg-white/5 transition-colors">
@@ -222,33 +281,21 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-16 flex items-center justify-between px-8 border-b border-white/10 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
+        <header className="h-14 flex items-center justify-between px-8 border-b border-white/10 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
           <div className="flex items-center gap-4">
-            <div className="flex bg-white/5 rounded-lg p-1">
-              {['Library', 'Recently Watched', 'Screenshots'].map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-base font-medium transition-all ${
-                    activeTab === tab ? 'bg-white/10 text-white shadow-sm' : 'text-white/40 hover:text-white'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+            <h1 className="text-xl font-bold tracking-tight text-white">FilmBase</h1>
           </div>
 
           <div className="flex items-center gap-6">
             <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-white/60 transition-colors" size={16} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-white/60 transition-colors" size={14} />
               <input 
                 ref={searchInputRef}
                 type="text" 
                 placeholder="Search films..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-full py-2 pl-10 pr-10 text-base w-64 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/10 transition-all placeholder:text-white/20"
+                className="bg-white/5 border border-white/10 rounded-full py-1.5 pl-9 pr-9 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/10 transition-all placeholder:text-white/20"
               />
               {searchQuery && (
                 <button
@@ -299,9 +346,6 @@ export default function App() {
                 Poster Size
               </span>
             </div>
-            <button className="p-2 text-white/40 hover:text-white transition-colors">
-              <Settings size={18} />
-            </button>
           </div>
         </div>
 
