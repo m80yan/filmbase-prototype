@@ -12,7 +12,8 @@ import {
   Filter,
   Settings,
   Check,
-  X
+  X,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
@@ -31,6 +32,9 @@ export default function App() {
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newMovieTitle, setNewMovieTitle] = useState('');
+  const [newMovieUrl, setNewMovieUrl] = useState('');
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
     year: false,
@@ -61,6 +65,32 @@ export default function App() {
 
   const handleRatingChange = (movieId: string, newRating: number) => {
     setMovies(prev => prev.map(m => m.id === movieId ? { ...m, personalRating: newRating } : m));
+  };
+
+  const handleAddMovie = () => {
+    if (!newMovieTitle.trim()) return;
+    
+    const newMovie: Movie = {
+      id: Math.random().toString(36).substr(2, 9),
+      title: newMovieTitle,
+      year: new Date().getFullYear(),
+      genre: ['Drama'],
+      director: 'Unknown',
+      cast: [],
+      imdbRating: 0,
+      rottenTomatoes: 0,
+      personalRating: 0,
+      runtime: '0 min',
+      posterUrl: 'https://picsum.photos/seed/movie/400/600',
+      trailerUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      isFavorite: false,
+      language: 'English'
+    };
+    
+    setMovies([newMovie, ...movies]);
+    setIsAddModalOpen(false);
+    setNewMovieTitle('');
+    setNewMovieUrl('');
   };
 
   const resetFilters = () => {
@@ -116,17 +146,25 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
-  const Checkbox = ({ checked, label, onClick }: { checked: boolean, label: string | React.ReactNode, onClick: () => void }) => (
+  const Checkbox = ({ checked, label, onClick, isRating }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean }) => (
     <button 
       onClick={onClick}
-      className="flex items-center gap-3 w-full px-3 py-1.5 rounded-md text-base transition-colors group text-left"
+      className={`flex items-center gap-3 w-full px-3 py-1.5 rounded-md text-base transition-colors group text-left ${
+        isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5'
+      }`}
     >
       <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
-        checked ? 'bg-white border-white text-black' : 'border-white/20 group-hover:border-white/40'
+        checked 
+          ? (isRating ? 'bg-[#EB9692] border-[#EB9692] text-black' : 'bg-white border-white text-black') 
+          : (isRating ? 'border-white/20 group-hover:border-[#EB9692]/50' : 'border-white/20 group-hover:border-white/40')
       }`}>
         {checked && <Check size={12} strokeWidth={4} />}
       </div>
-      <span className={`transition-colors ${checked ? 'text-white' : 'text-white/60 group-hover:text-white'}`}>
+      <span className={`transition-colors ${
+        checked 
+          ? (isRating ? 'text-[#EB9692]' : 'text-white') 
+          : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
+      }`}>
         {label}
       </span>
     </button>
@@ -136,13 +174,15 @@ export default function App() {
     <div className="flex h-screen w-full bg-[#121212] overflow-hidden">
       {/* Sidebar */}
       <aside className="w-64 flex flex-col border-r border-white/5 sidebar-gradient">
-        <div className="p-6">
-          <div className="flex items-center gap-2 mb-8">
+        <div className="p-6 pb-2">
+          <div className="flex items-center gap-2 mb-4">
             <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
             <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
             <div className="w-3 h-3 rounded-full bg-[#28c840]" />
           </div>
+        </div>
 
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 py-2">
           <nav className="space-y-6">
             <div>
               <button 
@@ -234,7 +274,7 @@ export default function App() {
                   >
                     <ChevronRight size={14} />
                   </motion.div>
-                  Ratings
+                  My Rating
                 </span>
               </button>
               <motion.div
@@ -254,6 +294,7 @@ export default function App() {
                         label={`${rating} ${rating === 1 ? 'star' : 'stars'}`}
                         checked={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
+                        isRating
                       />
                     </li>
                   ))}
@@ -303,10 +344,10 @@ export default function App() {
                     setSearchQuery('');
                     searchInputRef.current?.focus();
                   }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition-colors p-0.5"
+                  className="absolute right-[9px] top-1/2 -translate-y-1/2 w-4 h-4 bg-white/60 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-sm"
                   title="Clear search"
                 >
-                  <X size={14} />
+                  <X size={10} strokeWidth={3} className="text-[#121212]" />
                 </button>
               )}
             </div>
@@ -315,23 +356,24 @@ export default function App() {
 
         {/* Toolbar */}
         <div className="px-8 py-4 flex items-center justify-between border-b border-white/5 bg-[#121212]/50">
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-            >
-              <Grid size={18} />
-            </button>
-            <button 
-              onClick={() => setViewMode('list')}
-              className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-            >
-              <List size={18} />
-            </button>
-          </div>
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+              >
+                <Grid size={18} />
+              </button>
+              <button 
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+              >
+                <List size={18} />
+              </button>
+            </div>
 
-          <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
+              <Grid size={12} className="text-white/20" />
               <input 
                 type="range" 
                 min="120" 
@@ -341,11 +383,18 @@ export default function App() {
                 onChange={(e) => setPosterSize(Number(e.target.value))}
                 className="w-32 accent-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
               />
-              <span className={`text-sm font-medium uppercase tracking-wider flex items-center gap-2 transition-opacity ${viewMode === 'list' ? 'opacity-30' : 'text-white/40'}`}>
-                <Filter size={12} />
-                Poster Size
-              </span>
+              <Grid size={20} className="text-white/20" />
             </div>
+          </div>
+
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={() => setIsAddModalOpen(true)}
+              className="p-2 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+              title="Add Movie"
+            >
+              <Plus size={20} />
+            </button>
           </div>
         </div>
 
@@ -449,7 +498,7 @@ export default function App() {
                 </div>
                 <span className="text-center">Trailer</span>
                 <span>Director</span>
-                <span>Cast</span>
+                <span>Starring</span>
                 <button 
                   onClick={() => setSortMode(sortMode === 'imdb-desc' ? 'imdb-asc' : 'imdb-desc')}
                   className={`flex flex-col items-center gap-1 hover:text-white transition-colors ${sortMode.startsWith('imdb') ? 'text-white' : ''}`}
@@ -559,6 +608,75 @@ export default function App() {
               
               {/* Subtle gold glow behind the player */}
               <div className="absolute -inset-4 -z-10 bg-gradient-to-r from-white/5 via-white/10 to-white/5 blur-3xl opacity-50" />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Movie Modal */}
+      <AnimatePresence>
+        {isAddModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-xl p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
+            >
+              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Add New Movie</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                    Movie Title
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="Enter title..."
+                    value={newMovieTitle}
+                    onChange={(e) => setNewMovieTitle(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
+                    autoFocus
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                    IMDb / Douban URL
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="https://..."
+                    value={newMovieUrl}
+                    onChange={(e) => setNewMovieUrl(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 mt-8">
+                <button 
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setNewMovieTitle('');
+                    setNewMovieUrl('');
+                  }}
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleAddMovie}
+                  className="px-8 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:bg-white/90 transition-colors"
+                >
+                  Add
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
@@ -765,21 +883,24 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
         
         {/* Hover Metadata Overlay */}
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 space-y-2">
-          <div className="space-y-1 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
-            <div className="pb-1">
-              <span className="truncate block">{formatDirectorName(movie.director)}</span>
+          <div className="space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
+            <div>
+              <span className="truncate block">· {movie.genre.join(', ')}</span>
             </div>
-            <div className="pb-1">
-              <span className="truncate block">{movie.genre.join(', ')}</span>
+            <div>
+              <span className="truncate block">· {movie.year}</span>
             </div>
-            <div className="pb-1">
-              <span className="truncate block">{movie.runtime}</span>
+            <div>
+              <span className="truncate block">· {movie.runtime}</span>
             </div>
-            <div className="pt-1 overflow-hidden">
-              <div ref={castRef} className="relative w-full overflow-hidden h-4">
-                <div className={`whitespace-nowrap flex gap-4 ${isCastOverflowing ? 'animate-marquee' : ''}`}>
-                  <span>{movie.cast.join(' • ')}</span>
-                  {isCastOverflowing && <span>{movie.cast.join(' • ')}</span>}
+            <div className="pt-2">
+              <div className="text-[11px] capitalize tracking-[0.2em] text-white/50 font-bold mb-0">Starring</div>
+              <div className="overflow-hidden">
+                <div ref={castRef} className="relative w-full overflow-hidden h-4">
+                  <div className={`whitespace-nowrap flex gap-4 ${isCastOverflowing ? 'animate-marquee' : ''}`}>
+                    <span>{movie.cast.join(' • ')}</span>
+                    {isCastOverflowing && <span>{movie.cast.join(' • ')}</span>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -790,7 +911,7 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
               e.stopPropagation();
               onPlayTrailer();
             }}
-            className="w-full py-2.5 mt-2 rounded-full bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500"
+            className="w-full py-2.5 mt-2 rounded-full bg-white/80 hover:bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-xl"
           >
             Play Trailer
           </button>
@@ -816,25 +937,25 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
           )}
         </div>
         
-        <div className="flex flex-col gap-1.5 text-sm text-white/60 group-hover:text-white transition-colors font-medium tracking-wider">
-          <div className="flex items-center justify-between h-6">
+        <div className="flex flex-col gap-2 text-sm text-white/60 group-hover:text-white transition-colors font-medium tracking-wider">
+          <div className="flex items-center justify-between h-5">
             <div className="flex items-center gap-1.5">
               <span className="hidden group-hover:inline-block bg-[#F4C434] text-black font-bold px-1 rounded-[2px] text-[11px] leading-tight">IMDb</span>
               <span className="flex items-baseline gap-1">
-                {movie.imdbRating}
                 <span className="group-hover:hidden text-[10px] opacity-60">IMDb</span>
+                {movie.imdbRating}
               </span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="hidden group-hover:inline-block text-[13px] leading-tight" style={{ filter: 'saturate(1.5) brightness(1.2)' }}>🍅</span>
               <span className="flex items-baseline gap-1">
-                {movie.rottenTomatoes}%
                 <span className="group-hover:hidden text-[10px] opacity-60">RT</span>
+                {movie.rottenTomatoes}%
               </span>
             </div>
           </div>
           
-          <div className="pt-1 flex items-baseline">
+          <div className="flex items-baseline">
             <StarRating align="start" />
           </div>
         </div>
