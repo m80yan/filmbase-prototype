@@ -1,0 +1,5 @@
+{
+  "name": "CineVault",
+  "description": "A premium movie library manager with a sleek macOS-inspired interface.",
+  "requestFramePermissions": []
+}
