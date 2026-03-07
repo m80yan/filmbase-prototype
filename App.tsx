@@ -26,7 +26,6 @@ export default function App() {
   const [selectedRatings, setSelectedRatings] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [posterSize, setPosterSize] = useState(160);
-  const [activeTab, setActiveTab] = useState('Library');
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
@@ -132,13 +131,6 @@ export default function App() {
             <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
             <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
             <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-          </div>
-
-          <div className="mb-6 space-y-1">
-            <div className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base bg-white/10 text-white">
-              <Library size={18} />
-              Library
-            </div>
           </div>
 
           <nav className="space-y-6">
