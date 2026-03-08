@@ -373,7 +373,14 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Grid size={12} className="text-white/20" />
+              <button
+                onClick={() => setPosterSize(Math.max(120, posterSize - 20))}
+                disabled={viewMode === 'list' || posterSize <= 120}
+                className="text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                title="Decrease poster size"
+              >
+                <Grid size={12} />
+              </button>
               <input 
                 type="range" 
                 min="120" 
@@ -383,7 +390,14 @@ export default function App() {
                 onChange={(e) => setPosterSize(Number(e.target.value))}
                 className="w-32 accent-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
               />
-              <Grid size={20} className="text-white/20" />
+              <button
+                onClick={() => setPosterSize(Math.min(240, posterSize + 20))}
+                disabled={viewMode === 'list' || posterSize >= 240}
+                className="text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                title="Increase poster size"
+              >
+                <Grid size={20} />
+              </button>
             </div>
           </div>
 
@@ -402,7 +416,7 @@ export default function App() {
         <div className={`flex-1 overflow-y-auto px-8 pb-8 ${viewMode === 'list' ? 'pt-0' : 'pt-4'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
             <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-white/5">
-              <div className="grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_80px_80px_140px] gap-x-4 px-3 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end">
+              <div className="grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-4 px-3 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end">
                 <span>Poster</span>
                 <div className="relative">
                   <button 
@@ -501,36 +515,24 @@ export default function App() {
                 <span>Starring</span>
                 <button 
                   onClick={() => setSortMode(sortMode === 'imdb-desc' ? 'imdb-asc' : 'imdb-desc')}
-                  className={`flex flex-col items-center gap-1 hover:text-white transition-colors ${sortMode.startsWith('imdb') ? 'text-white' : ''}`}
+                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('imdb') ? 'text-white' : ''}`}
                 >
                   <span className="bg-[#F4C434] text-black px-1 rounded-[2px] text-[11px] font-bold">IMDb</span>
-                  <span className="flex items-center gap-1">
-                    Score
-                    {sortMode === 'imdb-asc' && <ChevronDown size={8} className="rotate-180" />}
-                    {sortMode === 'imdb-desc' && <ChevronDown size={8} />}
-                  </span>
+                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'imdb-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
                 <button 
                   onClick={() => setSortMode(sortMode === 'rt-desc' ? 'rt-asc' : 'rt-desc')}
-                  className={`flex flex-col items-center gap-1 hover:text-white transition-colors ${sortMode.startsWith('rt') ? 'text-white' : ''}`}
+                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('rt') ? 'text-white' : ''}`}
                 >
                   <span className="text-[14px] leading-none" style={{ filter: 'saturate(1.5) brightness(1.2)' }}>🍅</span>
-                  <span className="flex items-center gap-1">
-                    RT %
-                    {sortMode === 'rt-asc' && <ChevronDown size={8} className="rotate-180" />}
-                    {sortMode === 'rt-desc' && <ChevronDown size={8} />}
-                  </span>
+                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'rt-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('rt') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
                 <button 
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
-                  className={`flex flex-col items-center gap-0 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
+                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
                 >
-                  <span className="text-[12px] font-bold uppercase tracking-widest">My</span>
-                  <span className="flex items-center gap-1 text-[12px] font-bold uppercase tracking-widest">
-                    Rating
-                    {sortMode === 'personal-asc' && <ChevronDown size={8} className="rotate-180" />}
-                    {sortMode === 'personal-desc' && <ChevronDown size={8} />}
-                  </span>
+                  <span className="text-[12px] font-bold uppercase tracking-widest whitespace-nowrap">MY RATING</span>
+                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
               </div>
             </div>
@@ -794,7 +796,7 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className="group grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_80px_80px_140px] gap-x-4 items-center p-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer"
+        className="group grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-4 items-center p-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer"
       >
         <div 
           className="w-16 h-24 rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 group-hover:scale-115 origin-center"
@@ -885,19 +887,18 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 space-y-2">
           <div className="space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
             <div>
-              <span className="truncate block">· {movie.genre.join(', ')}</span>
+              <span className="truncate block">{movie.genre.join(', ')}</span>
             </div>
             <div>
-              <span className="truncate block">· {movie.year}</span>
+              <span className="truncate block">{movie.year}</span>
             </div>
             <div>
-              <span className="truncate block">· {movie.runtime}</span>
+              <span className="truncate block">{movie.runtime}</span>
             </div>
             <div className="pt-2">
-              <div className="text-[11px] capitalize tracking-[0.2em] text-white/50 font-bold mb-0">Starring</div>
               <div className="overflow-hidden">
                 <div ref={castRef} className="relative w-full overflow-hidden h-4">
-                  <div className={`whitespace-nowrap flex gap-4 ${isCastOverflowing ? 'animate-marquee' : ''}`}>
+                  <div className={`whitespace-nowrap flex gap-4 ${isCastOverflowing ? 'animate-marquee-fast' : ''}`}>
                     <span>{movie.cast.join(' • ')}</span>
                     {isCastOverflowing && <span>{movie.cast.join(' • ')}</span>}
                   </div>
