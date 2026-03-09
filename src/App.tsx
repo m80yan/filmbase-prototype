@@ -59,7 +59,7 @@ export default function App() {
   const [posterSize, setPosterSize] = useState(160);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
-  const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'year-desc' | 'year-asc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
+  const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -190,8 +190,6 @@ export default function App() {
     return [...filtered].sort((a, b) => {
       if (sortMode === 'title-asc') return a.title.localeCompare(b.title);
       if (sortMode === 'title-desc') return b.title.localeCompare(a.title);
-      if (sortMode === 'year-desc') return b.year - a.year;
-      if (sortMode === 'year-asc') return a.year - b.year;
       if (sortMode === 'duration-desc') {
         const durA = parseInt(a.runtime) || 0;
         const durB = parseInt(b.runtime) || 0;
@@ -491,16 +489,16 @@ export default function App() {
         <div className={`flex-1 overflow-y-auto pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
             <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-[#292929]">
-              <div className="grid grid-cols-[60px_100px_4fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end">
-                <span className="pl-8" />
-                <span>Poster</span>
-                <div className="relative ml-8">
+              <div className={`grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end`}>
+                {isEditing && <span className="pl-8" />}
+                <span className={isEditing ? "" : "pl-8"}>Poster</span>
+                <div className="relative pl-10">
                   <button 
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
-                    className={`flex items-center gap-1.5 hover:text-white transition-colors group ${sortMode.startsWith('title') || sortMode.startsWith('year') || selectedGenres.length > 0 ? 'text-white' : ''}`}
+                    className={`flex items-center gap-1.5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
                   >
                     <span>
-                      {sortMode.startsWith('title') ? 'TITLE' : sortMode.startsWith('year') ? 'YEAR' : sortMode.startsWith('duration') ? 'TITLE / DUR' : 'TITLE'}
+                      {sortMode.startsWith('title') ? 'TITLE' : sortMode.startsWith('duration') ? 'TITLE / DUR' : 'TITLE'}
                     </span>
                     <ChevronDown size={10} className={`transition-transform duration-300 ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -522,25 +520,6 @@ export default function App() {
                           {[
                             { id: 'title-asc', label: 'A-Z' },
                             { id: 'title-desc', label: 'Z-A' }
-                          ].map(opt => (
-                            <button
-                              key={opt.id}
-                              onClick={() => {
-                                setSortMode(opt.id as any);
-                                setIsSortDropdownOpen(false);
-                              }}
-                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
-                            >
-                              {opt.label}
-                              {sortMode === opt.id && <Check size={12} className="text-white" />}
-                            </button>
-                          ))}
-
-                          <div className="h-px bg-white/5 my-1.5" />
-                          <div className="px-3 py-1.5 text-[11px] text-white/20 uppercase tracking-[0.2em] font-black">Year</div>
-                          {[
-                            { id: 'year-desc', label: 'Newest First' },
-                            { id: 'year-asc', label: 'Oldest First' }
                           ].map(opt => (
                             <button
                               key={opt.id}
@@ -895,10 +874,10 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className="group grid grid-cols-[60px_100px_4fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer w-full"
+        className={`group grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer w-full`}
       >
-        <div className="flex justify-center pl-8">
-          {isEditing && (
+        {isEditing && (
+          <div className="flex justify-center pl-8">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -909,10 +888,10 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             >
               <Minus size={10} strokeWidth={3} />
             </button>
-          )}
-        </div>
+          </div>
+        )}
         <div 
-          className={`w-[100px] h-[150px] rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 origin-center ${!isEditing ? 'group-hover:scale-115 box-content' : ''}`}
+          className={`w-[100px] h-[150px] rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 origin-center ${!isEditing ? 'group-hover:scale-115 pl-8 box-content' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             onShowPoster();
@@ -926,7 +905,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           />
         </div>
         
-        <div className="min-w-0 ml-8">
+        <div className="min-w-0 pl-10">
           <h3 className="font-semibold text-lg text-white/90 group-hover:text-white transition-colors leading-tight">
             {movie.title}
             <span className="text-white/25 font-semibold">{"\u00A0".repeat(6)}{movie.year}</span>
