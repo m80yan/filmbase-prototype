@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Search, 
   ChevronDown, 
@@ -13,7 +13,8 @@ import {
   Settings,
   Check,
   X,
-  Plus
+  Plus,
+  Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
@@ -21,7 +22,35 @@ import { Movie } from './types';
 
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [movies, setMovies] = useState<Movie[]>(MOCK_MOVIES);
+  const [movies, setMovies] = useState<Movie[]>(() => {
+    // Always revert to base library on refresh
+    return MOCK_MOVIES.filter(m => 
+      m.title !== 'Avatar' && 
+      m.title !== 'Blade Runner 2049' &&
+      m.title !== 'Dune: Part One'
+    );
+  });
+
+  // Data Purge (Post-OMDb Cleanup)
+  useEffect(() => {
+    const purgeTitles = ['Avatar', 'Blade Runner 2049', 'Dune: Part One'];
+    
+    // One-time filter for localStorage
+    const saved = localStorage.getItem('filmbase_movies');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const filtered = parsed.filter((m: any) => !purgeTitles.includes(m.title));
+        localStorage.setItem('filmbase_movies', JSON.stringify(filtered));
+      } catch (e) {
+        localStorage.removeItem('filmbase_movies');
+      }
+    }
+
+    // Ensure current state is also purged
+    setMovies(prev => prev.filter(m => !purgeTitles.includes(m.title)));
+  }, []);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
@@ -30,11 +59,13 @@ export default function App() {
   const [posterSize, setPosterSize] = useState(160);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
-  const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
+  const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'year-desc' | 'year-asc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [newMovieTitle, setNewMovieTitle] = useState('');
   const [newMovieUrl, setNewMovieUrl] = useState('');
+  const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
     year: false,
@@ -47,9 +78,9 @@ export default function App() {
 
   const allUniqueGenres = useMemo(() => {
     const set = new Set<string>();
-    MOCK_MOVIES.forEach(m => m.genre.forEach(g => set.add(g)));
+    movies.forEach(m => m.genre.forEach(g => set.add(g)));
     return Array.from(set).sort();
-  }, []);
+  }, [movies]);
 
   const genres = allUniqueGenres;
   const years = ['2020s', '2010s', '2000s', '1990s', 'Classic'];
@@ -63,34 +94,67 @@ export default function App() {
     }
   };
 
+  const handleDeleteMovie = (movie: Movie) => {
+    if (window.confirm(`Are you sure you want to delete ${movie.title}?`)) {
+      setMovies(prev => prev.filter(m => m.id !== movie.id));
+    }
+  };
+
   const handleRatingChange = (movieId: string, newRating: number) => {
     setMovies(prev => prev.map(m => m.id === movieId ? { ...m, personalRating: newRating } : m));
   };
 
-  const handleAddMovie = () => {
-    if (!newMovieTitle.trim()) return;
+  const handleAddMovie = async () => {
+    if (!newMovieUrl.trim()) return;
     
-    const newMovie: Movie = {
-      id: Math.random().toString(36).substr(2, 9),
-      title: newMovieTitle,
-      year: new Date().getFullYear(),
-      genre: ['Drama'],
-      director: 'Unknown',
-      cast: [],
-      imdbRating: 0,
-      rottenTomatoes: 0,
-      personalRating: 0,
-      runtime: '0 min',
-      posterUrl: 'https://picsum.photos/seed/movie/400/600',
-      trailerUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      isFavorite: false,
-      language: 'English'
-    };
+    const imdbIdMatch = newMovieUrl.match(/tt\d+/);
+    if (!imdbIdMatch) {
+      alert("Please enter a valid IMDb URL containing 'tt...'");
+      return;
+    }
+    const imdbId = imdbIdMatch[0];
     
-    setMovies([newMovie, ...movies]);
-    setIsAddModalOpen(false);
-    setNewMovieTitle('');
-    setNewMovieUrl('');
+    try {
+      const response = await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=d18fbebc`);
+      const data = await response.json();
+      
+      if (data.Response === "False") {
+        alert(data.Error || "Failed to fetch movie data");
+        return;
+      }
+      
+      const trailerUrl = newMovieTrailerUrl.trim() 
+        ? newMovieTrailerUrl.replace(/watch\?v=([^&]+)/, 'embed/$1').replace(/youtu\.be\/([^?]+)/, 'www.youtube.com/embed/$1')
+        : `https://www.youtube.com/results?search_query=${encodeURIComponent(data.Title + " trailer")}`;
+
+      const newMovie: Movie = {
+        id: Math.random().toString(36).substr(2, 9),
+        title: data.Title,
+        year: parseInt(data.Year),
+        genre: data.Genre.split(', ').map((g: string) => g.trim()),
+        director: data.Director,
+        cast: data.Actors.split(', ').map((a: string) => a.trim()).slice(0, 7),
+        imdbRating: parseFloat(data.imdbRating) || 0,
+        rottenTomatoes: parseInt(data.Ratings.find((r: any) => r.Source === "Rotten Tomatoes")?.Value) || 0,
+        personalRating: 0,
+        runtime: data.Runtime,
+        posterUrl: data.Poster !== "N/A" ? data.Poster : 'https://picsum.photos/seed/movie/400/600',
+        trailerUrl: trailerUrl,
+        isFavorite: false,
+        language: data.Language,
+        isRecentlyAdded: true,
+        dateAdded: new Date().toISOString()
+      };
+      
+      setMovies(prev => [newMovie, ...prev]);
+      setIsAddModalOpen(false);
+      setNewMovieTitle('');
+      setNewMovieUrl('');
+      setNewMovieTrailerUrl('');
+    } catch (error) {
+      console.error("Error fetching from OMDb:", error);
+      alert("Failed to fetch movie data. Please check your connection.");
+    }
   };
 
   const resetFilters = () => {
@@ -126,6 +190,8 @@ export default function App() {
     return [...filtered].sort((a, b) => {
       if (sortMode === 'title-asc') return a.title.localeCompare(b.title);
       if (sortMode === 'title-desc') return b.title.localeCompare(a.title);
+      if (sortMode === 'year-desc') return b.year - a.year;
+      if (sortMode === 'year-asc') return a.year - b.year;
       if (sortMode === 'duration-desc') {
         const durA = parseInt(a.runtime) || 0;
         const durB = parseInt(b.runtime) || 0;
@@ -322,7 +388,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-14 flex items-center justify-between px-8 border-b border-white/10 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
+        <header className="h-14 flex items-center justify-between px-8 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold tracking-tight text-white">FilmBase</h1>
           </div>
@@ -344,7 +410,7 @@ export default function App() {
                     setSearchQuery('');
                     searchInputRef.current?.focus();
                   }}
-                  className="absolute right-[9px] top-1/2 -translate-y-1/2 w-4 h-4 bg-white/60 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-sm"
+                  className="absolute right-[15px] top-1/2 -translate-y-1/2 w-4 h-4 bg-white/60 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-sm translate-x-[-3px]"
                   title="Clear search"
                 >
                   <X size={10} strokeWidth={3} className="text-[#121212]" />
@@ -355,7 +421,7 @@ export default function App() {
         </header>
 
         {/* Toolbar */}
-        <div className="px-8 py-4 flex items-center justify-between border-b border-white/5 bg-[#121212]/50">
+        <div className="px-8 py-4 flex items-center justify-between border-b border-[#292929] bg-[#121212]/50">
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-2">
               <button 
@@ -402,29 +468,39 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-6">
-            <button 
-              onClick={() => setIsAddModalOpen(true)}
-              className="p-2 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
-              title="Add Movie"
-            >
-              <Plus size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setIsEditing(!isEditing)}
+                className={`p-2 rounded-md transition-colors ${isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                title="Edit Library"
+              >
+                <Minus size={20} />
+              </button>
+              <button 
+                onClick={() => setIsAddModalOpen(true)}
+                className="p-2 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+                title="Add Movie"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Content Area */}
-        <div className={`flex-1 overflow-y-auto px-8 pb-8 ${viewMode === 'list' ? 'pt-0' : 'pt-4'}`}>
+        <div className={`flex-1 overflow-y-auto pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
-            <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-white/5">
-              <div className="grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-4 px-3 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end">
+            <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-[#292929]">
+              <div className="grid grid-cols-[60px_100px_4fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end">
+                <span className="pl-8" />
                 <span>Poster</span>
-                <div className="relative">
+                <div className="relative ml-8">
                   <button 
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
-                    className={`flex items-center gap-1.5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
+                    className={`flex items-center gap-1.5 hover:text-white transition-colors group ${sortMode.startsWith('title') || sortMode.startsWith('year') || selectedGenres.length > 0 ? 'text-white' : ''}`}
                   >
                     <span>
-                      {sortMode.startsWith('title') ? 'TITLE' : sortMode.startsWith('duration') ? 'TITLE / DUR' : 'TITLE'}
+                      {sortMode.startsWith('title') ? 'TITLE' : sortMode.startsWith('year') ? 'YEAR' : sortMode.startsWith('duration') ? 'TITLE / DUR' : 'TITLE'}
                     </span>
                     <ChevronDown size={10} className={`transition-transform duration-300 ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -446,6 +522,25 @@ export default function App() {
                           {[
                             { id: 'title-asc', label: 'A-Z' },
                             { id: 'title-desc', label: 'Z-A' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => {
+                                setSortMode(opt.id as any);
+                                setIsSortDropdownOpen(false);
+                              }}
+                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
+                            >
+                              {opt.label}
+                              {sortMode === opt.id && <Check size={12} className="text-white" />}
+                            </button>
+                          ))}
+
+                          <div className="h-px bg-white/5 my-1.5" />
+                          <div className="px-3 py-1.5 text-[11px] text-white/20 uppercase tracking-[0.2em] font-black">Year</div>
+                          {[
+                            { id: 'year-desc', label: 'Newest First' },
+                            { id: 'year-asc', label: 'Oldest First' }
                           ].map(opt => (
                             <button
                               key={opt.id}
@@ -529,7 +624,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
-                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
+                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center pr-8 ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
                 >
                   <span className="text-[12px] font-bold uppercase tracking-widest whitespace-nowrap">MY RATING</span>
                   <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
@@ -551,6 +646,8 @@ export default function App() {
                   movie={movie} 
                   size={posterSize} 
                   viewMode={viewMode} 
+                  isEditing={isEditing}
+                  onDelete={() => handleDeleteMovie(movie)}
                   onRatingChange={(rating) => handleRatingChange(movie.id, rating)}
                   onPlayTrailer={() => {
                     setSelectedMovie(movie);
@@ -635,13 +732,13 @@ export default function App() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    Movie Title
+                    IMDb URL
                   </label>
                   <input 
                     type="text"
-                    placeholder="Enter title..."
-                    value={newMovieTitle}
-                    onChange={(e) => setNewMovieTitle(e.target.value)}
+                    placeholder="https://www.imdb.com/title/tt..."
+                    value={newMovieUrl}
+                    onChange={(e) => setNewMovieUrl(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
                     autoFocus
                   />
@@ -649,13 +746,13 @@ export default function App() {
                 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    IMDb / Douban URL
+                    Trailer URL (Optional)
                   </label>
                   <input 
                     type="text"
-                    placeholder="https://..."
-                    value={newMovieUrl}
-                    onChange={(e) => setNewMovieUrl(e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    value={newMovieTrailerUrl}
+                    onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
                   />
                 </div>
@@ -691,6 +788,8 @@ interface MovieCardProps {
   movie: Movie;
   size: number;
   viewMode: 'grid' | 'list';
+  isEditing: boolean;
+  onDelete: () => void;
   onRatingChange: (rating: number) => void;
   onPlayTrailer: () => void;
   onShowPoster: () => void;
@@ -712,7 +811,7 @@ const formatDirectorName = (name: string) => {
   return `${first} ${middles} ${last}`;
 };
 
-function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onShowPoster }: MovieCardProps) {
+function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange, onPlayTrailer, onShowPoster }: MovieCardProps) {
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const castRef = useRef<HTMLDivElement>(null);
@@ -796,10 +895,24 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className="group grid grid-cols-[80px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-4 items-center p-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer"
+        className="group grid grid-cols-[60px_100px_4fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer w-full"
       >
+        <div className="flex justify-center pl-8">
+          {isEditing && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
+              title="Delete Movie"
+            >
+              <Minus size={10} strokeWidth={3} />
+            </button>
+          )}
+        </div>
         <div 
-          className="w-16 h-24 rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 group-hover:scale-115 origin-center"
+          className={`w-[100px] h-[150px] rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 origin-center ${!isEditing ? 'group-hover:scale-115 box-content' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             onShowPoster();
@@ -813,9 +926,10 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
           />
         </div>
         
-        <div className="min-w-0">
+        <div className="min-w-0 ml-8">
           <h3 className="font-semibold text-lg text-white/90 group-hover:text-white transition-colors leading-tight">
             {movie.title}
+            <span className="text-white/25 font-semibold">{"\u00A0".repeat(6)}{movie.year}</span>
           </h3>
           <div className="flex items-center gap-1.5 mt-1 text-[13px] text-white/60 font-medium tracking-wide">
             <span>{movie.runtime}</span>
@@ -840,14 +954,14 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
           {formatDirectorName(movie.director)}
         </div>
 
-        <div className="relative h-14 overflow-hidden text-[13px] text-white/60 group-hover:text-white transition-colors leading-relaxed">
-          <div className="group-hover:animate-marquee-vertical flex flex-col gap-1 py-1">
+        <div className="relative h-10 overflow-hidden text-[13px] text-white/60 group-hover:text-white transition-colors leading-5">
+          <div className="group-hover:animate-marquee-vertical flex flex-col">
             {movie.cast.map((actor, idx) => (
-              <span key={idx} className="truncate block">{actor}</span>
+              <span key={idx} className="truncate block h-5">{actor}</span>
             ))}
-            {/* Duplicate for seamless scroll */}
+            {/* Duplicates for seamless rolling list */}
             {movie.cast.map((actor, idx) => (
-              <span key={`dup-${idx}`} className="truncate block">{actor}</span>
+              <span key={`dup-${idx}`} className="truncate block h-5">{actor}</span>
             ))}
           </div>
         </div>
@@ -860,7 +974,7 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
           {movie.rottenTomatoes}%
         </div>
 
-        <div className="flex items-center justify-center h-full pt-[4px]">
+        <div className="flex items-center justify-center h-full pt-[4px] pr-8">
           <StarRating align="center" />
         </div>
       </motion.div>
@@ -875,7 +989,19 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
       exit={{ opacity: 0, scale: 0.9 }}
       className="group cursor-pointer"
     >
-      <div className="relative aspect-[2/3] rounded-xl group-hover:rounded-none overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom group-hover:scale-115 group-hover:-translate-y-1 border-none">
+      <div className={`relative aspect-[2/3] rounded-xl group-hover:rounded-none overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}>
+        {isEditing && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="absolute top-2 left-2 z-50 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
+            title="Delete Movie"
+          >
+            <Minus size={10} strokeWidth={3} />
+          </button>
+        )}
         <img 
           src={movie.posterUrl} 
           alt={movie.title}
@@ -884,7 +1010,7 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
         />
         
         {/* Hover Metadata Overlay */}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 space-y-2">
+        <div className={`absolute inset-0 bg-black/50 opacity-0 transition-opacity flex flex-col justify-end p-4 space-y-2 ${!isEditing ? 'group-hover:opacity-100' : 'pointer-events-none'}`}>
           <div className="space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
             <div>
               <span className="truncate block">{movie.genre.join(', ')}</span>
@@ -896,13 +1022,22 @@ function MovieCard({ movie, size, viewMode, onRatingChange, onPlayTrailer, onSho
               <span className="truncate block">{movie.runtime}</span>
             </div>
             <div className="pt-2">
-              <div className="overflow-hidden">
-                <div ref={castRef} className="relative w-full overflow-hidden h-4">
-                  <div className={`whitespace-nowrap flex gap-4 ${isCastOverflowing ? 'animate-marquee-fast' : ''}`}>
-                    <span>{movie.cast.join(' • ')}</span>
-                    {isCastOverflowing && <span>{movie.cast.join(' • ')}</span>}
-                  </div>
+              <div className="relative h-4 overflow-hidden">
+                <div 
+                  ref={castRef}
+                  className={`text-white/60 transition-colors whitespace-nowrap ${isCastOverflowing ? 'group-hover:opacity-0' : 'truncate group-hover:text-white'}`}
+                >
+                  {movie.cast.join(' · ')}
                 </div>
+                
+                {isCastOverflowing && (
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <div className="flex animate-marquee-fast gap-4 whitespace-nowrap text-white/90">
+                      <span>{movie.cast.join(' · ')}</span>
+                      <span>{movie.cast.join(' · ')}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -14,6 +14,8 @@ export interface Movie {
   runtime: string;
   cast: string[];
   trailerUrl: string;
+  dateAdded?: string;
+  isRecentlyAdded?: boolean;
 }
 
 export type FilterType = 'genre' | 'year' | 'rating';

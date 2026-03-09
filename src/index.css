@@ -15,9 +15,40 @@
     to { transform: translateX(-50%); }
   }
 
-  @keyframes marquee-vertical {
+  @keyframes marquee-vertical-continuous {
     from { transform: translateY(0); }
     to { transform: translateY(-50%); }
+  }
+
+  @keyframes rolling-list {
+    0%, 10% { transform: translateY(0); }
+    14%, 24% { transform: translateY(-20px); }
+    28%, 38% { transform: translateY(-40px); }
+    42%, 52% { transform: translateY(-60px); }
+    56%, 66% { transform: translateY(-80px); }
+    70%, 80% { transform: translateY(-100px); }
+    84%, 94% { transform: translateY(-120px); }
+    100% { transform: translateY(-140px); }
+  }
+}
+
+@layer utilities {
+.animate-marquee-horizontal {
+  animation-name: marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+  
+  .animate-marquee-horizontal-fast {
+    animation: marquee 10s linear infinite;
+  }
+
+  .animate-rolling-list {
+    animation: rolling-list 14s linear infinite;
+  }
+
+  .animate-marquee-vertical-slow {
+    animation: marquee-vertical-continuous 15s linear infinite;
   }
 }
 
@@ -28,7 +59,7 @@
 }
 
 .animate-marquee-vertical {
-  animation: marquee-vertical 10s linear infinite;
+  animation: marquee-vertical-continuous 10s linear infinite;
 }
 
 .glass {
