@@ -489,7 +489,7 @@ export default function App() {
         <div className={`flex-1 overflow-y-auto pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
             <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-[#292929]">
-              <div className={`grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-end`}>
+              <div className={`grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-center`}>
                 {isEditing && <span className="pl-8" />}
                 <span className={isEditing ? "" : "pl-8"}>Poster</span>
                 <div className="relative pl-10">
@@ -589,16 +589,16 @@ export default function App() {
                 <span>Starring</span>
                 <button 
                   onClick={() => setSortMode(sortMode === 'imdb-desc' ? 'imdb-asc' : 'imdb-desc')}
-                  className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('imdb') ? 'text-white' : ''}`}
+                  className={`flex items-center gap-[6px] transition-colors justify-center group ${sortMode.startsWith('imdb') ? 'text-white' : 'text-white/40'}`}
                 >
-                  <span className="bg-[#F4C434] text-black px-1 rounded-[2px] text-[11px] font-bold">IMDb</span>
-                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'imdb-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-0'}`} />
+                  <span className="w-[41px] h-[16px] inline-flex items-center justify-center bg-[#795E18] group-hover:bg-[#F2BC30] text-black rounded-[2px] text-[10px] font-bold transition-colors duration-200">IMDb</span>
+                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'imdb-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`} />
                 </button>
                 <button 
                   onClick={() => setSortMode(sortMode === 'rt-desc' ? 'rt-asc' : 'rt-desc')}
                   className={`flex items-center gap-1.5 hover:text-white transition-colors justify-center ${sortMode.startsWith('rt') ? 'text-white' : ''}`}
                 >
-                  <span className="text-[14px] leading-none" style={{ filter: 'saturate(1.5) brightness(1.2)' }}>🍅</span>
+                  <span className="text-[14px] leading-none translate-y-[0.5px]" style={{ filter: 'saturate(1.5) brightness(1.2)' }}>🍅</span>
                   <ChevronDown size={10} className={`transition-transform ${sortMode === 'rt-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('rt') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
                 <button 
@@ -792,6 +792,7 @@ const formatDirectorName = (name: string) => {
 
 function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange, onPlayTrailer, onShowPoster }: MovieCardProps) {
   const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [isSelectedForDeletion, setIsSelectedForDeletion] = useState(false);
   const titleRef = useRef<HTMLDivElement>(null);
   const castRef = useRef<HTMLDivElement>(null);
   const [isTitleOverflowing, setIsTitleOverflowing] = useState(false);
@@ -874,14 +875,14 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className={`group grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 transition-colors cursor-pointer w-full`}
+        className={`group grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 border-b border-[#292929] transition-colors cursor-pointer w-full`}
       >
         {isEditing && (
           <div className="flex justify-center pl-8">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                setIsSelectedForDeletion(!isSelectedForDeletion);
               }}
               className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
               title="Delete Movie"
@@ -973,7 +974,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDelete();
+              setIsSelectedForDeletion(!isSelectedForDeletion);
             }}
             className="absolute top-2 left-2 z-50 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
             title="Delete Movie"
@@ -986,6 +987,11 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           alt={movie.title}
           className="w-full h-full object-cover"
           referrerPolicy="no-referrer"
+        />
+        
+        {/* Selection Overlay */}
+        <div 
+          className={`absolute inset-0 bg-black/50 pointer-events-none transition-opacity duration-500 ease-in-out ${isSelectedForDeletion ? 'opacity-100' : 'opacity-0'}`}
         />
         
         {/* Hover Metadata Overlay */}
