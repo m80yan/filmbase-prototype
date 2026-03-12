@@ -24,32 +24,9 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [movies, setMovies] = useState<Movie[]>(() => {
     // Always revert to base library on refresh
-    return MOCK_MOVIES.filter(m => 
-      m.title !== 'Avatar' && 
-      m.title !== 'Blade Runner 2049' &&
-      m.title !== 'Dune: Part One'
-    );
-  });
-
-  // Data Purge (Post-OMDb Cleanup)
-  useEffect(() => {
     const purgeTitles = ['Avatar', 'Blade Runner 2049', 'Dune: Part One'];
-    
-    // One-time filter for localStorage
-    const saved = localStorage.getItem('filmbase_movies');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const filtered = parsed.filter((m: any) => !purgeTitles.includes(m.title));
-        localStorage.setItem('filmbase_movies', JSON.stringify(filtered));
-      } catch (e) {
-        localStorage.removeItem('filmbase_movies');
-      }
-    }
-
-    // Ensure current state is also purged
-    setMovies(prev => prev.filter(m => !purgeTitles.includes(m.title)));
-  }, []);
+    return MOCK_MOVIES.filter(m => !purgeTitles.includes(m.title));
+  });
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -66,11 +43,31 @@ export default function App() {
   const [newMovieTitle, setNewMovieTitle] = useState('');
   const [newMovieUrl, setNewMovieUrl] = useState('');
   const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
+  const [addError, setAddError] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
     year: false,
     ratings: true
   });
+
+  const getYouTubeEmbedUrl = (url: string) => {
+    if (!url) return '';
+    
+    // Extract video ID from various formats
+    let videoId = '';
+    
+    const watchMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([^&?/\s]+)/);
+    if (watchMatch && watchMatch[1]) {
+      videoId = watchMatch[1];
+    }
+
+    if (videoId) {
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+
+    return url;
+  };
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -95,9 +92,7 @@ export default function App() {
   };
 
   const handleDeleteMovie = (movie: Movie) => {
-    if (window.confirm(`Are you sure you want to delete ${movie.title}?`)) {
-      setMovies(prev => prev.filter(m => m.id !== movie.id));
-    }
+    setMovies(prev => prev.filter(m => m.id !== movie.id));
   };
 
   const handleRatingChange = (movieId: string, newRating: number) => {
@@ -107,9 +102,13 @@ export default function App() {
   const handleAddMovie = async () => {
     if (!newMovieUrl.trim()) return;
     
+    setAddError('');
+    setIsAdding(true);
+
     const imdbIdMatch = newMovieUrl.match(/tt\d+/);
     if (!imdbIdMatch) {
-      alert("Please enter a valid IMDb URL containing 'tt...'");
+      setAddError("Please enter a valid IMDb URL containing 'tt...'");
+      setIsAdding(false);
       return;
     }
     const imdbId = imdbIdMatch[0];
@@ -119,12 +118,13 @@ export default function App() {
       const data = await response.json();
       
       if (data.Response === "False") {
-        alert(data.Error || "Failed to fetch movie data");
+        setAddError(data.Error || "Failed to fetch movie data");
+        setIsAdding(false);
         return;
       }
       
       const trailerUrl = newMovieTrailerUrl.trim() 
-        ? newMovieTrailerUrl.replace(/watch\?v=([^&]+)/, 'embed/$1').replace(/youtu\.be\/([^?]+)/, 'www.youtube.com/embed/$1')
+        ? getYouTubeEmbedUrl(newMovieTrailerUrl.trim())
         : `https://www.youtube.com/results?search_query=${encodeURIComponent(data.Title + " trailer")}`;
 
       const newMovie: Movie = {
@@ -153,7 +153,9 @@ export default function App() {
       setNewMovieTrailerUrl('');
     } catch (error) {
       console.error("Error fetching from OMDb:", error);
-      alert("Failed to fetch movie data. Please check your connection.");
+      setAddError("Failed to fetch movie data. Please check your connection.");
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -668,13 +670,39 @@ export default function App() {
               className={`relative ${modalMode === 'trailer' ? 'w-full max-w-5xl aspect-video' : 'h-[80vh] aspect-[2/3]'} bg-black rounded-none overflow-hidden shadow-[0_0_100px_rgba(255,255,255,0.1)] cursor-pointer`}
             >
               {modalMode === 'trailer' ? (
-                <iframe
-                  src={`${selectedMovie.trailerUrl.replace('watch?v=', 'embed/')}?autoplay=1`}
-                  title={`${selectedMovie.title} Trailer`}
-                  className="w-full h-full border-none"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
+                (() => {
+                  const embedUrl = getYouTubeEmbedUrl(selectedMovie.trailerUrl);
+                  const isEmbeddable = embedUrl.includes('/embed/');
+                  
+                  if (isEmbeddable) {
+                    return (
+                      <iframe
+                        src={`${embedUrl}?autoplay=1`}
+                        title={`${selectedMovie.title} Trailer`}
+                        className="w-full h-full border-none"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    );
+                  }
+                  
+                  return (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900 p-8 text-center">
+                      <Film size={48} className="text-white/20 mb-4" />
+                      <h3 className="text-xl font-bold mb-2">Trailer Not Found</h3>
+                      <p className="text-white/60 mb-6">We couldn't find a direct trailer for this film.</p>
+                      <a 
+                        href={selectedMovie.trailerUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="px-8 py-3 bg-white text-black font-bold rounded-full hover:bg-white/90 transition-colors flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Search on YouTube
+                      </a>
+                    </div>
+                  );
+                })()
               ) : (
                 <img 
                   src={selectedMovie.posterUrl} 
@@ -709,6 +737,11 @@ export default function App() {
               <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Add New Movie</h2>
               
               <div className="space-y-4">
+                {addError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
+                    {addError}
+                  </div>
+                )}
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
                     IMDb URL
@@ -717,8 +750,12 @@ export default function App() {
                     type="text"
                     placeholder="https://www.imdb.com/title/tt..."
                     value={newMovieUrl}
-                    onChange={(e) => setNewMovieUrl(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
+                    onChange={(e) => {
+                      setNewMovieUrl(e.target.value);
+                      if (addError) setAddError('');
+                    }}
+                    disabled={isAdding}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
                     autoFocus
                   />
                 </div>
@@ -732,7 +769,8 @@ export default function App() {
                     placeholder="https://www.youtube.com/watch?v=..."
                     value={newMovieTrailerUrl}
                     onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20"
+                    disabled={isAdding}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -743,16 +781,27 @@ export default function App() {
                     setIsAddModalOpen(false);
                     setNewMovieTitle('');
                     setNewMovieUrl('');
+                    setNewMovieTrailerUrl('');
+                    setAddError('');
                   }}
-                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                  disabled={isAdding}
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleAddMovie}
-                  className="px-8 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:bg-white/90 transition-colors"
+                  disabled={isAdding || !newMovieUrl.trim()}
+                  className="px-8 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
-                  Add
+                  {isAdding ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    'Add'
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -882,12 +931,16 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setIsSelectedForDeletion(!isSelectedForDeletion);
+                if (isSelectedForDeletion) {
+                  onDelete();
+                } else {
+                  setIsSelectedForDeletion(true);
+                }
               }}
-              className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
-              title="Delete Movie"
+              className={`w-4 h-4 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] ${isSelectedForDeletion ? 'bg-[#BA242F]' : 'bg-red-500 active:bg-[#BA242F]'}`}
+              title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
             >
-              <Minus size={10} strokeWidth={3} />
+              {isSelectedForDeletion ? <X size={10} strokeWidth={3} /> : <Minus size={10} strokeWidth={3} />}
             </button>
           </div>
         )}
@@ -974,12 +1027,16 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setIsSelectedForDeletion(!isSelectedForDeletion);
+              if (isSelectedForDeletion) {
+                onDelete();
+              } else {
+                setIsSelectedForDeletion(true);
+              }
             }}
-            className="absolute top-2 left-2 z-50 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] active:bg-[#BA242F] transition-all duration-200 hover:scale-[1.5]"
-            title="Delete Movie"
+            className={`absolute top-2 left-2 z-50 w-4 h-4 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] ${isSelectedForDeletion ? 'bg-[#BA242F]' : 'bg-red-500 active:bg-[#BA242F]'}`}
+            title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
           >
-            <Minus size={10} strokeWidth={3} />
+            {isSelectedForDeletion ? <X size={10} strokeWidth={3} /> : <Minus size={10} strokeWidth={3} />}
           </button>
         )}
         <img 
