@@ -17,6 +17,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '175 min',
     cast: ['Marlon Brando', 'Al Pacino', 'James Caan', 'Richard S. Castellano'],
     trailerUrl: 'https://www.youtube.com/embed/sY1S34973zA',
+    dateAdded: 1710831897000, // Older than 24h
   },
   {
     id: '2',
@@ -34,6 +35,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '148 min',
     cast: ['Leonardo DiCaprio', 'Joseph Gordon-Levitt', 'Elliot Page', 'Tom Hardy'],
     trailerUrl: 'https://www.youtube.com/embed/YoHD9XEInc0',
+    dateAdded: 1710831897000,
   },
   {
     id: '3',
@@ -51,6 +53,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '154 min',
     cast: ['John Travolta', 'Uma Thurman', 'Samuel L. Jackson', 'Bruce Willis'],
     trailerUrl: 'https://www.youtube.com/embed/s7EdQ4FqbhY',
+    dateAdded: 1710831897000,
   },
   {
     id: '4',
@@ -68,6 +71,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '132 min',
     cast: ['Song Kang-ho', 'Lee Sun-kyun', 'Cho Yeo-jeong', 'Choi Woo-shik'],
     trailerUrl: 'https://www.youtube.com/embed/5xH0HfJHsaY',
+    dateAdded: 1710831897000,
   },
   {
     id: '5',
@@ -85,6 +89,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '117 min',
     cast: ['Harrison Ford', 'Rutger Hauer', 'Sean Young', 'Edward James Olmos'],
     trailerUrl: 'https://www.youtube.com/embed/eogpIG53Cis',
+    dateAdded: 1710831897000,
   },
   {
     id: '6',
@@ -102,6 +107,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '152 min',
     cast: ['Christian Bale', 'Heath Ledger', 'Aaron Eckhart', 'Maggie Gyllenhaal'],
     trailerUrl: 'https://www.youtube.com/embed/EXeTwQWrcwY',
+    dateAdded: 1710831897000,
   },
   {
     id: '7',
@@ -119,6 +125,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '120 min',
     cast: ['Tom Hardy', 'Charlize Theron', 'Nicholas Hoult', 'Hugh Keays-Byrne'],
     trailerUrl: 'https://www.youtube.com/embed/hEJnMQG9ev8',
+    dateAdded: 1710831897000,
   },
   {
     id: '8',
@@ -136,6 +143,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '139 min',
     cast: ['Brad Pitt', 'Edward Norton', 'Meat Loaf', 'Jared Leto'],
     trailerUrl: 'https://www.youtube.com/embed/qtRKdVHc-cE',
+    dateAdded: 1710831897000,
   },
   {
     id: '9',
@@ -153,6 +161,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '195 min',
     cast: ['Liam Neeson', 'Ben Kingsley', 'Ralph Fiennes', 'Caroline Goodall'],
     trailerUrl: 'https://www.youtube.com/embed/gG22XNhtnoY',
+    dateAdded: 1710831897000,
   },
   {
     id: '10',
@@ -170,6 +179,7 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '142 min',
     cast: ['Tom Hanks', 'Robin Wright', 'Gary Sinise', 'Mykelti Williamson'],
     trailerUrl: 'https://www.youtube.com/embed/bLvqoHBptjg',
+    dateAdded: 1710831897000,
   },
   {
     id: '11',
@@ -187,5 +197,6 @@ export const MOCK_MOVIES: Movie[] = [
     runtime: '136 min',
     cast: ['Keanu Reeves', 'Laurence Fishburne', 'Carrie-Anne Moss', 'Hugo Weaving'],
     trailerUrl: 'https://www.youtube.com/embed/vKQi3bBA1y8',
+    dateAdded: 1710831897000,
   },
 ];

@@ -23,7 +23,9 @@ import { Movie } from './types';
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [movies, setMovies] = useState<Movie[]>(() => {
-    // Always revert to base library on refresh
+    const saved = localStorage.getItem('filmbase_movies');
+    if (saved) return JSON.parse(saved);
+    
     const purgeTitles = ['Avatar', 'Blade Runner 2049', 'Dune: Part One'];
     return MOCK_MOVIES.filter(m => !purgeTitles.includes(m.title));
   });
@@ -32,6 +34,7 @@ export default function App() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
   const [selectedRatings, setSelectedRatings] = useState<number[]>([]);
+  const [isRecentlyAddedFilter, setIsRecentlyAddedFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [posterSize, setPosterSize] = useState(160);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
@@ -81,7 +84,7 @@ export default function App() {
 
   const genres = allUniqueGenres;
   const years = ['2020s', '2010s', '2000s', '1990s', 'Classic'];
-  const ratings = [5, 4, 3, 2, 1];
+  const ratings = [5, 4, 3, 2, 1, 0];
 
   const toggleFilter = <T,>(list: T[], item: T, setList: (val: T[]) => void) => {
     if (list.includes(item)) {
@@ -92,11 +95,19 @@ export default function App() {
   };
 
   const handleDeleteMovie = (movie: Movie) => {
-    setMovies(prev => prev.filter(m => m.id !== movie.id));
+    setMovies(prev => {
+      const updated = prev.filter(m => m.id !== movie.id);
+      localStorage.setItem('filmbase_movies', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleRatingChange = (movieId: string, newRating: number) => {
-    setMovies(prev => prev.map(m => m.id === movieId ? { ...m, personalRating: newRating } : m));
+    setMovies(prev => {
+      const updated = prev.map(m => m.id === movieId ? { ...m, personalRating: newRating } : m);
+      localStorage.setItem('filmbase_movies', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleAddMovie = async () => {
@@ -143,10 +154,15 @@ export default function App() {
         isFavorite: false,
         language: data.Language,
         isRecentlyAdded: true,
-        dateAdded: new Date().toISOString()
+        dateAdded: Date.now()
       };
       
-      setMovies(prev => [newMovie, ...prev]);
+      setMovies(prev => {
+        const updated = [newMovie, ...prev];
+        localStorage.setItem('filmbase_movies', JSON.stringify(updated));
+        return updated;
+      });
+
       setIsAddModalOpen(false);
       setNewMovieTitle('');
       setNewMovieUrl('');
@@ -164,15 +180,22 @@ export default function App() {
     setSelectedYears([]);
     setSelectedRatings([]);
     setSearchQuery('');
+    setIsRecentlyAddedFilter(false);
   };
 
   const filteredMovies = useMemo(() => {
     const filtered = movies.filter(movie => {
+      // Recently Added Filter (24h)
+      if (isRecentlyAddedFilter) {
+        const addedDate = typeof movie.dateAdded === 'number' ? movie.dateAdded : new Date(movie.dateAdded || 0).getTime();
+        if (Date.now() - addedDate >= 86400000) return false;
+      }
+
       const matchesSearch = movie.title.toLowerCase().includes(searchQuery.toLowerCase());
       
       const matchesGenre = selectedGenres.length === 0 || movie.genre.some(g => selectedGenres.includes(g));
       
-      const matchesRating = selectedRatings.length === 0 || selectedRatings.includes(movie.personalRating);
+      const matchesRating = selectedRatings.length === 0 || selectedRatings.includes(movie.personalRating || 0);
 
       let matchesYear = selectedYears.length === 0;
       if (!matchesYear) {
@@ -212,11 +235,11 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
-  const Checkbox = ({ checked, label, onClick, isRating }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean }) => (
+  const Checkbox = ({ checked, label, onClick, isRating, isUnrated }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean, isUnrated?: boolean }) => (
     <button 
       onClick={onClick}
       className={`flex items-center gap-3 w-full px-3 py-1.5 rounded-md text-base transition-colors group text-left ${
-        isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5'
+        isUnrated ? 'hover:bg-white/5' : (isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5')
       }`}
     >
       <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
@@ -229,7 +252,10 @@ export default function App() {
       <span className={`transition-colors ${
         checked 
           ? (isRating ? 'text-[#EB9692]' : 'text-white') 
-          : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
+          : (isUnrated 
+              ? 'text-white/25 group-hover:text-[#EB9692]' 
+              : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
+            )
       }`}>
         {label}
       </span>
@@ -357,10 +383,11 @@ export default function App() {
                   {ratings.map(rating => (
                     <li key={rating}>
                       <Checkbox 
-                        label={`${rating} ${rating === 1 ? 'star' : 'stars'}`}
+                        label={rating === 0 ? 'Unrated' : `${rating} ${rating === 1 ? 'star' : 'stars'}`}
                         checked={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
                         isRating
+                        isUnrated={rating === 0}
                       />
                     </li>
                   ))}
@@ -373,12 +400,29 @@ export default function App() {
         <div className="mt-auto border-t border-white/5 pt-4 p-4">
           <button 
             onClick={resetFilters}
-            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base text-white/60 hover:bg-white/5 transition-colors"
+            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base transition-colors ${
+              !isRecentlyAddedFilter && selectedGenres.length === 0 && selectedYears.length === 0 && selectedRatings.length === 0 && !searchQuery
+                ? 'text-white' 
+                : 'text-white/60 hover:bg-white/5'
+            }`}
           >
             <Film size={18} />
             All Films
           </button>
-          <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base text-white/60 hover:bg-white/5 transition-colors">
+          <button 
+            onClick={() => {
+              setSelectedGenres([]);
+              setSelectedYears([]);
+              setSelectedRatings([]);
+              setSearchQuery('');
+              setIsRecentlyAddedFilter(true);
+            }}
+            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base transition-colors ${
+              isRecentlyAddedFilter 
+                ? 'text-white' 
+                : 'text-white/60 hover:bg-white/5'
+            }`}
+          >
             <Clock size={18} />
             Recently Added
           </button>
@@ -1022,7 +1066,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
       exit={{ opacity: 0, scale: 0.9 }}
       className="group cursor-pointer"
     >
-      <div className={`relative aspect-[2/3] rounded-xl group-hover:rounded-none overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}>
+      <div className={`relative aspect-[2/3] ${isEditing ? 'rounded-xl' : 'rounded-none'} group-hover:rounded-none overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}>
         {isEditing && (
           <button
             onClick={(e) => {

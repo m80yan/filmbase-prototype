@@ -14,7 +14,7 @@ export interface Movie {
   runtime: string;
   cast: string[];
   trailerUrl: string;
-  dateAdded?: string;
+  dateAdded?: string | number;
   isRecentlyAdded?: boolean;
 }
 
