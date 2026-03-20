@@ -235,11 +235,11 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
-  const Checkbox = ({ checked, label, onClick, isRating, isUnrated }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean, isUnrated?: boolean }) => (
+  const Checkbox = ({ checked, label, onClick, isRating }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean }) => (
     <button 
       onClick={onClick}
       className={`flex items-center gap-3 w-full px-3 py-1.5 rounded-md text-base transition-colors group text-left ${
-        isUnrated ? 'hover:bg-white/5' : (isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5')
+        isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5'
       }`}
     >
       <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
@@ -252,10 +252,7 @@ export default function App() {
       <span className={`transition-colors ${
         checked 
           ? (isRating ? 'text-[#EB9692]' : 'text-white') 
-          : (isUnrated 
-              ? 'text-white/25 group-hover:text-[#EB9692]' 
-              : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
-            )
+          : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
       }`}>
         {label}
       </span>
@@ -387,7 +384,6 @@ export default function App() {
                         checked={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
                         isRating
-                        isUnrated={rating === 0}
                       />
                     </li>
                   ))}
