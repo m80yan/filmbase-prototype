@@ -14,7 +14,8 @@ import {
   Check,
   X,
   Plus,
-  Minus
+  Minus,
+  PanelLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
@@ -22,6 +23,8 @@ import { Movie } from './types';
 
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const trailerIframeRef = useRef<HTMLIFrameElement>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [movies, setMovies] = useState<Movie[]>(() => {
     const saved = localStorage.getItem('filmbase_movies');
     if (saved) return JSON.parse(saved);
@@ -53,6 +56,12 @@ export default function App() {
     year: false,
     ratings: true
   });
+
+  useEffect(() => {
+    if (!selectedMovie && trailerIframeRef.current) {
+      trailerIframeRef.current.src = '';
+    }
+  }, [selectedMovie]);
 
   const getYouTubeEmbedUrl = (url: string) => {
     if (!url) return '';
@@ -195,7 +204,7 @@ export default function App() {
       
       const matchesGenre = selectedGenres.length === 0 || movie.genre.some(g => selectedGenres.includes(g));
       
-      const matchesRating = selectedRatings.length === 0 || selectedRatings.includes(movie.personalRating || 0);
+      const matchesRating = selectedRatings.length === 0 || selectedRatings.includes(movie.personalRating) || (selectedRatings.includes(0) && !movie.personalRating);
 
       let matchesYear = selectedYears.length === 0;
       if (!matchesYear) {
@@ -260,18 +269,26 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen w-full bg-[#121212] overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-64 flex flex-col border-r border-white/5 sidebar-gradient">
-        <div className="p-6 pb-2">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-          </div>
+    <div className="flex h-screen w-full bg-[#121212] overflow-hidden relative">
+      {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
+      <div className="absolute top-0 left-0 h-10 flex items-center pl-4 gap-3 z-[200]">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
+          <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
+          <div className="w-3 h-3 rounded-full bg-[#28c840]" />
         </div>
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+          title="Toggle Sidebar"
+        >
+          <PanelLeft size={18} />
+        </button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 py-2">
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0`}>
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 pt-14 pb-2 min-w-[256px]">
           <nav className="space-y-6">
             <div>
               <button 
@@ -393,7 +410,7 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="mt-auto border-t border-white/5 pt-4 p-4">
+        <div className="mt-auto border-t border-white/5 pt-4 p-4 min-w-[256px]">
           <button 
             onClick={resetFilters}
             className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base transition-colors ${
@@ -428,12 +445,14 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-14 flex items-center justify-between px-8 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
-          <div className="flex items-center gap-4">
+        <header className="relative h-12 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
+          {/* FilmBase Text */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
             <h1 className="text-xl font-bold tracking-tight text-white">FilmBase</h1>
           </div>
 
-          <div className="flex items-center gap-6">
+          {/* Right Group (Search) */}
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-white/60 transition-colors" size={14} />
               <input 
@@ -717,7 +736,8 @@ export default function App() {
                   if (isEmbeddable) {
                     return (
                       <iframe
-                        src={`${embedUrl}?autoplay=1`}
+                        ref={trailerIframeRef}
+                        src={`${embedUrl}?autoplay=1&mute=0`}
                         title={`${selectedMovie.title} Trailer`}
                         className="w-full h-full border-none"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -903,6 +923,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
     return () => {
       clearTimeout(timer);
       window.removeEventListener('resize', checkOverflow);
+      setHoverRating(null);
     };
   }, [movie.title, movie.cast, size, viewMode]);
 
@@ -917,13 +938,25 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
   const currentRating = hoverRating !== null ? hoverRating : movie.personalRating;
 
   const StarRating = ({ align = 'start' }: { align?: 'start' | 'center' }) => (
-    <div className={`flex flex-col ${align === 'center' ? 'items-center' : 'items-start'} gap-1`}>
+    <div 
+      className={`flex flex-col ${align === 'center' ? 'items-center' : 'items-start'} gap-1`}
+      onMouseLeave={(e) => {
+        e.stopPropagation();
+        setHoverRating(null);
+      }}
+    >
       <div className="flex items-center gap-0.5">
         {[...Array(5)].map((_, i) => (
           <button
             key={i}
-            onMouseEnter={() => setHoverRating(i + 1)}
-            onMouseLeave={() => setHoverRating(null)}
+            onMouseEnter={(e) => {
+              e.stopPropagation();
+              setHoverRating(i + 1);
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation();
+              setHoverRating(null);
+            }}
             onClick={(e) => {
               e.stopPropagation();
               const newRating = i + 1;
@@ -946,7 +979,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             <motion.span 
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
+              exit={{ opacity: 0, transition: { duration: 0 } }}
               className="text-[10px] tracking-[0.1em] whitespace-nowrap text-[#D4AF37] font-bold uppercase"
             >
               {ratingLabels[hoverRating]}
