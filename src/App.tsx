@@ -244,27 +244,16 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
-  const Checkbox = ({ checked, label, onClick, isRating }: { checked: boolean, label: string | React.ReactNode, onClick: () => void, isRating?: boolean }) => (
+  const SidebarItem = ({ active, label, onClick }: { active: boolean, label: string | React.ReactNode, onClick: () => void }) => (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-3 w-full px-3 py-1.5 rounded-md text-base transition-colors group text-left ${
-        isRating ? 'hover:bg-[#EB9692]/10' : 'hover:bg-white/5'
+      className={`flex items-center w-full px-2.5 py-1.5 rounded-md text-[13px] transition-colors text-left ${
+        active 
+          ? 'bg-[#EB9692]/20 text-[#EB9692] font-medium' 
+          : 'text-white/70 hover:bg-white/5 hover:text-[#EB9692]'
       }`}
     >
-      <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
-        checked 
-          ? (isRating ? 'bg-[#EB9692] border-[#EB9692] text-black' : 'bg-white border-white text-black') 
-          : (isRating ? 'border-white/20 group-hover:border-[#EB9692]/50' : 'border-white/20 group-hover:border-white/40')
-      }`}>
-        {checked && <Check size={12} strokeWidth={4} />}
-      </div>
-      <span className={`transition-colors ${
-        checked 
-          ? (isRating ? 'text-[#EB9692]' : 'text-white') 
-          : (isRating ? 'text-white/60 group-hover:text-[#EB9692]' : 'text-white/60 group-hover:text-white')
-      }`}>
-        {label}
-      </span>
+      <span className="truncate">{label}</span>
     </button>
   );
 
@@ -317,22 +306,20 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 mt-6 pb-2 min-w-[256px]">
+        <div className="flex-1 overflow-y-auto scrollbar-hide pl-6 pr-4 mt-6 pb-2 min-w-[256px]">
           <nav className="space-y-6">
             <div>
               <button 
                 onClick={() => toggleSection('genre')}
-                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
-                <span className="flex items-center gap-2">
-                  <motion.div
-                    animate={{ rotate: expandedSections.genre ? 90 : 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <ChevronRight size={14} />
-                  </motion.div>
-                  Genre
-                </span>
+                <span>Genre</span>
+                <motion.div
+                  animate={{ rotate: expandedSections.genre ? 90 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronRight size={12} strokeWidth={2.5} />
+                </motion.div>
               </button>
               <motion.div
                 initial={false}
@@ -347,9 +334,9 @@ export default function App() {
                 <ul className="space-y-0.5">
                   {genres.map(genre => (
                     <li key={genre}>
-                      <Checkbox 
+                      <SidebarItem 
                         label={genre}
-                        checked={selectedGenres.includes(genre)}
+                        active={selectedGenres.includes(genre)}
                         onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
                       />
                     </li>
@@ -361,17 +348,15 @@ export default function App() {
             <div>
               <button 
                 onClick={() => toggleSection('year')}
-                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
-                <span className="flex items-center gap-2">
-                  <motion.div
-                    animate={{ rotate: expandedSections.year ? 90 : 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <ChevronRight size={14} />
-                  </motion.div>
-                  Year
-                </span>
+                <span>Year</span>
+                <motion.div
+                  animate={{ rotate: expandedSections.year ? 90 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronRight size={12} strokeWidth={2.5} />
+                </motion.div>
               </button>
               <motion.div
                 initial={false}
@@ -386,9 +371,9 @@ export default function App() {
                 <ul className="space-y-0.5">
                   {years.map(year => (
                     <li key={year}>
-                      <Checkbox 
+                      <SidebarItem 
                         label={year}
-                        checked={selectedYears.includes(year)}
+                        active={selectedYears.includes(year)}
                         onClick={() => toggleFilter(selectedYears, year, setSelectedYears)}
                       />
                     </li>
@@ -400,17 +385,15 @@ export default function App() {
             <div>
               <button 
                 onClick={() => toggleSection('ratings')}
-                className="flex items-center justify-between w-full text-sm font-semibold text-white/40 uppercase tracking-wider mb-3 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
-                <span className="flex items-center gap-2">
-                  <motion.div
-                    animate={{ rotate: expandedSections.ratings ? 90 : 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <ChevronRight size={14} />
-                  </motion.div>
-                  My Rating
-                </span>
+                <span>My Rating</span>
+                <motion.div
+                  animate={{ rotate: expandedSections.ratings ? 90 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronRight size={12} strokeWidth={2.5} />
+                </motion.div>
               </button>
               <motion.div
                 initial={false}
@@ -425,11 +408,10 @@ export default function App() {
                 <ul className="space-y-0.5">
                   {ratings.map(rating => (
                     <li key={rating}>
-                      <Checkbox 
+                      <SidebarItem 
                         label={rating === 0 ? 'Unrated' : `${rating} ${rating === 1 ? 'star' : 'stars'}`}
-                        checked={selectedRatings.includes(rating)}
+                        active={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
-                        isRating
                       />
                     </li>
                   ))}
