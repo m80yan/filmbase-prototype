@@ -306,7 +306,7 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto scrollbar-hide pl-6 pr-4 mt-6 pb-2 min-w-[256px]">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden pl-6 pr-4 mt-6 pb-2 min-w-[256px] [scrollbar-gutter:stable]">
           <nav className="space-y-6">
             <div>
               <button 
@@ -424,7 +424,7 @@ export default function App() {
         <div className="mt-auto border-t border-white/5 pt-4 p-4 min-w-[256px]">
           <button 
             onClick={resetFilters}
-            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base transition-colors ${
+            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
               !isRecentlyAddedFilter && selectedGenres.length === 0 && selectedYears.length === 0 && selectedRatings.length === 0 && !searchQuery
                 ? 'text-white' 
                 : 'text-white/60 hover:bg-white/5'
@@ -441,7 +441,7 @@ export default function App() {
               setSearchQuery('');
               setIsRecentlyAddedFilter(true);
             }}
-            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-base transition-colors ${
+            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
               isRecentlyAddedFilter 
                 ? 'text-white' 
                 : 'text-white/60 hover:bg-white/5'
@@ -531,7 +531,7 @@ export default function App() {
         </div>
 
         {/* Content Area */}
-        <div className={`flex-1 overflow-y-auto pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
+        <div className={`flex-1 overflow-y-auto overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
             <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-[#292929]">
               <div className={`grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-center`}>
