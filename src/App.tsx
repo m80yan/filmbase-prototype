@@ -287,8 +287,37 @@ export default function App() {
       </div>
 
       {/* Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0`}>
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 pt-14 pb-2 min-w-[256px]">
+      <aside className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10`}>
+        {/* Spacer for Window Controls (Axis A) */}
+        <div className="h-10 flex-shrink-0 w-full" />
+        
+        {/* Sidebar Header / Search (Axis B) */}
+        <div className="h-12 flex items-center px-4 min-w-[256px] flex-shrink-0">
+          <div className="relative group w-full">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#0A84FF] transition-colors" size={14} />
+            <input 
+              ref={searchInputRef}
+              type="text" 
+              placeholder="Search FilmBase"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-black/20 border border-white/10 rounded-md py-1.5 pl-8 pr-8 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#0A84FF] focus:border-[#0A84FF] transition-all placeholder:text-white/40 text-white shadow-inner"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  searchInputRef.current?.focus();
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-colors"
+                title="Clear search"
+              >
+                <X size={10} strokeWidth={3} className="text-white" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-6 mt-6 pb-2 min-w-[256px]">
           <nav className="space-y-6">
             <div>
               <button 
@@ -445,55 +474,28 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="relative h-12 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50">
+        <header className="relative h-10 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50 flex-shrink-0">
           {/* FilmBase Text */}
           <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
-            <h1 className="text-xl font-bold tracking-tight text-white">FilmBase</h1>
-          </div>
-
-          {/* Right Group (Search) */}
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-            <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-white/60 transition-colors" size={14} />
-              <input 
-                ref={searchInputRef}
-                type="text" 
-                placeholder="Search films..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-full py-1.5 pl-9 pr-9 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/10 transition-all placeholder:text-white/20"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    searchInputRef.current?.focus();
-                  }}
-                  className="absolute right-[15px] top-1/2 -translate-y-1/2 w-4 h-4 bg-white/60 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-sm translate-x-[-3px]"
-                  title="Clear search"
-                >
-                  <X size={10} strokeWidth={3} className="text-[#121212]" />
-                </button>
-              )}
-            </div>
+            <h1 className="text-[13px] font-bold tracking-tight text-white/40">FilmBase</h1>
           </div>
         </header>
 
         {/* Toolbar */}
-        <div className="px-8 py-4 flex items-center justify-between border-b border-[#292929] bg-[#121212]/50">
+        <div className="h-12 px-8 flex items-center justify-between border-b border-[#292929] bg-[#121212]/50 sticky top-10 z-40 flex-shrink-0">
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
               >
-                <Grid size={18} />
+                <Grid size={16} />
               </button>
               <button 
                 onClick={() => setViewMode('list')}
-                className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
               >
-                <List size={18} />
+                <List size={16} />
               </button>
             </div>
 
@@ -521,7 +523,7 @@ export default function App() {
                 className="text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
                 title="Increase poster size"
               >
-                <Grid size={20} />
+                <Grid size={16} />
               </button>
             </div>
           </div>
@@ -530,17 +532,17 @@ export default function App() {
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setIsEditing(!isEditing)}
-                className={`p-2 rounded-md transition-colors ${isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                className={`p-1.5 rounded-md transition-colors ${isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                 title="Edit Library"
               >
-                <Minus size={20} />
+                <Minus size={16} />
               </button>
               <button 
                 onClick={() => setIsAddModalOpen(true)}
-                className="p-2 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+                className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
                 title="Add Movie"
               >
-                <Plus size={20} />
+                <Plus size={16} />
               </button>
             </div>
           </div>
