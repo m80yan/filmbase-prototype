@@ -48,6 +48,7 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [newMovieTitle, setNewMovieTitle] = useState('');
   const [newMovieUrl, setNewMovieUrl] = useState('');
+  const [isImdbEntered, setIsImdbEntered] = useState(false);
   const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
   const [addError, setAddError] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -120,7 +121,7 @@ export default function App() {
   };
 
   const handleAddMovie = async () => {
-    if (!newMovieUrl.trim()) return;
+    if (!newMovieUrl.trim() || !newMovieTrailerUrl.trim()) return;
     
     setAddError('');
     setIsAdding(true);
@@ -143,9 +144,7 @@ export default function App() {
         return;
       }
       
-      const trailerUrl = newMovieTrailerUrl.trim() 
-        ? getYouTubeEmbedUrl(newMovieTrailerUrl.trim())
-        : `https://www.youtube.com/results?search_query=${encodeURIComponent(data.Title + " trailer")}`;
+      const trailerUrl = getYouTubeEmbedUrl(newMovieTrailerUrl.trim());
 
       const newMovie: Movie = {
         id: Math.random().toString(36).substr(2, 9),
@@ -798,19 +797,33 @@ export default function App() {
                       setNewMovieUrl(e.target.value);
                       if (addError) setAddError('');
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newMovieUrl.trim()) {
+                        e.preventDefault();
+                        setIsImdbEntered(true);
+                        document.getElementById('trailer-input')?.focus();
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newMovieUrl.trim()) {
+                        setIsImdbEntered(true);
+                      }
+                    }}
                     disabled={isAdding}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
+                    readOnly={isImdbEntered}
+                    className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
                     autoFocus
                   />
                 </div>
                 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    Trailer URL (Optional)
+                    Trailer URL (Required)
                   </label>
                   <input 
+                    id="trailer-input"
                     type="text"
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="Trailer URL (Required)"
                     value={newMovieTrailerUrl}
                     onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
                     disabled={isAdding}
@@ -825,6 +838,7 @@ export default function App() {
                     setIsAddModalOpen(false);
                     setNewMovieTitle('');
                     setNewMovieUrl('');
+                    setIsImdbEntered(false);
                     setNewMovieTrailerUrl('');
                     setAddError('');
                   }}
@@ -835,8 +849,12 @@ export default function App() {
                 </button>
                 <button 
                   onClick={handleAddMovie}
-                  disabled={isAdding || !newMovieUrl.trim()}
-                  className="px-8 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  disabled={isAdding || !newMovieUrl.trim() || !newMovieTrailerUrl.trim()}
+                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-colors flex items-center gap-2 ${
+                    isAdding || !newMovieUrl.trim() || !newMovieTrailerUrl.trim()
+                      ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                      : 'bg-[#0A84FF] text-white hover:bg-[#0A84FF]/90'
+                  }`}
                 >
                   {isAdding ? (
                     <>
