@@ -7,12 +7,12 @@
   --color-mac-sidebar: #2d2d2d;
   --color-mac-accent: #007aff;
   --animate-marquee: marquee 4s linear infinite;
-  --animate-marquee-fast: marquee 2s linear infinite;
-  --animate-marquee-slow: marquee 15s linear infinite;
+  --animate-marquee-fast: marquee 8s linear infinite;
+  --animate-marquee-slow: marquee 40s linear infinite;
 
   @keyframes marquee {
-    from { transform: translateX(0); }
-    to { transform: translateX(-50%); }
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-50%, 0, 0); }
   }
 
   @keyframes marquee-vertical-continuous {
@@ -33,6 +33,12 @@
 }
 
 @layer utilities {
+  .animate-marquee-fast {
+    will-change: transform;
+    backface-visibility: hidden;
+    perspective: 1000px;
+  }
+
 .animate-marquee-horizontal {
   animation-name: marquee;
   animation-timing-function: linear;
@@ -80,14 +86,18 @@
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb,
+aside div::-webkit-scrollbar-thumb,
+main::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.2);
   border-radius: 10px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover,
+aside div::-webkit-scrollbar-thumb:hover,
+main::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.4);
 }
 

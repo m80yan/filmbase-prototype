@@ -275,7 +275,7 @@ export default function App() {
       </div>
 
       {/* Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10`}>
+      <aside className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 h-screen`}>
         {/* Spacer for Window Controls (Axis A) */}
         <div className="h-10 flex-shrink-0 w-full" />
         
@@ -453,17 +453,19 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="relative h-10 bg-[#121212]/60 backdrop-blur-xl sticky top-0 z-50 flex-shrink-0">
-          {/* FilmBase Text */}
-          <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
-            <h1 className="text-[13px] font-bold tracking-tight text-white/40">FilmBase</h1>
-          </div>
-        </header>
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto overflow-x-hidden h-full">
+        {/* Unified Header & Toolbar */}
+        <div className="sticky top-0 z-50 bg-[#121212]/70 backdrop-blur-xl flex-shrink-0">
+          {/* Header */}
+          <header className="relative h-10">
+            {/* FilmBase Text */}
+            <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2">
+              <h1 className="text-[13px] font-bold tracking-tight text-white/40">FilmBase</h1>
+            </div>
+          </header>
 
-        {/* Toolbar */}
-        <div className="h-12 px-8 flex items-center justify-between border-b border-[#292929] bg-[#121212]/50 sticky top-10 z-40 flex-shrink-0">
+          {/* Toolbar */}
+          <div className="h-12 px-8 flex items-center justify-between border-b border-[#292929]">
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-2">
               <button 
@@ -528,11 +530,12 @@ export default function App() {
             </div>
           </div>
         </div>
+        </div>
 
         {/* Content Area */}
-        <div className={`flex-1 overflow-y-auto overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
+        <div className={`pb-8 [scrollbar-gutter:stable] ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`}>
           {viewMode === 'list' && filteredMovies.length > 0 && (
-            <div className="sticky top-0 z-[70] bg-[#121212] py-4 border-b border-[#292929]">
+            <div className="sticky top-[88px] z-[70] bg-[#121212]/70 backdrop-blur-xl py-4 border-b border-[#292929]">
               <div className={`grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] font-bold uppercase tracking-widest text-white/40 items-center`}>
                 {isEditing && <span className="pl-8" />}
                 <span className={isEditing ? "" : "pl-8"}>Poster</span>
@@ -658,7 +661,7 @@ export default function App() {
           <AnimatePresence mode="popLayout">
             <motion.div 
               layout
-              className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-1'}
+              className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
               style={viewMode === 'grid' ? { 
                 gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
               } : {}}
@@ -850,15 +853,15 @@ export default function App() {
                 <button 
                   onClick={handleAddMovie}
                   disabled={isAdding || !newMovieUrl.trim() || !newMovieTrailerUrl.trim()}
-                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-colors flex items-center gap-2 ${
+                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
                     isAdding || !newMovieUrl.trim() || !newMovieTrailerUrl.trim()
                       ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                      : 'bg-[#0A84FF] text-white hover:bg-[#0A84FF]/90'
+                      : 'bg-white/80 text-black hover:bg-white shadow-xl'
                   }`}
                 >
                   {isAdding ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent opacity-70 rounded-full animate-spin" />
                       Adding...
                     </>
                   ) : (
@@ -999,7 +1002,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className={`group grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-center px-0 py-3 rounded-none hover:bg-white/5 border-b border-[#292929] transition-colors cursor-pointer w-full`}
+        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[100px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-center px-0 h-[172px] rounded-none hover:bg-white/5 border-b border-[#292929] transition-colors cursor-pointer w-full`}
       >
         {isEditing && (
           <div className="flex justify-center pl-8">
@@ -1019,19 +1022,21 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             </button>
           </div>
         )}
-        <div 
-          className={`w-[100px] h-[150px] rounded-none flex-shrink-0 shadow-lg cursor-zoom-in relative group-hover:z-10 transition-all duration-300 origin-center ${!isEditing ? 'group-hover:scale-115 pl-8 box-content' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onShowPoster();
-          }}
-        >
-          <img 
-            src={movie.posterUrl} 
-            alt={movie.title} 
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
+        <div className="pl-8 flex-shrink-0 overflow-visible">
+          <div 
+            className={`w-[100px] h-[150px] transition-all duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowPoster();
+            }}
+          >
+            <img 
+              src={movie.posterUrl} 
+              alt={movie.title} 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          </div>
         </div>
         
         <div className="min-w-0 pl-10">
@@ -1149,9 +1154,9 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
                 
                 {isCastOverflowing && (
                   <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                    <div className="flex animate-marquee-fast gap-4 whitespace-nowrap text-white/90">
-                      <span>{movie.cast.join(' · ')}</span>
-                      <span>{movie.cast.join(' · ')}</span>
+                    <div className="flex w-max animate-marquee-fast whitespace-nowrap text-white/90 transform-gpu will-change-transform">
+                      <span className="pr-4">{movie.cast.join(' · ')}</span>
+                      <span className="pr-4">{movie.cast.join(' · ')}</span>
                     </div>
                   </div>
                 )}
@@ -1182,9 +1187,9 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           
           {isTitleOverflowing && (
             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-              <div className="flex animate-marquee-slow gap-8 whitespace-nowrap font-semibold text-base text-white tracking-wide">
-                <span>{movie.title}</span>
-                <span>{movie.title}</span>
+              <div className="flex w-max animate-marquee-slow whitespace-nowrap font-semibold text-base text-white tracking-wide">
+                <span className="pr-8">{movie.title}</span>
+                <span className="pr-8">{movie.title}</span>
               </div>
             </div>
           )}
