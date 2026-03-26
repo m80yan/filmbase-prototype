@@ -257,8 +257,16 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen w-full bg-[#121212] overflow-hidden relative">
-      {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
+    <div className="w-full h-screen bg-[#000] p-8 antialiased flex items-center justify-center font-sans overflow-hidden">
+      {/* Viewport: Acts as the desktop background */}
+      {/* The macOS Window Container */}
+      <div className="macos-window w-full h-full max-w-[1920px] max-h-[1080px] bg-[#050505] text-[#E0E0E0] flex flex-col relative selection:bg-[#FFD700] selection:text-[#050505]">
+        
+        {/* Window Top Edge Highlighter (1px shine) */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-white/10 z-50 pointer-events-none"></div>
+
+        <div className="flex h-full w-full overflow-hidden relative">
+          {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
       <div className="absolute top-0 left-0 h-10 flex items-center pl-4 gap-3 z-[200]">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
@@ -873,6 +881,8 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+        </div>
+      </div>
     </div>
   );
 }
