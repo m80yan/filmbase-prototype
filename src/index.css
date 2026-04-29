@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-mac-bg: #1e1e1e;
+  --color-mac-sidebar: #2d2d2d;
+  --color-mac-accent: #007aff;
+  --animate-marquee: marquee 4s linear infinite;
+  --animate-marquee-fast: marquee 8s linear infinite;
+  --animate-marquee-slow: marquee 40s linear infinite;
+
+  @keyframes marquee {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-50%, 0, 0); }
+  }
+
+  @keyframes marquee-vertical-continuous {
+    from { transform: translateY(0); }
+    to { transform: translateY(-50%); }
+  }
+
+  @keyframes rolling-list {
+    0%, 10% { transform: translateY(0); }
+    14%, 24% { transform: translateY(-20px); }
+    28%, 38% { transform: translateY(-40px); }
+    42%, 52% { transform: translateY(-60px); }
+    56%, 66% { transform: translateY(-80px); }
+    70%, 80% { transform: translateY(-100px); }
+    84%, 94% { transform: translateY(-120px); }
+    100% { transform: translateY(-140px); }
+  }
+}
+
+@layer utilities {
+  .animate-marquee-fast {
+    will-change: transform;
+    backface-visibility: hidden;
+    perspective: 1000px;
+  }
+
+.animate-marquee-horizontal {
+  animation-name: marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+  
+  .animate-marquee-horizontal-fast {
+    animation: marquee 10s linear infinite;
+  }
+
+  .animate-rolling-list {
+    animation: rolling-list 14s linear infinite;
+  }
+
+  .animate-marquee-vertical-slow {
+    animation: marquee-vertical-continuous 15s linear infinite;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-[#121212] text-white font-sans antialiased overflow-hidden;
+  }
+}
+
+.animate-marquee-vertical {
+  animation: marquee-vertical-continuous 10s linear infinite;
+}
+
+.glass {
+  @apply bg-white/5 backdrop-blur-md border border-white/10;
+}
+
+.sidebar-gradient {
+  background: linear-gradient(180deg, rgba(45, 45, 45, 0.8) 0%, rgba(30, 30, 30, 0.9) 100%);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main::-webkit-scrollbar {
+  width: 8px;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: 88px;
+  margin-bottom: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+main::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+aside .overflow-y-auto::-webkit-scrollbar {
+  width: 8px;
+}
+
+aside .overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+aside .overflow-y-auto::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+}
+
+aside .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
