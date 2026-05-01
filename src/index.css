@@ -32,6 +32,14 @@
   }
 }
 
+/**
+ * Grid/Poster cast 横向跑马灯：须放在 @theme 外，否则 Tailwind 构建可能不输出该 keyframes。
+ */
+@keyframes marquee-cast-poster {
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
 @layer utilities {
   .animate-marquee-fast {
     will-change: transform;

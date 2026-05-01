@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Movie } from '../types';
+import type { Movie, MovieCastDetail } from '../types';
 
 const SAVED_MOVIES_TABLE = 'filmbase_saved_movies';
+/** 公共 demo 片单（列与 `filmbase_saved_movies` 一致，但无 `owner_id`） */
+const PUBLIC_MOVIES_TABLE = 'filmbase_public_movies';
 const POSTERS_BUCKET = 'filmbase-posters';
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 const LOCALSTORAGE_MIGRATION_MARKER = 'filmbase_supabase_migrated_v1';
@@ -29,7 +31,21 @@ type SavedMovieRow = {
 
   is_favorite: boolean | null;
   badge: string | null;
+
+  content_rating?: string | null;
+  plot?: string | null;
+  writer?: string | null;
+  tagline?: string | null;
+  release_date?: string | null;
+  country_of_origin?: string | null;
+  also_known_as?: string[] | null;
+  production_companies?: string[] | null;
+  box_office?: string | null;
+  cast_details?: MovieCastDetail[] | null;
 };
+
+/** 与 `SavedMovieRow` 相同字段，但不包含 `owner_id`（公共表行） */
+type LibraryMovieRow = Omit<SavedMovieRow, 'owner_id'>;
 
 const signedUrlCache = new Map<
   string,
@@ -56,6 +72,40 @@ function posterStoragePath(uid: string, movieId: string): string {
 function posterUrlForUIFromSignedUrl(signedUrl: string): string {
   // UI 只认 movie.posterUrl，因此我们把 signedUrl 直接回填即可。
   return signedUrl;
+}
+
+/** 将 DB / JSON 中的值规范为 `string[]`。 */
+function parseStringArrayField(val: unknown): string[] {
+  if (!Array.isArray(val)) return [];
+  return val.filter((x): x is string => typeof x === 'string');
+}
+
+/** 将 DB JSON 中的 `cast_details` 规范为 `MovieCastDetail[]`。 */
+function parseCastDetailsField(val: unknown): MovieCastDetail[] {
+  if (!Array.isArray(val)) return [];
+  const out: MovieCastDetail[] = [];
+  for (const item of val) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as { name?: unknown; character?: unknown };
+    if (typeof o.name !== 'string' || !o.name.trim()) continue;
+    out.push({
+      name: o.name.trim(),
+      character: typeof o.character === 'string' ? o.character.trim() : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * 给 URL 增加 cache-busting 查询参数，避免同一路径替换后仍显示旧图。
+ *
+ * 注意：这里不尝试用 `new URL()` 解析（signedUrl 可能是相对/跨域/包含特殊字符），
+ * 只做最小字符串拼接，并确保不会破坏已有查询串结构。
+ */
+function withCacheBuster(url: string, v: number): string {
+  const hasQuery = url.includes('?');
+  const joiner = hasQuery ? '&' : '?';
+  return `${url}${joiner}v=${encodeURIComponent(String(v))}`;
 }
 
 /**
@@ -88,23 +138,41 @@ async function storagePathToSignedUrl(
     })();
 
     signedUrlCache.set(storagePath, { signedUrl: cached?.signedUrl ?? '', expiresAtMs: 0, promise: p });
-    const resolved = await p;
-    signedUrlCache.set(storagePath, {
-      signedUrl: resolved,
-      expiresAtMs: Date.now() + SIGNED_URL_TTL_SECONDS * 1000,
-    });
-    return resolved;
+    try {
+      const resolved = await p;
+      signedUrlCache.set(storagePath, {
+        signedUrl: resolved,
+        expiresAtMs: Date.now() + SIGNED_URL_TTL_SECONDS * 1000,
+      });
+      return resolved;
+    } catch (err) {
+      signedUrlCache.delete(storagePath);
+      throw err;
+    }
   }
 
   const existingPromise = signedUrlCache.get(storagePath)?.promise;
   if (!existingPromise) throw new Error('Unexpected signed URL cache state.');
-  return existingPromise;
+  try {
+    return await existingPromise;
+  } catch (err) {
+    signedUrlCache.delete(storagePath);
+    throw err;
+  }
 }
 
-function rowToMovieBase(row: SavedMovieRow): Movie {
+function rowToMovieBase(row: LibraryMovieRow): Movie {
   // 如果 poster_storage_path 不存在，将来合并时可能由 seed 覆盖，
   // 但 UI 合同要求 posterUrl 必须是字符串，所以我们给一个兜底。
   const posterUrlFallback = 'https://picsum.photos/seed/movie/400/600';
+
+  const castMembers = row.cast_members ?? [];
+  let castDetails = parseCastDetailsField(row.cast_details);
+  if (castDetails.length === 0 && castMembers.length > 0) {
+    castDetails = castMembers
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+      .map((name) => ({ name: name.trim(), character: '' }));
+  }
 
   return {
     id: row.movie_id,
@@ -121,7 +189,7 @@ function rowToMovieBase(row: SavedMovieRow): Movie {
     director: row.director ?? '',
     language: row.language ?? '',
     runtime: row.runtime ?? '',
-    cast: row.cast_members ?? [],
+    cast: castMembers,
     trailerUrl: row.trailer_url ?? '',
 
     badge: row.badge ?? undefined,
@@ -135,7 +203,111 @@ function rowToMovieBase(row: SavedMovieRow): Movie {
 
     // 额外字段（可选）用于后续写操作：当海报来自 Storage 时保留它
     posterStoragePath: row.poster_storage_path ?? undefined,
+
+    contentRating: row.content_rating ?? '',
+    plot: row.plot ?? '',
+    writer: row.writer ?? '',
+    tagline: row.tagline ?? '',
+    releaseDate: row.release_date ?? '',
+    countryOfOrigin: row.country_of_origin ?? '',
+    alsoKnownAs: parseStringArrayField(row.also_known_as),
+    productionCompanies: parseStringArrayField(row.production_companies),
+    boxOffice: row.box_office ?? '',
+    castDetails,
   };
+}
+
+const LIBRARY_MOVIE_SELECT_COLUMNS = [
+  'movie_id',
+  'title',
+  'year',
+  'genre',
+  'imdb_rating',
+  'rotten_tomatoes',
+  'personal_rating',
+  'poster_url',
+  'poster_storage_path',
+  'director',
+  'language',
+  'runtime',
+  'cast_members',
+  'trailer_url',
+  'date_added',
+  'is_favorite',
+  'badge',
+  'content_rating',
+  'plot',
+  'writer',
+  'tagline',
+  'release_date',
+  'country_of_origin',
+  'also_known_as',
+  'production_companies',
+  'box_office',
+  'cast_details',
+].join(',');
+
+/**
+ * 将库表行（无 `owner_id` 要求）映射为 `Movie[]`，并处理 `poster_storage_path` → signed URL。
+ */
+async function hydrateMoviesFromLibraryRows(
+  supabase: SupabaseClient,
+  rows: LibraryMovieRow[]
+): Promise<Movie[]> {
+  const movies: Movie[] = [];
+  const posterUrlFallback = 'https://picsum.photos/seed/movie/400/600';
+
+  for (const row of rows) {
+    const movie = rowToMovieBase(row);
+    if (row.poster_storage_path) {
+      try {
+        const signedUrl = await storagePathToSignedUrl(supabase, row.poster_storage_path);
+        movie.posterUrl = posterUrlForUIFromSignedUrl(signedUrl);
+        movie.posterStoragePath = row.poster_storage_path;
+      } catch (posterErr) {
+        console.warn(
+          '[filmbaseSupabase] Poster Storage missing or signed URL failed; using poster_url or placeholder.',
+          {
+            storagePath: row.poster_storage_path,
+            movie_id: row.movie_id,
+            title: row.title,
+            error: posterErr,
+          },
+        );
+        const fromUrl = row.poster_url?.trim();
+        movie.posterUrl = fromUrl && fromUrl.length > 0 ? fromUrl : posterUrlFallback;
+        movie.posterStoragePath = undefined;
+      }
+    } else if (row.poster_url?.trim()) {
+      movie.posterUrl = row.poster_url.trim();
+      movie.posterStoragePath = undefined;
+    } else {
+      movie.posterStoragePath = undefined;
+    }
+
+    const dateAddedMs =
+      typeof movie.dateAdded === 'number'
+        ? movie.dateAdded
+        : new Date(movie.dateAdded ?? 0).getTime();
+    movie.isRecentlyAdded = Date.now() - dateAddedMs < 86400000;
+    movies.push(movie);
+  }
+
+  return movies;
+}
+
+/**
+ * 从 Supabase 读取公共 demo 片单，并把 Storage 海报回填为 signed URL。
+ */
+export async function loadPublicMovies(supabase: SupabaseClient): Promise<Movie[]> {
+  const { data, error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .select(LIBRARY_MOVIE_SELECT_COLUMNS);
+
+  if (error) throw error;
+
+  const rows = (data ?? []) as unknown as LibraryMovieRow[];
+  return hydrateMoviesFromLibraryRows(supabase, rows);
 }
 
 /**
@@ -147,54 +319,14 @@ export async function loadSavedMovies(
 ): Promise<Movie[]> {
   const { data, error } = await supabase
     .from(SAVED_MOVIES_TABLE)
-    .select(
-      [
-        'owner_id',
-        'movie_id',
-        'title',
-        'year',
-        'genre',
-        'imdb_rating',
-        'rotten_tomatoes',
-        'personal_rating',
-        'poster_url',
-        'poster_storage_path',
-        'director',
-        'language',
-        'runtime',
-        'cast_members',
-        'trailer_url',
-        'date_added',
-        'is_favorite',
-        'badge',
-      ].join(',')
-    );
+    .select(['owner_id', LIBRARY_MOVIE_SELECT_COLUMNS].join(','));
 
   if (error) throw error;
 
   const rows = (data ?? []) as unknown as SavedMovieRow[];
+  const libraryRows: LibraryMovieRow[] = rows.map(({ owner_id: _ownerId, ...rest }) => rest);
 
-  const movies: Movie[] = [];
-  for (const row of rows) {
-    const movie = rowToMovieBase(row);
-    if (row.poster_storage_path) {
-      const signedUrl = await storagePathToSignedUrl(supabase, row.poster_storage_path);
-      movie.posterUrl = posterUrlForUIFromSignedUrl(signedUrl);
-      movie.posterStoragePath = row.poster_storage_path;
-    } else if (row.poster_url) {
-      movie.posterUrl = row.poster_url;
-      movie.posterStoragePath = undefined;
-    } else {
-      // leave fallback as-is
-      movie.posterStoragePath = undefined;
-    }
-
-    // 让 UI 的 Recently Added 逻辑继续可用（基于 dateAdded）
-    movie.isRecentlyAdded = Date.now() - (movie.dateAdded ?? 0) < 86400000;
-    movies.push(movie);
-  }
-
-  return movies;
+  return hydrateMoviesFromLibraryRows(supabase, libraryRows);
 }
 
 async function upsertSavedMovieRow(
@@ -231,6 +363,17 @@ async function upsertSavedMovieRow(
 
     is_favorite: movie.isFavorite,
     badge: movie.badge ?? null,
+
+    content_rating: movie.contentRating?.trim() || null,
+    plot: movie.plot?.trim() || null,
+    writer: movie.writer?.trim() || null,
+    tagline: movie.tagline?.trim() || null,
+    release_date: movie.releaseDate?.trim() || null,
+    country_of_origin: movie.countryOfOrigin?.trim() || null,
+    also_known_as: movie.alsoKnownAs?.length ? movie.alsoKnownAs : [],
+    production_companies: movie.productionCompanies?.length ? movie.productionCompanies : [],
+    box_office: movie.boxOffice?.trim() || null,
+    cast_details: movie.castDetails?.length ? movie.castDetails : [],
   };
 
   const { error } = await supabase
@@ -324,6 +467,17 @@ export async function migrateLocalStorageOnce(
 
       is_favorite: movie.isFavorite,
       badge: movie.badge ?? null,
+
+      content_rating: movie.contentRating?.trim() || null,
+      plot: movie.plot?.trim() || null,
+      writer: movie.writer?.trim() || null,
+      tagline: movie.tagline?.trim() || null,
+      release_date: movie.releaseDate?.trim() || null,
+      country_of_origin: movie.countryOfOrigin?.trim() || null,
+      also_known_as: movie.alsoKnownAs?.length ? movie.alsoKnownAs : [],
+      production_companies: movie.productionCompanies?.length ? movie.productionCompanies : [],
+      box_office: movie.boxOffice?.trim() || null,
+      cast_details: movie.castDetails?.length ? movie.castDetails : [],
     };
 
     const { error } = await supabase
@@ -387,8 +541,86 @@ export async function uploadPosterDataUrlAndSign(
     });
   if (uploadError) throw uploadError;
 
+  // 替换同一路径对象后，需要生成一个“全新”的 signed URL。
+  // 1) 清掉内存缓存，避免复用旧 signedUrl
+  signedUrlCache.delete(path);
+  // 2) 重新签名，并附加 cache-busting 参数，避免浏览器/中间层缓存命中旧图片内容
   const signedUrl = await storagePathToSignedUrl(supabase, path);
-  return { posterStoragePath: path, signedPosterUrl: signedUrl };
+  const cacheBusted = withCacheBuster(signedUrl, Date.now());
+  return { posterStoragePath: path, signedPosterUrl: cacheBusted };
+}
+
+/**
+ * 上传原始海报文件（不缩放不转码）并回填 signed URL + storage path。
+ *
+ * 注意：Storage 路径仍使用固定的 `{uid}/{movieId}/poster.jpg`，但会以文件自身的 `mime type` 作为 `contentType` 上传，
+ * 以便浏览器正确渲染（扩展名与真实格式不一致也能工作）。
+ */
+export async function uploadPosterFileAndSign(
+  supabase: SupabaseClient,
+  uid: string,
+  movieId: string,
+  file: File
+): Promise<{ posterStoragePath: string; signedPosterUrl: string }> {
+  const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
+  if (!allowed.has(file.type)) {
+    throw new Error('Unsupported image type. Please upload JPEG, PNG, or WebP.');
+  }
+
+  const path = posterStoragePath(uid, movieId);
+
+  const { error: uploadError } = await supabase
+    .storage
+    .from(POSTERS_BUCKET)
+    .upload(path, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: true,
+    });
+  if (uploadError) throw uploadError;
+
+  signedUrlCache.delete(path);
+  const signedUrl = await storagePathToSignedUrl(supabase, path);
+  const cacheBusted = withCacheBuster(signedUrl, Date.now());
+  return { posterStoragePath: path, signedPosterUrl: cacheBusted };
+}
+
+/**
+ * 从 Storage 下载该片 `poster.jpg`，确认存在后刷新签名 URL，并 upsert 行：
+ * `poster_storage_path` 为唯一来源、`poster_url` 置空，避免元数据里残留外链覆盖 Storage。
+ *
+ * @param supabase 已鉴权的客户端
+ * @param uid 当前匿名用户 id（与路径前缀一致）
+ * @param movie 当前影片；若缺少 `posterStoragePath` 则按 `{uid}/{movieId}/poster.jpg` 解析
+ * @returns 更新后的 `Movie`（供 UI 立即替换列表与 modal）
+ */
+export async function syncPosterMetadataFromStorage(
+  supabase: SupabaseClient,
+  uid: string,
+  movie: Movie
+): Promise<Movie> {
+  const path = movie.posterStoragePath ?? posterStoragePath(uid, movie.id);
+
+  const { data: blob, error: downloadError } = await supabase.storage
+    .from(POSTERS_BUCKET)
+    .download(path);
+
+  if (downloadError) throw downloadError;
+  if (!blob || blob.size < 1) {
+    throw new Error('Storage 中该路径无有效海报文件。');
+  }
+
+  signedUrlCache.delete(path);
+  const signedUrl = await storagePathToSignedUrl(supabase, path);
+  const signedPosterUrl = withCacheBuster(signedUrl, Date.now());
+
+  const updated: Movie = {
+    ...movie,
+    posterUrl: signedPosterUrl,
+    posterStoragePath: path,
+  };
+
+  await upsertSavedMovieRow(supabase, uid, updated);
+  return updated;
 }
 
 /**

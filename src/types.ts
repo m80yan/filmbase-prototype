@@ -1,3 +1,6 @@
+/** 与 `filmbase_*` 表 `cast_details` JSON 及 Edge enrich 返回结构一致。 */
+export type MovieCastDetail = { name: string; character: string };
+
 export interface Movie {
   id: string;
   title: string;
@@ -21,6 +24,18 @@ export interface Movie {
   trailerUrl: string;
   dateAdded?: string | number;
   isRecentlyAdded?: boolean;
+
+  /** 以下字段来自 enrich / DB；旧 seed 可无。 */
+  contentRating?: string;
+  plot?: string;
+  writer?: string;
+  tagline?: string;
+  releaseDate?: string;
+  countryOfOrigin?: string;
+  alsoKnownAs?: string[];
+  productionCompanies?: string[];
+  boxOffice?: string;
+  castDetails?: MovieCastDetail[];
 }
 
 export type FilterType = 'genre' | 'year' | 'rating';
