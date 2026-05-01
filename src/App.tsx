@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useLayoutEffect, useReducer, useCallback } from 'react';
 import { 
-  Search, 
   ChevronDown, 
   ChevronRight,
   ChevronLeft,
@@ -1315,14 +1314,30 @@ export default function App() {
         {/* Sidebar Header / Search (Axis B) */}
         <div className="h-12 flex items-center px-4 min-w-[256px] flex-shrink-0">
           <div className="relative group w-full">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#0A84FF] transition-colors" size={14} />
+            {/* 16×16 素材缩放到 14×14，与原先 lucide Search size={14} 一致。 */}
+            <img
+              src="/icons/search.svg"
+              alt=""
+              width={14}
+              height={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-100 transition-opacity group-focus-within:opacity-0"
+              aria-hidden
+            />
+            <img
+              src="/icons/search-focus.svg"
+              alt=""
+              width={14}
+              height={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-0 transition-opacity group-focus-within:opacity-100"
+              aria-hidden
+            />
             <input 
               ref={searchInputRef}
               type="text" 
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-black/20 border border-white/10 rounded-md py-1.5 pl-8 pr-8 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#0A84FF] focus:border-[#0A84FF] transition-all placeholder:text-white/40 text-white shadow-inner"
+              className="w-full bg-black/20 border border-white/10 rounded-md py-1.5 pl-8 pr-8 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#EA9794] focus:border-[#EA9794] transition-all placeholder:text-white/40 text-white shadow-inner"
             />
             {searchQuery && (
               <button
@@ -1679,7 +1694,7 @@ export default function App() {
           previewNaturalSize.w > 0 &&
           previewNaturalSize.h > 0 &&
           posterPreviewMovie ? (
-            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-normal text-white tabular-nums">
+            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium text-white tabular-nums">
               {isScopedPosterUploadOpen && isPosterApplying ? (
                 <span className="inline-block w-[11ch] text-left tabular-nums">
                   {`Applying${'.'.repeat(applyingDots)}`}
