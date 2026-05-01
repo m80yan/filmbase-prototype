@@ -15,7 +15,6 @@ import {
   X,
   Plus,
   Minus,
-  PanelLeft,
   Upload,
   Download,
   ZoomIn,
@@ -1294,12 +1293,31 @@ export default function App() {
           <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
           <div className="w-3 h-3 rounded-full bg-[#28c840]" />
         </div>
-        <button 
+        <button
+          type="button"
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+          className="group/togglesidebar relative p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
           title="Toggle Sidebar"
+          aria-label="Toggle sidebar"
         >
-          <PanelLeft size={18} />
+          <img
+            src="/icons/toggle-sidebar.svg"
+            alt=""
+            width={18}
+            height={18}
+            className="pointer-events-none block h-[18px] w-[18px] opacity-100 transition-opacity group-hover/togglesidebar:opacity-0"
+            decoding="async"
+            aria-hidden
+          />
+          <img
+            src="/icons/toggle-sidebar-hover.svg"
+            alt=""
+            width={18}
+            height={18}
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/togglesidebar:opacity-100"
+            decoding="async"
+            aria-hidden
+          />
         </button>
       </div>
 
