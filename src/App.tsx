@@ -2,20 +2,16 @@ import React, { useState, useMemo, useRef, useEffect, useLayoutEffect, useReduce
 import { 
   ChevronDown, 
   ChevronRight,
-  ChevronLeft,
-  Grid,
   Star, 
   Film,
   Filter,
   Settings,
   Check,
   X,
-  Plus,
   Minus,
   Upload,
   Download,
   ZoomIn,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
@@ -41,6 +37,55 @@ function normalizeTitleForIdentity(title: string): string {
     .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** `public/icons` 下已有素材的类型 slug（与 `{slug}.svg` / `{slug}-hover.svg` 文件名一致）。 */
+const SIDEBAR_GENRE_ICON_SLUGS = new Set([
+  'action',
+  'adventure',
+  'biography',
+  'comedy',
+  'crime',
+  'drama',
+  'fantasy',
+  'history',
+  'horror',
+  'mystery',
+  'romance',
+  'sci-fi',
+  'thriller',
+  'war',
+]);
+
+/**
+ * 侧栏与筛选用的 genre 展示标签：合并 Sci-Fi 诸写法，不写回 `movie.genre`。
+ *
+ * @param g 原始 genre 字符串
+ * @returns 去首尾空白；`science fiction` / `sci fi` / `sci-fi`（大小写不敏感）返回 `Sci-Fi`，否则返回 trim 原串
+ */
+function normalizeGenreDisplayLabel(g: string): string {
+  const t = g.trim();
+  const lower = t.toLowerCase();
+  if (lower === 'science fiction' || lower === 'sci fi' || lower === 'sci-fi') {
+    return 'Sci-Fi';
+  }
+  return t;
+}
+
+/**
+ * 将片库中的 genre 文案映射为侧栏图标 slug。
+ * 无单独设计的类型（如 Animation、Family）统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
+ *
+ * @param label 如 `Sci-Fi`、`War`
+ */
+function genreLabelToIconSlug(label: string): string {
+  const t = label.trim();
+  if (!t) return 'fallback';
+  const lower = t.toLowerCase();
+  if (lower === 'sci fi' || lower === 'science fiction') return 'sci-fi';
+  const slug = lower.replace(/\s+/g, '-');
+  if (SIDEBAR_GENRE_ICON_SLUGS.has(slug)) return slug;
+  return 'fallback';
 }
 
 /**
@@ -751,7 +796,7 @@ export default function App() {
 
   const allUniqueGenres = useMemo(() => {
     const set = new Set<string>();
-    movies.forEach(m => m.genre.forEach(g => set.add(g)));
+    movies.forEach((m) => m.genre.forEach((g) => set.add(normalizeGenreDisplayLabel(g))));
     return Array.from(set).sort();
   }, [movies]);
 
@@ -1143,7 +1188,9 @@ export default function App() {
 
       const matchesSearch = movie.title.toLowerCase().includes(searchQuery.toLowerCase());
       
-      const matchesGenre = selectedGenres.length === 0 || movie.genre.some(g => selectedGenres.includes(g));
+      const matchesGenre =
+        selectedGenres.length === 0 ||
+        movie.genre.some((g) => selectedGenres.includes(normalizeGenreDisplayLabel(g)));
       
       const matchesRating = selectedRatings.length === 0 || selectedRatings.includes(movie.personalRating) || (selectedRatings.includes(0) && !movie.personalRating);
 
@@ -1193,16 +1240,54 @@ export default function App() {
     selectedRatings.length === 0 &&
     !searchQuery;
 
-  const SidebarItem = ({ active, label, onClick }: { active: boolean, label: string | React.ReactNode, onClick: () => void }) => (
-    <button 
+  const SidebarItem = ({
+    active,
+    label,
+    onClick,
+    iconSlug,
+  }: {
+    active: boolean;
+    label: string | React.ReactNode;
+    onClick: () => void;
+    /** 有值时在文案左侧显示 `public/icons/{slug}.svg`（与 `-hover` 配对）；未知类型用 `fallback`；`Genre` 总标题行勿传。 */
+    iconSlug?: string | null;
+  }) => (
+    <button
+      type="button"
       onClick={onClick}
-      className={`flex items-center w-full px-2.5 py-1.5 rounded-md text-[13px] transition-colors text-left ${
-        active 
-          ? 'bg-[#EB9692]/20 font-bold text-white' 
+      className={`group/sidebarrow flex items-center w-full px-2.5 py-1.5 rounded-md text-[13px] transition-colors text-left ${
+        active
+          ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
       }`}
     >
-      <span className="truncate">{label}</span>
+      {iconSlug ? (
+        <span className="relative mr-2 h-[18px] w-[18px] shrink-0">
+          <img
+            src={`/icons/${iconSlug}.svg`}
+            alt=""
+            width={18}
+            height={18}
+            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+              active ? 'opacity-0' : 'opacity-100 group-hover/sidebarrow:opacity-0'
+            }`}
+            decoding="async"
+            aria-hidden
+          />
+          <img
+            src={`/icons/${iconSlug}-hover.svg`}
+            alt=""
+            width={18}
+            height={18}
+            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+              active ? 'opacity-100' : 'opacity-0 group-hover/sidebarrow:opacity-100'
+            }`}
+            decoding="async"
+            aria-hidden
+          />
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
     </button>
   );
 
@@ -1404,10 +1489,11 @@ export default function App() {
                 <ul className="space-y-0.5">
                   {genres.map(genre => (
                     <li key={genre}>
-                      <SidebarItem 
+                      <SidebarItem
                         label={genre}
                         active={selectedGenres.includes(genre)}
                         onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
+                        iconSlug={genreLabelToIconSlug(genre)}
                       />
                     </li>
                   ))}
@@ -1608,11 +1694,30 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => closePosterPreview()}
-                    className="p-1.5 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                    className="group/backprev relative p-1.5 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors"
                     title="Back"
                     aria-label="Close poster preview"
                   >
-                    <ChevronLeft size={18} strokeWidth={2.5} />
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <img
+                        src="/icons/back.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/backprev:opacity-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/back-hover.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/backprev:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </span>
                   </button>
                 </div>
                 <div className="flex min-w-0 items-center gap-3">
@@ -1623,10 +1728,41 @@ export default function App() {
                       setPreviewPan({ x: 0, y: 0 });
                     }}
                     disabled={previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderLocked}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                    className="group/prevfit relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward fit / fill"
                   >
-                    <ImageIcon size={12} className="shrink-0" aria-hidden />
+                    {previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderLocked ? (
+                      <img
+                        src="/icons/poster-preview-fit-disabled.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none h-[18px] w-[18px] shrink-0 opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                        <img
+                          src="/icons/poster-preview-fit.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/prevfit:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          src="/icons/poster-preview-fit-hover.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/prevfit:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </span>
+                    )}
                   </button>
                   <div className="group relative flex h-8 w-32 shrink-0 items-center">
                     {previewSliderHoverLabel ? (
@@ -1671,10 +1807,41 @@ export default function App() {
                       setPreviewPan({ x: 0, y: 0 });
                     }}
                     disabled={previewSliderPercent >= 100 || isPreviewZoomSliderLocked}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                    className="group/prev100 relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward 100%"
                   >
-                    <ImageIcon size={16} className="shrink-0" aria-hidden />
+                    {previewSliderPercent >= 100 || isPreviewZoomSliderLocked ? (
+                      <img
+                        src="/icons/poster-preview-100-disabled.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none h-[18px] w-[18px] shrink-0 opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                        <img
+                          src="/icons/poster-preview-100.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/prev100:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          src="/icons/poster-preview-100-hover.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/prev100:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </span>
+                    )}
                   </button>
                 </div>
               </>
@@ -1693,13 +1860,13 @@ export default function App() {
                         : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-4 w-4 shrink-0">
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
                       <img
                         src="/icons/view-grid.svg"
                         alt=""
-                        width={16}
-                        height={16}
-                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
                           viewMode === 'grid'
                             ? 'opacity-0'
                             : 'opacity-100 group-hover/viewgrid:opacity-0'
@@ -1710,9 +1877,9 @@ export default function App() {
                       <img
                         src="/icons/view-grid-hover.svg"
                         alt=""
-                        width={16}
-                        height={16}
-                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
                           viewMode === 'grid'
                             ? 'opacity-100'
                             : 'opacity-0 group-hover/viewgrid:opacity-100'
@@ -1734,13 +1901,13 @@ export default function App() {
                         : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-4 w-4 shrink-0">
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
                       <img
                         src="/icons/view-list.svg"
                         alt=""
-                        width={16}
-                        height={16}
-                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
                           viewMode === 'list'
                             ? 'opacity-0'
                             : 'opacity-100 group-hover/viewlist:opacity-0'
@@ -1751,9 +1918,9 @@ export default function App() {
                       <img
                         src="/icons/view-list-hover.svg"
                         alt=""
-                        width={16}
-                        height={16}
-                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
                           viewMode === 'list'
                             ? 'opacity-100'
                             : 'opacity-0 group-hover/viewlist:opacity-100'
@@ -1767,12 +1934,44 @@ export default function App() {
 
                 <div className="flex items-center gap-3">
                   <button
+                    type="button"
                     onClick={() => setPosterSize(Math.max(120, posterSize - 20))}
                     disabled={viewMode === 'list' || posterSize <= 120}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                    className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Decrease poster size"
                   >
-                    <Grid size={12} />
+                    {viewMode === 'list' || posterSize <= 120 ? (
+                      <img
+                        src="/icons/poster-size-decrease-disabled.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                        <img
+                          src="/icons/poster-size-decrease.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/postdec:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          src="/icons/poster-size-decrease-hover.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/postdec:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </span>
+                    )}
                   </button>
                   <input 
                     type="range" 
@@ -1784,12 +1983,44 @@ export default function App() {
                     className="w-32 accent-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
                   />
                   <button
+                    type="button"
                     onClick={() => setPosterSize(Math.min(240, posterSize + 20))}
                     disabled={viewMode === 'list' || posterSize >= 240}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:text-white/10 disabled:cursor-not-allowed transition-colors"
+                    className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Increase poster size"
                   >
-                    <Grid size={16} />
+                    {viewMode === 'list' || posterSize >= 240 ? (
+                      <img
+                        src="/icons/poster-size-increase-disabled.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                        <img
+                          src="/icons/poster-size-increase.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/postinc:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          src="/icons/poster-size-increase-hover.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/postinc:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </span>
+                    )}
                   </button>
                 </div>
               </>
@@ -1812,27 +2043,100 @@ export default function App() {
                       posterFileInputRef.current?.click();
                     }
                   }}
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] font-medium text-white/40 transition-colors hover:bg-white/5 hover:text-white"
+                  className="group/uploadprev relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] font-medium text-white/40 transition-colors hover:bg-white/5 hover:text-white"
                   title={isScopedPosterUploadOpen ? 'Close upload panel' : 'Upload Poster'}
                 >
-                  <Upload size={16} strokeWidth={2} className="shrink-0" aria-hidden />
+                  <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <img
+                      src="/icons/upload-poster.svg"
+                      alt=""
+                      width={18}
+                      height={18}
+                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                        isScopedPosterUploadOpen
+                          ? 'opacity-0'
+                          : 'opacity-100 group-hover/uploadprev:opacity-0'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
+                    <img
+                      src="/icons/upload-poster-hover.svg"
+                      alt=""
+                      width={18}
+                      height={18}
+                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                        isScopedPosterUploadOpen
+                          ? 'opacity-100'
+                          : 'opacity-0 group-hover/uploadprev:opacity-100'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
+                  </span>
                   Upload Poster
                 </button>
               ) : (
                 <>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setIsEditing(!isEditing)}
-                    className={`p-1.5 rounded-md transition-colors ${isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                    className={`group/editlib relative p-1.5 rounded-md transition-colors ${
+                      isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'
+                    }`}
                     title="Edit Library"
                   >
-                    <Minus size={16} />
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <img
+                        src="/icons/edit-library.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                          isEditing ? 'opacity-0' : 'opacity-100 group-hover/editlib:opacity-0'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/edit-library-hover.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                          isEditing ? 'opacity-100' : 'opacity-0 group-hover/editlib:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </span>
                   </button>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setIsAddModalOpen(true)}
-                    className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+                    className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors hover:bg-white/5 hover:text-white"
                     title="Add Movie"
                   >
-                    <Plus size={16} />
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <img
+                        src="/icons/add-movie.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/add-movie-hover.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </span>
                   </button>
                 </>
               )}
