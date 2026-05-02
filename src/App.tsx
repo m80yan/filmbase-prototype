@@ -269,6 +269,11 @@ const LIST_HEADER_RATINGS_ICON = {
   rtHover: '/icons/ratings/rt-source-white.svg',
 } as const;
 
+/** 网格海报尺寸 slider 最小值（px）；再小则 hover overlay 易破版。 */
+const GRID_POSTER_SIZE_MIN_PX = 170;
+/** 网格海报尺寸 +/- 按钮步长（px）；slider 仍为无级拖动。 */
+const GRID_POSTER_SIZE_STEP_PX = 10;
+
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const trailerIframeRef = useRef<HTMLIFrameElement>(null);
@@ -1438,7 +1443,8 @@ export default function App() {
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
-  const isMainContentOverlayActive = isPosterPreviewOpen || isTrailerOverlayInMain;
+  const isMainContentOverlayActive =
+    isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen;
 
   return (
     <div className="w-screen h-screen bg-[#000] antialiased font-sans overflow-hidden">
@@ -2012,12 +2018,14 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setPosterSize(Math.max(120, posterSize - 20))}
-                    disabled={viewMode === 'list' || posterSize <= 120}
+                    onClick={() =>
+                      setPosterSize(Math.max(GRID_POSTER_SIZE_MIN_PX, posterSize - GRID_POSTER_SIZE_STEP_PX))
+                    }
+                    disabled={viewMode === 'list' || posterSize <= GRID_POSTER_SIZE_MIN_PX}
                     className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Decrease poster size"
                   >
-                    {viewMode === 'list' || posterSize <= 120 ? (
+                    {viewMode === 'list' || posterSize <= GRID_POSTER_SIZE_MIN_PX ? (
                       <img
                         src="/icons/poster-size-decrease-disabled.svg"
                         alt=""
@@ -2051,9 +2059,10 @@ export default function App() {
                     )}
                   </button>
                   <input 
-                    type="range" 
-                    min="120" 
-                    max="240" 
+                    type="range"
+                    min={GRID_POSTER_SIZE_MIN_PX}
+                    max="240"
+                    step={GRID_POSTER_SIZE_STEP_PX}
                     value={posterSize}
                     disabled={viewMode === 'list'}
                     onChange={(e) => setPosterSize(Number(e.target.value))}
@@ -2061,7 +2070,9 @@ export default function App() {
                   />
                   <button
                     type="button"
-                    onClick={() => setPosterSize(Math.min(240, posterSize + 20))}
+                    onClick={() =>
+                      setPosterSize(Math.min(240, posterSize + GRID_POSTER_SIZE_STEP_PX))
+                    }
                     disabled={viewMode === 'list' || posterSize >= 240}
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Increase poster size"
@@ -2828,6 +2839,125 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Add Movie Modal：仅主内容宿主区（与预告片/海报预览同 scope），侧栏与顶栏不被压暗 */}
+      <AnimatePresence>
+        {isAddModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => {
+              if (isAdding) return;
+              setIsAddModalOpen(false);
+              setNewMovieTitle('');
+              setNewMovieUrl('');
+              setIsImdbEntered(false);
+              setNewMovieTrailerUrl('');
+              setAddError('');
+            }}
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/92 p-4 backdrop-blur-xl md:p-8"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md cursor-default bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
+            >
+              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Add New Movie</h2>
+
+              <div className="space-y-4">
+                {addError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
+                    {addError}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                    IMDb URL
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://www.imdb.com/title/tt..."
+                    value={newMovieUrl}
+                    onChange={(e) => {
+                      setNewMovieUrl(e.target.value);
+                      if (addError) setAddError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newMovieUrl.trim()) {
+                        e.preventDefault();
+                        setIsImdbEntered(true);
+                        document.getElementById('trailer-input')?.focus();
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newMovieUrl.trim()) {
+                        setIsImdbEntered(true);
+                      }
+                    }}
+                    disabled={isAdding}
+                    readOnly={isImdbEntered}
+                    className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                    Trailer URL (optional — overrides enrich result)
+                  </label>
+                  <input
+                    id="trailer-input"
+                    type="text"
+                    placeholder="YouTube URL if you want a specific trailer"
+                    value={newMovieTrailerUrl}
+                    onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
+                    disabled={isAdding}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 mt-8">
+                <button
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setNewMovieTitle('');
+                    setNewMovieUrl('');
+                    setIsImdbEntered(false);
+                    setNewMovieTrailerUrl('');
+                    setAddError('');
+                  }}
+                  disabled={isAdding}
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddMovie}
+                  disabled={isAdding || !newMovieUrl.trim()}
+                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                    isAdding || !newMovieUrl.trim()
+                      ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                      : 'bg-white/80 text-black hover:bg-white shadow-xl'
+                  }`}
+                >
+                  {isAdding ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent opacity-70 rounded-full animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    'Add'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {isPosterHeroAnimating &&
         posterPreviewMovie &&
         posterHeroFromRect &&
@@ -2968,115 +3098,6 @@ export default function App() {
               </>
 
               <div className="absolute -inset-4 -z-10 bg-gradient-to-r from-white/5 via-white/10 to-white/5 blur-3xl opacity-50" />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Add Movie Modal */}
-      <AnimatePresence>
-        {isAddModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-xl p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
-            >
-              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Add New Movie</h2>
-              
-              <div className="space-y-4">
-                {addError && (
-                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
-                    {addError}
-                  </div>
-                )}
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    IMDb URL
-                  </label>
-                  <input 
-                    type="text"
-                    placeholder="https://www.imdb.com/title/tt..."
-                    value={newMovieUrl}
-                    onChange={(e) => {
-                      setNewMovieUrl(e.target.value);
-                      if (addError) setAddError('');
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newMovieUrl.trim()) {
-                        e.preventDefault();
-                        setIsImdbEntered(true);
-                        document.getElementById('trailer-input')?.focus();
-                      }
-                    }}
-                    onBlur={() => {
-                      if (newMovieUrl.trim()) {
-                        setIsImdbEntered(true);
-                      }
-                    }}
-                    disabled={isAdding}
-                    readOnly={isImdbEntered}
-                    className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    autoFocus
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    Trailer URL (optional — overrides enrich result)
-                  </label>
-                  <input 
-                    id="trailer-input"
-                    type="text"
-                    placeholder="YouTube URL if you want a specific trailer"
-                    value={newMovieTrailerUrl}
-                    onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
-                    disabled={isAdding}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 mt-8">
-                <button 
-                  onClick={() => {
-                    setIsAddModalOpen(false);
-                    setNewMovieTitle('');
-                    setNewMovieUrl('');
-                    setIsImdbEntered(false);
-                    setNewMovieTrailerUrl('');
-                    setAddError('');
-                  }}
-                  disabled={isAdding}
-                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleAddMovie}
-                  disabled={isAdding || !newMovieUrl.trim()}
-                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
-                    isAdding || !newMovieUrl.trim()
-                      ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                      : 'bg-white/80 text-black hover:bg-white shadow-xl'
-                  }`}
-                >
-                  {isAdding ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent opacity-70 rounded-full animate-spin" />
-                      Adding...
-                    </>
-                  ) : (
-                    'Add'
-                  )}
-                </button>
-              </div>
             </motion.div>
           </motion.div>
         )}
@@ -3322,10 +3343,14 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
   const castRef = useRef<HTMLDivElement>(null);
   const castMarqueeStripRef = useRef<HTMLDivElement>(null);
   const titleMarqueeStripRef = useRef<HTMLDivElement>(null);
+  const directorRef = useRef<HTMLDivElement>(null);
+  const directorMarqueeStripRef = useRef<HTMLDivElement>(null);
   const [isTitleOverflowing, setIsTitleOverflowing] = useState(false);
   const [isCastOverflowing, setIsCastOverflowing] = useState(false);
+  const [isDirectorOverflowing, setIsDirectorOverflowing] = useState(false);
   const [castMarqueeDurationSec, setCastMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   const [titleMarqueeDurationSec, setTitleMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
+  const [directorMarqueeDurationSec, setDirectorMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   /** 列表行 starring 纵移：`line` 为已上移行数（0…N）；`skipTx` 为滚满一圈回到 0 时本帧关闭 transform。 */
   const [listCastScroll, dispatchListCastScroll] = useReducer(listCastScrollReducer, { line: 0, skipTx: false });
   /** 列表行 hover（与 starring `group-hover` 同步），驱动纵移定时器。 */
@@ -3347,6 +3372,11 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
       if (castRef.current) {
         setIsCastOverflowing(castRef.current.scrollWidth > castRef.current.clientWidth);
       }
+      if (directorRef.current) {
+        setIsDirectorOverflowing(directorRef.current.scrollWidth > directorRef.current.clientWidth);
+      } else {
+        setIsDirectorOverflowing(false);
+      }
     };
     
     // Small delay to ensure layout is stable
@@ -3357,7 +3387,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
       window.removeEventListener('resize', checkOverflow);
       setHoverRating(null);
     };
-  }, [movie.title, movie.cast, size, viewMode]);
+  }, [movie.title, movie.cast, movie.director, size, viewMode]);
 
   /** 按内容宽度换算 cast 跑马灯时长，使线速度与 Matrix 基准一致。 */
   React.useEffect(() => {
@@ -3384,6 +3414,32 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
       window.removeEventListener('resize', measure);
     };
   }, [viewMode, isCastOverflowing, movie.cast, size]);
+
+  /** 网格 hover 导演名：溢出时与 starring 同 `marquee` 线速基准（`gridStripMarqueeDurationSec`）。 */
+  React.useEffect(() => {
+    if (viewMode !== 'grid' || !isDirectorOverflowing) return;
+
+    const measure = () => {
+      const node = directorMarqueeStripRef.current;
+      if (!node) return;
+      setDirectorMarqueeDurationSec(gridStripMarqueeDurationSec(node.scrollWidth));
+    };
+
+    const ro = new ResizeObserver(measure);
+    const raf = requestAnimationFrame(() => {
+      measure();
+      const node = directorMarqueeStripRef.current;
+      if (node) ro.observe(node);
+    });
+
+    window.addEventListener('resize', measure);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [viewMode, isDirectorOverflowing, movie.director, size]);
 
   /** 片名跑马灯：网格 hover 展示；列表溢出时始终展示。均用 `gridStripMarqueeDurationSec` 与 poster 网格同线速。 */
   React.useEffect(() => {
@@ -3855,10 +3911,31 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
         >
           <div className="space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
             <div className="relative">
-              {/** 导演叠在年/时长行上方，不占文档流高度，避免推动本行与下方 genre、starring */}
-              <span className="absolute bottom-full left-0 right-0 mb-1 block truncate text-sm font-medium leading-relaxed tracking-tight text-white/60 group-hover:text-white">
-                {formatDirectorName(movie.director)}
-              </span>
+              {/** 导演叠在年/时长行上方；溢出时 hover 横向跑马灯，线速与 starring 同基准。 */}
+              <div className="absolute bottom-full left-0 right-0 z-[2] mb-1 h-6 overflow-hidden">
+                <div
+                  ref={directorRef}
+                  className={`block truncate text-sm font-medium leading-relaxed tracking-tight text-white/60 transition-colors group-hover:text-white ${
+                    isDirectorOverflowing ? 'group-hover:opacity-0' : ''
+                  }`}
+                >
+                  {formatDirectorName(movie.director)}
+                </div>
+                {isDirectorOverflowing ? (
+                  <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                    <div
+                      ref={directorMarqueeStripRef}
+                      className="flex h-full w-max items-center whitespace-nowrap text-sm font-medium leading-relaxed tracking-tight text-white transform-gpu will-change-transform [backface-visibility:hidden]"
+                      style={{
+                        animation: `marquee ${directorMarqueeDurationSec}s linear infinite`,
+                      }}
+                    >
+                      <span className="pr-4">{formatDirectorName(movie.director)}</span>
+                      <span className="pr-4">{formatDirectorName(movie.director)}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <span className="block truncate text-[12px] font-normal leading-tight tracking-normal text-white/50 group-hover:text-white/75">
                 {formatYearRatingRuntime(movie)}
               </span>
