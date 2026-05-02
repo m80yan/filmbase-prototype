@@ -41,10 +41,12 @@ function normalizeTitleForIdentity(title: string): string {
 const SIDEBAR_GENRE_ICON_SLUGS = new Set([
   'action',
   'adventure',
+  'animation',
   'biography',
   'comedy',
   'crime',
   'drama',
+  'family',
   'fantasy',
   'history',
   'horror',
@@ -72,9 +74,9 @@ function normalizeGenreDisplayLabel(g: string): string {
 
 /**
  * 将片库中的 genre 文案映射为侧栏图标 slug。
- * 无单独设计的类型（如 Animation、Family）统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
+ * 无单独设计的类型统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
  *
- * @param label 如 `Sci-Fi`、`War`
+ * @param label 如 `Sci-Fi`、`War`、`Animation`
  */
 function genreLabelToIconSlug(label: string): string {
   const t = label.trim();
@@ -271,8 +273,35 @@ const LIST_HEADER_RATINGS_ICON = {
 
 /** 网格海报尺寸 slider 最小值（px）；再小则 hover overlay 易破版。 */
 const GRID_POSTER_SIZE_MIN_PX = 170;
+/** 网格海报尺寸 slider 最大值（px）。 */
+const GRID_POSTER_SIZE_MAX_PX = 240;
 /** 网格海报尺寸 +/- 按钮步长（px）；slider 仍为无级拖动。 */
 const GRID_POSTER_SIZE_STEP_PX = 10;
+/**
+ * 海报尺寸滑块 CSS 轨道高度（px）；两端整半圆时半径 = `H/2`。无 `border` / 外描边式阴影，填充色与原先 `accent-white/40` 控件同系（浅白半透明条）。
+ */
+const POSTER_SIZE_SLIDER_TRACK_H_PX = 6;
+/** 拇指 SVG 栅格边长（px），与 `public/icons/poster-size-slider-thumb*.svg` 一致。 */
+const POSTER_SIZE_SLIDER_THUMB_PX = 16;
+
+/**
+ * 将海报尺寸限制在 slider 合法区间，避免 `value < min` 时自定义拇指 `left` 线性比例变负而冲出轨道。
+ *
+ * @param px 原始像素值
+ */
+function clampPosterSizePx(px: number): number {
+  return Math.min(GRID_POSTER_SIZE_MAX_PX, Math.max(GRID_POSTER_SIZE_MIN_PX, px));
+}
+
+/** 片库加载叠层：底层静态胶片。 */
+const LIBRARY_LOADING_FILM_BASE_SRC = '/icons/library-loading-film-base.svg';
+/** 片库加载叠层：上层旋转卷轴。 */
+const LIBRARY_LOADING_REEL_SRC = '/icons/library-loading-reel.svg';
+/**
+ * 片库加载音（方案 A）：`public/sounds/library-ready.mp3` 单次播放、不循环；与 loader 同启，就绪时 cleanup 立刻停声。
+ * 若实际加载短于音轨时长则中途截断；长于音轨则播完后静默直至 UI 就绪。
+ */
+const LIBRARY_LOADING_SOUND_SRC = '/sounds/library-ready.mp3';
 
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -294,11 +323,15 @@ export default function App() {
   const [selectedRatings, setSelectedRatings] = useState<number[]>([]);
   const [isRecentlyAddedFilter, setIsRecentlyAddedFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [posterSize, setPosterSize] = useState(160);
+  const [posterSize, setPosterSize] = useState(GRID_POSTER_SIZE_MIN_PX);
+  /** 海报尺寸自定义滑块：按下/拖动中为 true（列表模式下不用 pressed 图）。 */
+  const [isPosterSizeSliderPressed, setIsPosterSizeSliderPressed] = useState(false);
   /** 海报预览 slider：0 = 铺满内容区（Fit/Fill），100 = 1:1 像素（100%）。 */
   const [previewSliderPercent, setPreviewSliderPercent] = useState(100);
   /** 宿主尺寸变化时递增，驱动预览布局 `useMemo` 重算。 */
   const [previewLayoutTick, setPreviewLayoutTick] = useState(0);
+  /** 海报预览 Fit↔100% 滑块：按下/拖动中为 true（`isPreviewZoomSliderLocked` 时不用 pressed 图）。 */
+  const [isPreviewZoomSliderPressed, setIsPreviewZoomSliderPressed] = useState(false);
   const [isMoviesHydrated, setIsMoviesHydrated] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const trailerOpenGuardUntilRef = useRef(0);
@@ -372,6 +405,35 @@ export default function App() {
     year: false,
     ratings: true
   });
+
+  /** 全局 `pointerup` / `pointercancel` 结束海报尺寸滑块按下态。 */
+  useEffect(() => {
+    if (!isPosterSizeSliderPressed) return;
+    const end = () => setIsPosterSizeSliderPressed(false);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [isPosterSizeSliderPressed]);
+
+  /** 全局 `pointerup` / `pointercancel` 结束预览缩放滑块按下态。 */
+  useEffect(() => {
+    if (!isPreviewZoomSliderPressed) return;
+    const end = () => setIsPreviewZoomSliderPressed(false);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [isPreviewZoomSliderPressed]);
+
+  /** 挂载时将 `posterSize` 夹在 `[min,max]`，避免历史默认或持久化值低于当前 `GRID_POSTER_SIZE_MIN_PX`。 */
+  useLayoutEffect(() => {
+    setPosterSize((p) => clampPosterSizePx(p));
+  }, []);
 
   /** 编辑库模式：`Esc` 退出编辑（其它浮层已占 ESC 时跳过）。 */
   useEffect(() => {
@@ -531,6 +593,25 @@ export default function App() {
       setIsMoviesHydrated(true);
     });
   }, []);
+
+  /**
+   * 与「Loading library…」及胶片 loader 同生命周期：`!isMoviesHydrated` 时单次播放加载音（不 loop）；就绪时 cleanup 立刻停声。
+   */
+  useEffect(() => {
+    if (isMoviesHydrated) return;
+
+    const audio = new Audio(LIBRARY_LOADING_SOUND_SRC);
+    audio.loop = false;
+    audio.volume = 0.28;
+    void audio.play().catch(() => {});
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = '';
+      void audio.load();
+    };
+  }, [isMoviesHydrated]);
 
   useEffect(() => {
     if (!selectedMovie && trailerIframeRef.current) {
@@ -1865,23 +1946,65 @@ export default function App() {
                         {previewSliderHoverLabel}
                       </span>
                     ) : null}
-                    <input
-                      type="range"
-                      min={previewSliderMinPercent}
-                      max={100}
-                      step="1"
-                      value={previewSliderPercent}
-                      disabled={isPreviewZoomSliderLocked}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        setPreviewSliderPercent(
-                          Math.min(100, Math.max(previewSliderMinPercent, v)),
-                        );
-                        setPreviewPan({ x: 0, y: 0 });
+                    <div
+                      className="relative h-8 w-full"
+                      onPointerDownCapture={(e) => {
+                        if (isPreviewZoomSliderLocked) return;
+                        if (e.button !== 0) return;
+                        setIsPreviewZoomSliderPressed(true);
                       }}
-                      className="w-full accent-white/40 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Poster preview: fit to fill versus 100 percent"
-                    />
+                    >
+                      <div
+                        className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
+                          isPreviewZoomSliderLocked ? 'opacity-15' : 'opacity-100'
+                        }`}
+                        style={{
+                          height: POSTER_SIZE_SLIDER_TRACK_H_PX,
+                          borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
+                        }}
+                        aria-hidden
+                      />
+                      <img
+                        src={
+                          isPreviewZoomSliderLocked
+                            ? '/icons/poster-size-slider-thumb-disabled.svg'
+                            : isPreviewZoomSliderPressed
+                              ? '/icons/poster-size-slider-thumb-pressed.svg'
+                              : '/icons/poster-size-slider-thumb.svg'
+                        }
+                        alt=""
+                        width={POSTER_SIZE_SLIDER_THUMB_PX}
+                        height={POSTER_SIZE_SLIDER_THUMB_PX}
+                        className="pointer-events-none absolute top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none"
+                        style={{
+                          left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${
+                            100 - previewSliderMinPercent > 0
+                              ? (previewSliderPercent - previewSliderMinPercent) /
+                                (100 - previewSliderMinPercent)
+                              : 0
+                          })`,
+                        }}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <input
+                        type="range"
+                        min={previewSliderMinPercent}
+                        max={100}
+                        step="1"
+                        value={previewSliderPercent}
+                        disabled={isPreviewZoomSliderLocked}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setPreviewSliderPercent(
+                            Math.min(100, Math.max(previewSliderMinPercent, v)),
+                          );
+                          setPreviewPan({ x: 0, y: 0 });
+                        }}
+                        className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
+                        aria-label="Poster preview: fit to fill versus 100 percent"
+                      />
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -2058,26 +2181,70 @@ export default function App() {
                       </span>
                     )}
                   </button>
-                  <input 
-                    type="range"
-                    min={GRID_POSTER_SIZE_MIN_PX}
-                    max="240"
-                    step={GRID_POSTER_SIZE_STEP_PX}
-                    value={posterSize}
-                    disabled={viewMode === 'list'}
-                    onChange={(e) => setPosterSize(Number(e.target.value))}
-                    className="w-32 accent-white/40 disabled:opacity-30 disabled:cursor-not-allowed"
-                  />
+                  <div
+                    className="relative h-8 w-32 shrink-0"
+                    onPointerDownCapture={(e) => {
+                      if (viewMode === 'list') return;
+                      if (e.button !== 0) return;
+                      setIsPosterSizeSliderPressed(true);
+                    }}
+                  >
+                    <div
+                      className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
+                        viewMode === 'list' ? 'opacity-15' : 'opacity-100'
+                      }`}
+                      style={{
+                        height: POSTER_SIZE_SLIDER_TRACK_H_PX,
+                        borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
+                      }}
+                      aria-hidden
+                    />
+                    <img
+                      src={
+                        viewMode === 'list'
+                          ? '/icons/poster-size-slider-thumb-disabled.svg'
+                          : isPosterSizeSliderPressed
+                            ? '/icons/poster-size-slider-thumb-pressed.svg'
+                            : '/icons/poster-size-slider-thumb.svg'
+                      }
+                      alt=""
+                      width={POSTER_SIZE_SLIDER_THUMB_PX}
+                      height={POSTER_SIZE_SLIDER_THUMB_PX}
+                      className="pointer-events-none absolute top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none"
+                      style={{
+                        left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${Math.max(
+                          0,
+                          Math.min(
+                            1,
+                            (clampPosterSizePx(posterSize) - GRID_POSTER_SIZE_MIN_PX) /
+                              (GRID_POSTER_SIZE_MAX_PX - GRID_POSTER_SIZE_MIN_PX),
+                          ),
+                        )})`,
+                      }}
+                      decoding="async"
+                      aria-hidden
+                    />
+                    <input
+                      type="range"
+                      min={GRID_POSTER_SIZE_MIN_PX}
+                      max={GRID_POSTER_SIZE_MAX_PX}
+                      step={GRID_POSTER_SIZE_STEP_PX}
+                      value={posterSize}
+                      disabled={viewMode === 'list'}
+                      onChange={(e) => setPosterSize(clampPosterSizePx(Number(e.target.value)))}
+                      className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
-                      setPosterSize(Math.min(240, posterSize + GRID_POSTER_SIZE_STEP_PX))
+                      setPosterSize(Math.min(GRID_POSTER_SIZE_MAX_PX, posterSize + GRID_POSTER_SIZE_STEP_PX))
                     }
-                    disabled={viewMode === 'list' || posterSize >= 240}
+                    disabled={viewMode === 'list' || posterSize >= GRID_POSTER_SIZE_MAX_PX}
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Increase poster size"
                   >
-                    {viewMode === 'list' || posterSize >= 240 ? (
+                    {viewMode === 'list' || posterSize >= GRID_POSTER_SIZE_MAX_PX ? (
                       <img
                         src="/icons/poster-size-increase-disabled.svg"
                         alt=""
@@ -2294,7 +2461,24 @@ export default function App() {
         >
           {!isMoviesHydrated ? (
             <div className="flex min-h-[48vh] flex-col items-center justify-center gap-3 text-white/35">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-white/50" />
+              <div className="relative h-8 w-8 shrink-0" aria-hidden>
+                <img
+                  src={LIBRARY_LOADING_FILM_BASE_SRC}
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="absolute inset-0 h-full w-full object-contain pointer-events-none"
+                  decoding="async"
+                />
+                <img
+                  src={LIBRARY_LOADING_REEL_SRC}
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="absolute inset-0 h-full w-full object-contain pointer-events-none animate-spin"
+                  decoding="async"
+                />
+              </div>
               <p className="text-sm font-medium tracking-wide">Loading library…</p>
             </div>
           ) : (
@@ -2517,7 +2701,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setSelectedMovie(null)}
-            className="absolute inset-0 z-[104] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/92 p-4 backdrop-blur-xl md:p-8"
+            className="absolute inset-0 z-[104] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
               key={`trailer-panel-${selectedMovie.id}`}
@@ -2571,7 +2755,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/92 backdrop-blur-xl"
+            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md"
             onClick={closePosterPreview}
             onWheel={(e) => {
               e.preventDefault();
@@ -2855,7 +3039,7 @@ export default function App() {
               setNewMovieTrailerUrl('');
               setAddError('');
             }}
-            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/92 p-4 backdrop-blur-xl md:p-8"
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -3008,7 +3192,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setSelectedMovie(null)}
-            className="fixed inset-0 z-[100] flex cursor-pointer items-center justify-center bg-black/80 p-4 backdrop-blur-xl md:p-12"
+            className="fixed inset-0 z-[100] flex cursor-pointer items-center justify-center bg-black/35 p-4 backdrop-blur-md md:p-12"
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -3415,9 +3599,9 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
     };
   }, [viewMode, isCastOverflowing, movie.cast, size]);
 
-  /** 网格 hover 导演名：溢出时与 starring 同 `marquee` 线速基准（`gridStripMarqueeDurationSec`）。 */
+  /** 列表行与网格 hover：导演名溢出时与片名 / starring 同 `marquee` 线速（`gridStripMarqueeDurationSec`）。 */
   React.useEffect(() => {
-    if (viewMode !== 'grid' || !isDirectorOverflowing) return;
+    if (!isDirectorOverflowing) return;
 
     const measure = () => {
       const node = directorMarqueeStripRef.current;
@@ -3748,12 +3932,35 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           </button>
         </div>
 
-        {/** 默认与片名首行同带；hover 仅用 `translateY` 略下移，与 Trailer 列行内垂直中心对齐（不改 `padding`/`justify`，避免大幅竖直动画） */}
+        {/** 默认与片名首行同带；hover `translateY`；溢出时与 Title 列同横向 marquee（`pr-8` 与 `gridStripMarqueeDurationSec` 与片名一致） */}
         <div className="flex min-h-0 min-w-0 flex-col self-stretch items-center justify-start pt-[66px] text-center text-[13px] leading-5 text-white/60">
           {/** `translate-y`：行高 172、Trailer `items-center` 中心约 86px，片名带首行字中心约 76px → 约 10px；`duration-0` 离开无过渡 */}
-          <span className="block h-5 min-w-0 w-full shrink-0 translate-y-0 truncate text-center transition-[transform,color] duration-0 ease-out will-change-transform group-hover:translate-y-[10px] group-hover:text-white group-hover:duration-300">
-            {formatDirectorName(movie.director)}
-          </span>
+          <div className="h-5 min-w-0 w-full shrink-0 translate-y-0 transition-[transform,color] duration-0 ease-out will-change-transform group-hover:translate-y-[10px] group-hover:text-white group-hover:duration-300">
+            <div className="relative h-5 min-w-0 w-full shrink-0 overflow-hidden">
+              <span
+                ref={directorRef}
+                className={`block w-full truncate text-center text-[13px] font-medium leading-5 text-white/60 transition-colors group-hover:text-white ${
+                  isDirectorOverflowing ? 'opacity-0' : ''
+                }`}
+              >
+                {formatDirectorName(movie.director)}
+              </span>
+              {isDirectorOverflowing ? (
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <div
+                    ref={directorMarqueeStripRef}
+                    className="flex w-max whitespace-nowrap text-[13px] font-medium leading-5 text-white/60 transform-gpu will-change-transform [backface-visibility:hidden] transition-colors group-hover:text-white"
+                    style={{
+                      animation: `marquee ${directorMarqueeDurationSec}s linear infinite`,
+                    }}
+                  >
+                    <span className="pr-8">{formatDirectorName(movie.director)}</span>
+                    <span className="pr-8">{formatDirectorName(movie.director)}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
 
         {/** hover：`flex-1` + `justify-center` + `pt-0`，6 行视口在行高内垂直居中（Title 列已单独 `LIST_TITLE_COLUMN_PT_PX` 解耦） */}
