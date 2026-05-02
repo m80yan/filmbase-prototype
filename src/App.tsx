@@ -8,7 +8,6 @@ import {
   Settings,
   Check,
   X,
-  Minus,
   Upload,
   Download,
   ZoomIn,
@@ -86,6 +85,24 @@ function genreLabelToIconSlug(label: string): string {
   const slug = lower.replace(/\s+/g, '-');
   if (SIDEBAR_GENRE_ICON_SLUGS.has(slug)) return slug;
   return 'fallback';
+}
+
+/**
+ * 网格海报 hover 叠层：按片中顺序保留首次出现的展示用 genre，避免 Sci-Fi / Science Fiction 重复图标。
+ *
+ * @param genres `movie.genre` 原始列表
+ */
+function uniqueNormalizedGenreLabels(genres: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of genres) {
+    const label = normalizeGenreDisplayLabel(raw);
+    if (!label) continue;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
 }
 
 /**
@@ -349,6 +366,30 @@ export default function App() {
     year: false,
     ratings: true
   });
+
+  /** 编辑库模式：`Esc` 退出编辑（其它浮层已占 ESC 时跳过）。 */
+  useEffect(() => {
+    if (!isEditing) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isPosterPreviewOpen) return;
+      if (selectedMovie && modalMode === 'trailer') return;
+      if (selectedMovie && modalMode === 'poster') return;
+      if (isAddModalOpen) return;
+      if (isSortDropdownOpen) return;
+      e.preventDefault();
+      setIsEditing(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isEditing,
+    isPosterPreviewOpen,
+    selectedMovie,
+    modalMode,
+    isAddModalOpen,
+    isSortDropdownOpen,
+  ]);
 
   useEffect(() => {
     if (hasHydratedRef.current) return;
@@ -1255,14 +1296,14 @@ export default function App() {
     <button
       type="button"
       onClick={onClick}
-      className={`group/sidebarrow flex items-center w-full px-2.5 py-1.5 rounded-md text-[13px] transition-colors text-left ${
+      className={`group/sidebarrow flex h-9 w-full items-center px-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
       }`}
     >
       {iconSlug ? (
-        <span className="relative mr-2 h-[18px] w-[18px] shrink-0">
+        <span className="relative mr-[10px] h-[18px] w-[18px] shrink-0">
           <img
             src={`/icons/${iconSlug}.svg`}
             alt=""
@@ -2082,7 +2123,9 @@ export default function App() {
                     type="button"
                     onClick={() => setIsEditing(!isEditing)}
                     className={`group/editlib relative p-1.5 rounded-md transition-colors ${
-                      isEditing ? 'bg-white text-black' : 'text-white/40 hover:text-white hover:bg-white/5'
+                      isEditing
+                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                        : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                     title="Edit Library"
                   >
@@ -2104,7 +2147,29 @@ export default function App() {
                         width={18}
                         height={18}
                         className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          isEditing ? 'opacity-100' : 'opacity-0 group-hover/editlib:opacity-100'
+                          isEditing ? 'opacity-0' : 'opacity-0 group-hover/editlib:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/edit-library-active.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                          isEditing ? 'opacity-100 group-hover/editlib:opacity-0' : 'opacity-0'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/edit-library-active-hover.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                          isEditing ? 'opacity-0 group-hover/editlib:opacity-100' : 'opacity-0'
                         }`}
                         decoding="async"
                         aria-hidden
@@ -2980,6 +3045,74 @@ export default function App() {
   );
 }
 
+/**
+ * Genre 图标 + 延迟提示：悬停满 0.5s 后在图标下方显示展示用名称（深色底、细边，接近顶栏控件提示）。
+ *
+ * @param label 已规范化的 genre 文案，如 `Sci-Fi`
+ * @param iconSizePx 图标边长（px）；网格海报默认 20，列表行传 18
+ */
+function PosterGenreIconWithTooltip({
+  label,
+  iconSizePx = 20,
+}: {
+  label: string;
+  iconSizePx?: number;
+}) {
+  const [tipVisible, setTipVisible] = useState(false);
+  const showTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  const clearShowTimer = useCallback(() => {
+    if (showTimerRef.current !== null) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearShowTimer(), [clearShowTimer]);
+
+  const handleEnter = useCallback(() => {
+    clearShowTimer();
+    showTimerRef.current = window.setTimeout(() => {
+      showTimerRef.current = null;
+      setTipVisible(true);
+    }, 500);
+  }, [clearShowTimer]);
+
+  const handleLeave = useCallback(() => {
+    clearShowTimer();
+    setTipVisible(false);
+  }, [clearShowTimer]);
+
+  const slug = genreLabelToIconSlug(label);
+
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <img
+        src={`/icons/${slug}-hover.svg`}
+        alt=""
+        width={iconSizePx}
+        height={iconSizePx}
+        className="pointer-events-none object-contain"
+        style={{ width: iconSizePx, height: iconSizePx }}
+        decoding="async"
+        aria-hidden
+      />
+      {tipVisible ? (
+        <span
+          className="pointer-events-none absolute left-1/2 top-full z-[60] mt-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-zinc-950/95 px-2 py-1 text-[11px] font-medium text-white shadow-md"
+          role="tooltip"
+        >
+          {label}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 interface MovieCardProps {
   movie: Movie;
   size: number;
@@ -3155,6 +3288,10 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
   const gridPosterShellRef = useRef<HTMLDivElement>(null);
   /** 列表行海报壳（100×150），供 hero 起点。 */
   const listPosterShellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isEditing) setIsSelectedForDeletion(false);
+  }, [isEditing]);
 
   React.useEffect(() => {
     const checkOverflow = () => {
@@ -3405,17 +3542,25 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
                   setIsSelectedForDeletion(true);
                 }
               }}
-              className={`w-4 h-4 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] ${isSelectedForDeletion ? 'bg-[#BA242F]' : 'bg-red-500 active:bg-[#BA242F]'}`}
+              className={`flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90`}
               title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
             >
-              {isSelectedForDeletion ? <X size={10} strokeWidth={3} /> : <Minus size={10} strokeWidth={3} />}
+              <img
+                src={isSelectedForDeletion ? '/icons/poster-delete-confirm.svg' : '/icons/poster-delete.svg'}
+                alt=""
+                width={16}
+                height={16}
+                className="pointer-events-none h-4 w-4 object-contain"
+                decoding="async"
+                aria-hidden
+              />
             </button>
           </div>
         )}
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
             ref={listPosterShellRef}
-            className={`w-[100px] h-[150px] transition-all duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''}`}
+            className={`relative w-[100px] h-[150px] transition-all duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''} ${isEditing ? 'group/posteredit' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               onOpenPosterPreview(listPosterShellRef.current);
@@ -3424,9 +3569,15 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             <img 
               src={movie.posterUrl} 
               alt={movie.title} 
-              className="w-full h-full object-cover"
+              className="relative z-0 h-full w-full object-cover"
               referrerPolicy="no-referrer"
             />
+            {isEditing ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-[15] bg-black/75 opacity-100 transition-opacity duration-300 ease-out group-hover/posteredit:opacity-0"
+                aria-hidden
+              />
+            ) : null}
           </div>
         </div>
         
@@ -3464,12 +3615,21 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             <div className="mt-0.5 w-full truncate text-[13px] font-medium leading-5 text-white/60">
               {formatYearRatingRuntime(movie)}
             </div>
-            {/** genre：与 year 同字号/色；`top` 与 Starring 6 行视口内第 6 行顶齐（不占文档流，不顶动标题/年） */}
+            {/** genre：默认文字；行 hover 时换为 `-hover` 图标 18px + 与海报网格相同的延迟提示 */}
             <div
-              className="pointer-events-none absolute left-0 right-0 z-[1] flex h-5 max-w-full items-center truncate text-[13px] font-medium leading-5 text-white/60 transition-colors group-hover:text-white"
+              className="pointer-events-none absolute left-0 right-0 z-[1] flex h-5 max-w-full items-center text-[13px] font-medium leading-5 text-white/60 transition-colors group-hover:text-white"
               style={{ top: listTitleGenreLineTopPx }}
             >
-              {movie.genre.length > 0 ? movie.genre.join(', ') : '\u00a0'}
+              <span className="min-w-0 flex-1 truncate opacity-100 transition-opacity duration-150 group-hover:opacity-0">
+                {movie.genre.length > 0 ? movie.genre.join(', ') : '\u00a0'}
+              </span>
+              <div className="pointer-events-none absolute inset-0 flex min-w-0 items-center gap-2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
+                {uniqueNormalizedGenreLabels(movie.genre).map((gl) => (
+                  <React.Fragment key={gl}>
+                    <PosterGenreIconWithTooltip label={gl} iconSizePx={18} />
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -3583,7 +3743,11 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
     >
       <div
         ref={gridPosterShellRef}
-        className={`relative aspect-[2/3] ${isEditing ? 'rounded-xl' : 'rounded-none'} group-hover:rounded-none overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}
+        className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${
+          isEditing
+            ? 'group/posteredit rounded-xl group-hover/posteredit:rounded-none group-hover:rounded-none'
+            : 'rounded-none group-hover:rounded-none'
+        } ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}
       >
         {isEditing && (
           <button
@@ -3595,10 +3759,18 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
                 setIsSelectedForDeletion(true);
               }
             }}
-            className={`absolute top-2 left-2 z-50 w-4 h-4 rounded-full flex items-center justify-center text-white shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] ${isSelectedForDeletion ? 'bg-[#BA242F]' : 'bg-red-500 active:bg-[#BA242F]'}`}
+            className="absolute left-2 top-2 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
             title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
           >
-            {isSelectedForDeletion ? <X size={10} strokeWidth={3} /> : <Minus size={10} strokeWidth={3} />}
+            <img
+              src={isSelectedForDeletion ? '/icons/poster-delete-confirm.svg' : '/icons/poster-delete.svg'}
+              alt=""
+              width={16}
+              height={16}
+              className="pointer-events-none h-4 w-4 object-contain"
+              decoding="async"
+              aria-hidden
+            />
           </button>
         )}
         <button
@@ -3616,10 +3788,15 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
 	          className="pointer-events-none relative z-0 h-full w-full object-cover"
 	          referrerPolicy="no-referrer"
 	        />
-	        
+        {isEditing ? (
+          <div
+            className="pointer-events-none absolute inset-0 z-[15] bg-black/75 opacity-100 transition-opacity duration-300 ease-out group-hover/posteredit:opacity-0"
+            aria-hidden
+          />
+        ) : null}
 	        {/* Selection Overlay */}
         <div 
-          className={`absolute inset-0 bg-black/50 pointer-events-none transition-opacity duration-500 ease-in-out ${isSelectedForDeletion ? 'opacity-100' : 'opacity-0'}`}
+          className={`absolute inset-0 z-[16] bg-black/50 pointer-events-none transition-opacity duration-500 ease-in-out ${isSelectedForDeletion ? 'opacity-100' : 'opacity-0'}`}
         />
         
         {/* Hover Metadata Overlay */}
@@ -3640,8 +3817,12 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
                 {formatYearRatingRuntime(movie)}
               </span>
             </div>
-            <div>
-              <span className="truncate block">{movie.genre.join(', ')}</span>
+            <div className="mt-[8px] flex min-h-0 flex-wrap items-center gap-2">
+              {uniqueNormalizedGenreLabels(movie.genre).map((label) => (
+                <React.Fragment key={label}>
+                  <PosterGenreIconWithTooltip label={label} />
+                </React.Fragment>
+              ))}
             </div>
             {/** `mt-[1lh]`：合并 year/runtime 少一行后，用一行高垫回 starring 的 Y 位置 */}
             <div className="mt-[1lh] pt-2">
