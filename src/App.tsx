@@ -10,7 +10,6 @@ import {
   X,
   Upload,
   Download,
-  ZoomIn,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
@@ -1340,13 +1339,13 @@ export default function App() {
       }`}
     >
       {iconSlug ? (
-        <span className="relative mr-[10px] h-[18px] w-[18px] shrink-0">
+        <span className="relative mr-[10px] h-[20px] w-[20px] shrink-0">
           <img
             src={`/icons/${iconSlug}.svg`}
             alt=""
-            width={18}
-            height={18}
-            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+            width={20}
+            height={20}
+            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
               active ? 'opacity-0' : 'opacity-100 group-hover/sidebarrow:opacity-0'
             }`}
             decoding="async"
@@ -1355,9 +1354,9 @@ export default function App() {
           <img
             src={`/icons/${iconSlug}-hover.svg`}
             alt=""
-            width={18}
-            height={18}
-            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+            width={20}
+            height={20}
+            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
               active ? 'opacity-100' : 'opacity-0 group-hover/sidebarrow:opacity-100'
             }`}
             decoding="async"
@@ -1471,18 +1470,18 @@ export default function App() {
           <img
             src="/icons/toggle-sidebar.svg"
             alt=""
-            width={18}
-            height={18}
-            className="pointer-events-none block h-[18px] w-[18px] opacity-100 transition-opacity group-hover/togglesidebar:opacity-0"
+            width={20}
+            height={20}
+            className="pointer-events-none block h-[20px] w-[20px] opacity-100 transition-opacity group-hover/togglesidebar:opacity-0"
             decoding="async"
             aria-hidden
           />
           <img
             src="/icons/toggle-sidebar-hover.svg"
             alt=""
-            width={18}
-            height={18}
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/togglesidebar:opacity-100"
+            width={20}
+            height={20}
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[20px] w-[20px] -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/togglesidebar:opacity-100"
             decoding="async"
             aria-hidden
           />
@@ -1665,13 +1664,13 @@ export default function App() {
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <span className="relative block h-[18px] w-[18px] shrink-0">
+            <span className="relative block h-[20px] w-[20px] shrink-0">
               <img
                 src="/icons/films.svg"
                 alt=""
-                width={18}
-                height={18}
-                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                width={20}
+                height={20}
+                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                   isAllFilmsDefaultView
                     ? 'opacity-0'
                     : 'opacity-100 group-hover/allfilms:opacity-0'
@@ -1682,9 +1681,9 @@ export default function App() {
               <img
                 src="/icons/films-hover.svg"
                 alt=""
-                width={18}
-                height={18}
-                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                width={20}
+                height={20}
+                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                   isAllFilmsDefaultView
                     ? 'opacity-100'
                     : 'opacity-0 group-hover/allfilms:opacity-100'
@@ -1710,13 +1709,13 @@ export default function App() {
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <span className="relative block h-[18px] w-[18px] shrink-0">
+            <span className="relative block h-[20px] w-[20px] shrink-0">
               <img
                 src="/icons/recently-added.svg"
                 alt=""
-                width={18}
-                height={18}
-                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                width={20}
+                height={20}
+                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                   isRecentlyAddedFilter
                     ? 'opacity-0'
                     : 'opacity-100 group-hover/recent:opacity-0'
@@ -1727,9 +1726,9 @@ export default function App() {
               <img
                 src="/icons/recently-added-hover.svg"
                 alt=""
-                width={18}
-                height={18}
-                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                width={20}
+                height={20}
+                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                   isRecentlyAddedFilter
                     ? 'opacity-100'
                     : 'opacity-0 group-hover/recent:opacity-100'
@@ -2130,7 +2129,7 @@ export default function App() {
                       alt=""
                       width={18}
                       height={18}
-                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity duration-150 ease-out ${
                         isScopedPosterUploadOpen
                           ? 'opacity-0'
                           : 'opacity-100 group-hover/uploadprev:opacity-0'
@@ -2143,7 +2142,7 @@ export default function App() {
                       alt=""
                       width={18}
                       height={18}
-                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity duration-150 ease-out ${
                         isScopedPosterUploadOpen
                           ? 'opacity-100'
                           : 'opacity-0 group-hover/uploadprev:opacity-100'
@@ -3092,7 +3091,7 @@ export default function App() {
  * Genre 图标 + 延迟提示：悬停满 0.5s 后在图标下方显示展示用名称（深色底、细边，接近顶栏控件提示）。
  *
  * @param label 已规范化的 genre 文案，如 `Sci-Fi`
- * @param iconSizePx 图标边长（px）；网格海报默认 20，列表行传 18
+ * @param iconSizePx 图标边长（px）；默认 20（列表行与网格海报 hover 一致）
  */
 function PosterGenreIconWithTooltip({
   label,
@@ -3165,7 +3164,7 @@ interface MovieCardProps {
   onRatingChange: (rating: number) => void;
   onPlayTrailer: () => void;
   onShowPoster: () => void;
-  /** 全屏大图预览（列表点海报 / 网格 ZoomIn）；传入海报外壳元素以启用 hero。 */
+  /** 全屏大图预览（列表点海报 / 网格 hover 预览热区）；传入海报外壳元素以启用 hero。 */
   onOpenPosterPreview: (posterSourceElement: HTMLElement | null) => void;
   key?: React.Key;
 }
@@ -3203,6 +3202,10 @@ const CAST_MARQUEE_REF_DURATION_SEC = 8;
 const LIST_CAST_LINE_PX = 20;
 /** 列表 Title 列 `padding-top`（px）：小于其他列 `pt-[66px]`，为 `text-base`/`leading-6` 片名腾高且保持 year·runtime 与 starring 第 2 行对齐。 */
 const LIST_TITLE_COLUMN_PT_PX = 62;
+/**
+ * 网格海报 hover 右上角「预览」点击热区边长（px）：与 overlay 内「Play Trailer」全宽胶囊同高（`py-2.5` + `text-[12px]` 单行约 40–42px）。
+ */
+const GRID_POSTER_PREVIEW_HIT_PX = 42;
 /** 单行平移时长（ms）。 */
 const LIST_CAST_SCROLL_MOTION_MS = 420;
 /** 每步之间停顿（ms），与 motion 衔接为一步总周期。 */
@@ -3658,7 +3661,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
             <div className="mt-0.5 w-full truncate text-[13px] font-medium leading-5 text-white/60">
               {formatYearRatingRuntime(movie)}
             </div>
-            {/** genre：默认文字；行 hover 时换为 `-hover` 图标 18px + 与海报网格相同的延迟提示 */}
+            {/** genre：默认文字；行 hover 时换为 `-hover` 图标 20px + 与海报网格相同的延迟提示 */}
             <div
               className="pointer-events-none absolute left-0 right-0 z-[1] flex h-5 max-w-full items-center text-[13px] font-medium leading-5 text-white/60 transition-colors group-hover:text-white"
               style={{ top: listTitleGenreLineTopPx }}
@@ -3669,7 +3672,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
               <div className="pointer-events-none absolute inset-0 flex min-w-0 items-center gap-2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
                 {uniqueNormalizedGenreLabels(movie.genre).map((gl) => (
                   <React.Fragment key={gl}>
-                    <PosterGenreIconWithTooltip label={gl} iconSizePx={18} />
+                    <PosterGenreIconWithTooltip label={gl} />
                   </React.Fragment>
                 ))}
               </div>
@@ -3844,7 +3847,7 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
         
         {/* Hover Metadata Overlay */}
         <div
-          className={`absolute inset-0 z-20 flex flex-col justify-end bg-black/50 p-4 opacity-0 transition-opacity space-y-2 ${
+          className={`absolute inset-0 z-20 flex flex-col justify-end bg-black/75 p-4 opacity-0 transition-opacity space-y-2 ${
             isEditing
               ? 'pointer-events-none'
               : 'pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100'
@@ -3909,13 +3912,39 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
           <button
             type="button"
             title="Preview poster"
+            aria-label="Preview poster"
             onClick={(e) => {
               e.stopPropagation();
               onOpenPosterPreview(gridPosterShellRef.current);
             }}
-            className="pointer-events-auto absolute right-2 top-2 z-30 flex h-6 w-6 items-center justify-center bg-transparent p-0 text-white opacity-0 transition-opacity group-hover:opacity-100"
+            style={{
+              width: GRID_POSTER_PREVIEW_HIT_PX,
+              height: GRID_POSTER_PREVIEW_HIT_PX,
+              top: 10,
+              right: 10,
+            }}
+            className="group/posterzoom pointer-events-auto absolute z-30 flex items-center justify-center rounded-[10px] bg-white/20 p-0 opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <ZoomIn size={24} strokeWidth={2} className="text-white" aria-hidden />
+            <span className="relative inline-flex h-6 w-6 shrink-0">
+              <img
+                src="/icons/zoom-in.svg"
+                alt=""
+                width={24}
+                height={24}
+                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 object-contain opacity-100 transition-opacity group-hover/posterzoom:opacity-0"
+                decoding="async"
+                aria-hidden
+              />
+              <img
+                src="/icons/zoom-in-hover.svg"
+                alt=""
+                width={24}
+                height={24}
+                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 object-contain opacity-0 transition-opacity group-hover/posterzoom:opacity-100"
+                decoding="async"
+                aria-hidden
+              />
+            </span>
           </button>
         )}
       </div>
