@@ -3,12 +3,9 @@ import {
   ChevronDown, 
   ChevronRight,
   ChevronLeft,
-  Grid, 
-  List, 
+  Grid,
   Star, 
-  Clock, 
-  Film, 
-  Library,
+  Film,
   Filter,
   Settings,
   Check,
@@ -1188,6 +1185,14 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
+  /** 侧栏「All Films」是否为默认筛选态（与 `resetFilters` 后一致）。 */
+  const isAllFilmsDefaultView =
+    !isRecentlyAddedFilter &&
+    selectedGenres.length === 0 &&
+    selectedYears.length === 0 &&
+    selectedRatings.length === 0 &&
+    !searchQuery;
+
   const SidebarItem = ({ active, label, onClick }: { active: boolean, label: string | React.ReactNode, onClick: () => void }) => (
     <button 
       onClick={onClick}
@@ -1487,18 +1492,47 @@ export default function App() {
         </div>
 
 	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pt-4 p-4 min-w-[256px]">
-          <button 
+          <button
+            type="button"
             onClick={resetFilters}
-            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-              !isRecentlyAddedFilter && selectedGenres.length === 0 && selectedYears.length === 0 && selectedRatings.length === 0 && !searchQuery
-                ? 'text-white' 
+            className={`group/allfilms flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+              isAllFilmsDefaultView
+                ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <Film size={18} />
+            <span className="relative block h-[18px] w-[18px] shrink-0">
+              <img
+                src="/icons/films.svg"
+                alt=""
+                width={18}
+                height={18}
+                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                  isAllFilmsDefaultView
+                    ? 'opacity-0'
+                    : 'opacity-100 group-hover/allfilms:opacity-0'
+                }`}
+                decoding="async"
+                aria-hidden
+              />
+              <img
+                src="/icons/films-hover.svg"
+                alt=""
+                width={18}
+                height={18}
+                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                  isAllFilmsDefaultView
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover/allfilms:opacity-100'
+                }`}
+                decoding="async"
+                aria-hidden
+              />
+            </span>
             All Films
           </button>
-          <button 
+          <button
+            type="button"
             onClick={() => {
               setSelectedGenres([]);
               setSelectedYears([]);
@@ -1506,13 +1540,40 @@ export default function App() {
               setSearchQuery('');
               setIsRecentlyAddedFilter(true);
             }}
-            className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-              isRecentlyAddedFilter 
-                ? 'text-white' 
+            className={`group/recent flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+              isRecentlyAddedFilter
+                ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <Clock size={18} />
+            <span className="relative block h-[18px] w-[18px] shrink-0">
+              <img
+                src="/icons/recently-added.svg"
+                alt=""
+                width={18}
+                height={18}
+                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                  isRecentlyAddedFilter
+                    ? 'opacity-0'
+                    : 'opacity-100 group-hover/recent:opacity-0'
+                }`}
+                decoding="async"
+                aria-hidden
+              />
+              <img
+                src="/icons/recently-added-hover.svg"
+                alt=""
+                width={18}
+                height={18}
+                className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                  isRecentlyAddedFilter
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover/recent:opacity-100'
+                }`}
+                decoding="async"
+                aria-hidden
+              />
+            </span>
             Recently Added
           </button>
         </div>
@@ -1620,17 +1681,87 @@ export default function App() {
             ) : (
               <>
                 <div className="flex h-9 min-w-[5.5rem] shrink-0 items-center justify-start gap-2">
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setViewMode('grid')}
-                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                    title="Grid view"
+                    aria-label="Grid view"
+                    aria-pressed={viewMode === 'grid'}
+                    className={`group/viewgrid relative p-1.5 rounded-md transition-colors ${
+                      viewMode === 'grid'
+                        ? 'bg-white/10 text-white'
+                        : 'text-white/40 hover:text-white hover:bg-white/5'
+                    }`}
                   >
-                    <Grid size={16} />
+                    <span className="relative block h-4 w-4 shrink-0">
+                      <img
+                        src="/icons/view-grid.svg"
+                        alt=""
+                        width={16}
+                        height={16}
+                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                          viewMode === 'grid'
+                            ? 'opacity-0'
+                            : 'opacity-100 group-hover/viewgrid:opacity-0'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/view-grid-hover.svg"
+                        alt=""
+                        width={16}
+                        height={16}
+                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                          viewMode === 'grid'
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover/viewgrid:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </span>
                   </button>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setViewMode('list')}
-                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                    title="List view"
+                    aria-label="List view"
+                    aria-pressed={viewMode === 'list'}
+                    className={`group/viewlist relative p-1.5 rounded-md transition-colors ${
+                      viewMode === 'list'
+                        ? 'bg-white/10 text-white'
+                        : 'text-white/40 hover:text-white hover:bg-white/5'
+                    }`}
                   >
-                    <List size={16} />
+                    <span className="relative block h-4 w-4 shrink-0">
+                      <img
+                        src="/icons/view-list.svg"
+                        alt=""
+                        width={16}
+                        height={16}
+                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                          viewMode === 'list'
+                            ? 'opacity-0'
+                            : 'opacity-100 group-hover/viewlist:opacity-0'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img
+                        src="/icons/view-list-hover.svg"
+                        alt=""
+                        width={16}
+                        height={16}
+                        className={`pointer-events-none absolute left-0 top-0 h-4 w-4 transition-opacity ${
+                          viewMode === 'list'
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover/viewlist:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </span>
                   </button>
                 </div>
 
