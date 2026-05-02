@@ -337,6 +337,8 @@ export default function App() {
     startPanY: 0,
     moved: false,
   });
+  /** 指针是否在海报预览 `img` 上（用于 Z 键仅在图上生效）。 */
+  const previewPointerOverImgRef = useRef(false);
   /** 主内容滚动区（海报预览 overlay 仅覆盖此区域，用于量测可用宽高）。 */
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
   /** 供 pointer 拖拽时读取最新布局（避免闭包陈旧）。 */
@@ -654,6 +656,41 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isPosterPreviewOpen, closePosterPreview]);
+
+  /**
+   * 海报预览打开且指针在预览图上：`Z` 在 Fit 与 100% 间切换（不锚 pan；忽略连发；不在表单控件内触发）。
+   */
+  useEffect(() => {
+    if (!isPosterPreviewOpen) {
+      previewPointerOverImgRef.current = false;
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.key !== 'z' && e.key !== 'Z') return;
+      const ae = document.activeElement;
+      if (
+        ae instanceof HTMLInputElement ||
+        ae instanceof HTMLTextAreaElement ||
+        ae instanceof HTMLSelectElement ||
+        (ae instanceof HTMLElement && ae.isContentEditable)
+      ) {
+        return;
+      }
+      if (!previewPointerOverImgRef.current) return;
+      const L = posterPreviewLayoutRef.current;
+      if (!L || L.sFill >= 1 - 1e-6) return;
+      const fitPct = getPreviewSliderMinPercent(L.sFill);
+      e.preventDefault();
+      setPreviewSliderPercent((p) => (p <= fitPct ? 100 : fitPct));
+      setPreviewPan({ x: 0, y: 0 });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      previewPointerOverImgRef.current = false;
+    };
+  }, [isPosterPreviewOpen]);
 
   /** 主区内预告片 overlay 打开时 ESC 关闭。 */
   useEffect(() => {
@@ -2568,6 +2605,12 @@ export default function App() {
                     alt={posterPreviewMovie.title}
                     referrerPolicy="no-referrer"
                     draggable={false}
+                    onPointerEnter={() => {
+                      previewPointerOverImgRef.current = true;
+                    }}
+                    onPointerLeave={() => {
+                      previewPointerOverImgRef.current = false;
+                    }}
                     className="select-none object-contain"
                     style={
                       posterPreviewLayout
