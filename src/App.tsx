@@ -1403,6 +1403,10 @@ export default function App() {
     selectedRatings.length === 0 &&
     !searchQuery;
 
+  /**
+   * 侧栏 Genre / Year 筛选项行。左内边距为原 `px-2.5`（10px）+ 14px = `pl-6`（24px），右为 `pr-2.5`；图标与文案间距仍为 `mr-[10px]`。
+   * 底栏 All Films、Recently Added 不使用本组件。
+   */
   const SidebarItem = ({
     active,
     label,
@@ -1418,7 +1422,7 @@ export default function App() {
     <button
       type="button"
       onClick={onClick}
-      className={`group/sidebarrow flex h-9 w-full items-center px-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
+      className={`group/sidebarrow flex h-9 w-full items-center pl-6 pr-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
@@ -2652,7 +2656,6 @@ export default function App() {
           )}
           <AnimatePresence mode="popLayout">
             <motion.div 
-              layout
               className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
               style={viewMode === 'grid' ? { 
                 gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
@@ -3559,6 +3562,7 @@ const SIDEBAR_MY_RATING_HOVER_LABEL_UPPER: Record<number, string> = {
 
 /**
  * 侧栏「My Rating」下单条筛选：默认仅星标（N 颗粉星或 Unrated 五颗描边空星）；悬停时星标不隐藏，星排与文案间距同侧栏 Genre 图标与文案（`mr-[10px]`），标签样式与海报星级 hover 一致（不改行高与背景态）。
+ * 左内边距与 `SidebarItem` 一致：`pl-6 pr-2.5`（较原 `px-2.5` 整体右移 14px），与 Genre/Year 条目左缘对齐。
  *
  * @param rating 筛选项分值 `0`…`5`（与 `selectedRatings` 一致）
  */
@@ -3584,7 +3588,7 @@ function SidebarMyRatingFilterRow({
       type="button"
       onClick={onClick}
       aria-label={aria}
-      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md px-2.5 py-0 text-left text-[13px] transition-colors ${
+      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md pl-6 pr-2.5 py-0 text-left text-[13px] transition-colors ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
@@ -3908,11 +3912,10 @@ function MovieCard({
   if (viewMode === 'list') {
     return (
       <motion.div
-        layout
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 20 }}
-        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none hover:bg-white/5 border-b border-[#292929] transition-colors cursor-pointer w-full`}
+        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none hover:bg-white/5 border-b border-[#292929] transition-[background-color] cursor-pointer w-full`}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
           setIsListStarringMarqueeHover(false);
@@ -3948,7 +3951,7 @@ function MovieCard({
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
             ref={listPosterShellRef}
-            className={`relative w-[100px] h-[150px] transition-all duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''} ${isEditing ? 'group/posteredit' : ''}`}
+            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''} ${isEditing ? 'group/posteredit' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               onOpenPosterPreview(listPosterShellRef.current);
@@ -4157,7 +4160,7 @@ function MovieCard({
     >
       <div
         ref={gridPosterShellRef}
-        className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-all duration-300 ease-out origin-bottom border-none ${
+        className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-transform duration-300 ease-out origin-bottom border-none ${
           isEditing
             ? 'group/posteredit rounded-xl group-hover/posteredit:rounded-none group-hover:rounded-none'
             : 'rounded-none group-hover:rounded-none'
