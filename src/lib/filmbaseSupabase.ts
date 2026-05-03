@@ -1,12 +1,16 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import type { Movie, MovieCastDetail } from '../types';
 
 const SAVED_MOVIES_TABLE = 'filmbase_saved_movies';
-/** 公共 demo 片单（列与 `filmbase_saved_movies` 一致，但无 `owner_id`） */
+/** 共享公共片单：所有用户读写的唯一可见库表（无 `owner_id`，主键 `movie_id`）。 */
 const PUBLIC_MOVIES_TABLE = 'filmbase_public_movies';
 const POSTERS_BUCKET = 'filmbase-posters';
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 const LOCALSTORAGE_MIGRATION_MARKER = 'filmbase_supabase_migrated_v1';
+/** 一次性把当前匿名用户的 saved → public 迁移标记。 */
+const LOCALSTORAGE_SAVED_TO_PUBLIC_MARKER = 'filmbase_saved_to_public_migrated_v1';
+/** 共享海报存放路径前缀；所有用户共享同一对象，便于后续 sign 出统一 URL。 */
+const PUBLIC_POSTER_PATH_PREFIX = 'shared';
 
 type SavedMovieRow = {
   owner_id: string;
@@ -67,6 +71,11 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
 function posterStoragePath(uid: string, movieId: string): string {
   return `${uid}/${movieId}/poster.jpg`;
+}
+
+/** 共享海报路径：`shared/{movieId}/poster.jpg`；与具体用户 uid 解耦。 */
+function publicPosterStoragePath(movieId: string): string {
+  return `${PUBLIC_POSTER_PATH_PREFIX}/${movieId}/poster.jpg`;
 }
 
 function posterUrlForUIFromSignedUrl(signedUrl: string): string {
@@ -633,5 +642,440 @@ export async function upsertSavedMovieFromUI(
   movie: Movie
 ): Promise<void> {
   await upsertSavedMovieRow(supabase, uid, movie);
+}
+
+/**
+ * 校验该 storage 路径仍存在，并刷新签名 URL（带 cache-buster），随后把公共行的
+ * `poster_storage_path` 设为该路径，`poster_url` 置空（以 storage 为唯一来源）。
+ *
+ * 适用于「Use Storage Poster」按钮：当其它用户已上传过更高分辨率海报、
+ * 而本地行 cache 出现旧 signed URL 时，从 Storage 重新拉取并同步到 UI。
+ *
+ * @param movie 当前选中的影片；优先使用 `movie.posterStoragePath`，否则按 shared 路径解析。
+ */
+export async function syncPublicMoviePosterFromStorage(
+  supabase: SupabaseClient,
+  movie: Movie
+): Promise<Movie> {
+  const path = movie.posterStoragePath?.trim() || publicPosterStoragePath(movie.id);
+
+  const { data: blob, error: downloadError } = await supabase.storage
+    .from(POSTERS_BUCKET)
+    .download(path);
+  if (downloadError) throw downloadError;
+  if (!blob || blob.size < 1) {
+    throw new Error('Storage 中该路径无有效海报文件。');
+  }
+
+  signedUrlCache.delete(path);
+  const signedUrl = await storagePathToSignedUrl(supabase, path);
+  const signedPosterUrl = withCacheBuster(signedUrl, Date.now());
+
+  const updated: Movie = {
+    ...movie,
+    posterUrl: signedPosterUrl,
+    posterStoragePath: path,
+  };
+
+  await updatePublicMoviePoster(supabase, movie.id, {
+    storagePath: path,
+    posterUrl: null,
+  });
+  return updated;
+}
+
+/**
+ * 把 `Movie` 转换为 `filmbase_public_movies` 行（无 `owner_id`）。
+ * 海报来源：`posterStoragePath` 优先；否则使用 `posterUrl`（外链）。
+ */
+function movieToPublicRecord(movie: Movie): LibraryMovieRow {
+  const storagePath = movie.posterStoragePath ?? null;
+  const posterFallbackPlaceholder = 'https://picsum.photos/seed/movie/400/600';
+  const externalPoster = movie.posterUrl?.startsWith('http')
+    && !movie.posterUrl.includes('/storage/v1/object/sign/')
+    ? movie.posterUrl
+    : null;
+
+  return {
+    movie_id: movie.id,
+    title: movie.title ?? null,
+    year: typeof movie.year === 'number' ? movie.year : null,
+    genre: movie.genre ?? [],
+    imdb_rating: typeof movie.imdbRating === 'number' ? movie.imdbRating : null,
+    rotten_tomatoes: typeof movie.rottenTomatoes === 'number' ? movie.rottenTomatoes : null,
+    personal_rating: typeof movie.personalRating === 'number' ? movie.personalRating : null,
+
+    poster_url: storagePath ? null : externalPoster ?? posterFallbackPlaceholder,
+    poster_storage_path: storagePath,
+
+    director: movie.director ?? null,
+    language: movie.language ?? null,
+    runtime: movie.runtime ?? null,
+    cast_members: movie.cast ?? [],
+    trailer_url: movie.trailerUrl ?? null,
+    date_added: movie.dateAdded
+      ? new Date(movie.dateAdded).toISOString()
+      : new Date().toISOString(),
+
+    is_favorite: movie.isFavorite ?? false,
+    badge: movie.badge ?? null,
+
+    content_rating: movie.contentRating?.trim() || null,
+    plot: movie.plot?.trim() || null,
+    writer: movie.writer?.trim() || null,
+    tagline: movie.tagline?.trim() || null,
+    release_date: movie.releaseDate?.trim() || null,
+    country_of_origin: movie.countryOfOrigin?.trim() || null,
+    also_known_as: movie.alsoKnownAs?.length ? movie.alsoKnownAs : [],
+    production_companies: movie.productionCompanies?.length ? movie.productionCompanies : [],
+    box_office: movie.boxOffice?.trim() || null,
+    cast_details: movie.castDetails?.length ? movie.castDetails : [],
+  };
+}
+
+/**
+ * 写入 / 更新共享公共片单一行。任何已登录用户都可调用（受 RLS 约束）。
+ * 失败时抛错；调用方负责显示用户可见的错误。
+ */
+export async function upsertPublicMovie(
+  supabase: SupabaseClient,
+  movie: Movie
+): Promise<void> {
+  const record = movieToPublicRecord(movie);
+  const { error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .upsert(record, { onConflict: 'movie_id' });
+  if (error) throw error;
+}
+
+/**
+ * 仅更新公共行的 `trailer_url`。比 full upsert 更轻、且不会覆盖其它字段。
+ */
+export async function updatePublicMovieTrailerUrl(
+  supabase: SupabaseClient,
+  movieId: string,
+  trailerUrl: string
+): Promise<void> {
+  const { error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .update({ trailer_url: trailerUrl })
+    .eq('movie_id', movieId);
+  if (error) throw error;
+}
+
+/**
+ * 仅更新公共行的海报字段（`poster_storage_path` / `poster_url`）。
+ * `storagePath` 非空时优先使用 storage 路径；否则使用外链 `posterUrl`。
+ */
+export async function updatePublicMoviePoster(
+  supabase: SupabaseClient,
+  movieId: string,
+  args: { storagePath?: string | null; posterUrl?: string | null }
+): Promise<void> {
+  const storagePath = args.storagePath?.trim() || null;
+  const posterUrl = args.posterUrl?.trim() || null;
+  const { error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .update({
+      poster_storage_path: storagePath,
+      poster_url: storagePath ? null : posterUrl,
+    })
+    .eq('movie_id', movieId);
+  if (error) throw error;
+}
+
+/**
+ * 删除共享公共片单中的某行。注意：此操作对所有用户可见。
+ * 不会清理 Storage 中的共享海报对象，避免误删其它仍在使用的资源。
+ */
+export async function deletePublicMovie(
+  supabase: SupabaseClient,
+  movieId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .delete()
+    .eq('movie_id', movieId);
+  if (error) throw error;
+}
+
+/**
+ * 上传原始海报文件到共享路径，并回填 signed URL + storage path。
+ *
+ * Storage 路径：`shared/{movieId}/poster.jpg`，与具体用户 uid 解耦，
+ * 便于其它用户读取同一对象并显示同一张海报。
+ *
+ * 注意：bucket 仍为私有；需要 Storage 策略允许已认证用户读 `shared/*`。
+ */
+export async function uploadPublicPosterFileAndSign(
+  supabase: SupabaseClient,
+  movieId: string,
+  file: File
+): Promise<{ posterStoragePath: string; signedPosterUrl: string }> {
+  const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
+  if (!allowed.has(file.type)) {
+    throw new Error('Unsupported image type. Please upload JPEG, PNG, or WebP.');
+  }
+
+  const path = publicPosterStoragePath(movieId);
+
+  const { error: uploadError } = await supabase.storage
+    .from(POSTERS_BUCKET)
+    .upload(path, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: true,
+    });
+  if (uploadError) throw uploadError;
+
+  signedUrlCache.delete(path);
+  const signedUrl = await storagePathToSignedUrl(supabase, path);
+  const cacheBusted = withCacheBuster(signedUrl, Date.now());
+  return { posterStoragePath: path, signedPosterUrl: cacheBusted };
+}
+
+/**
+ * 按 `movie_id` 拉取一条公共行并 hydrate（处理 storage 海报签名）。
+ * 用于 realtime INSERT/UPDATE 后，把单条行同步到 UI。
+ */
+export async function loadPublicMovieById(
+  supabase: SupabaseClient,
+  movieId: string
+): Promise<Movie | null> {
+  const { data, error } = await supabase
+    .from(PUBLIC_MOVIES_TABLE)
+    .select(LIBRARY_MOVIE_SELECT_COLUMNS)
+    .eq('movie_id', movieId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const rows = [data as unknown as LibraryMovieRow];
+  const movies = await hydrateMoviesFromLibraryRows(supabase, rows);
+  return movies[0] ?? null;
+}
+
+type PublicMoviesRealtimeHandlers = {
+  onUpsert: (movie: Movie) => void;
+  onDelete: (movieId: string) => void;
+  onError?: (err: unknown) => void;
+};
+
+/**
+ * 订阅 `filmbase_public_movies` 行变更。返回的 `unsubscribe` 用于断开。
+ * INSERT/UPDATE 自动按 `movie_id` 拉取最新行并 hydrate；DELETE 仅返回 `movie_id`。
+ *
+ * 注意：需要在 Supabase 控制台为该表开启 Realtime（通常默认开启）。
+ */
+export function subscribeToPublicMovies(
+  supabase: SupabaseClient,
+  handlers: PublicMoviesRealtimeHandlers
+): () => void {
+  let channel: RealtimeChannel | null = null;
+  try {
+    channel = supabase
+      .channel('public:filmbase_public_movies')
+      .on(
+        'postgres_changes' as never,
+        { event: '*', schema: 'public', table: PUBLIC_MOVIES_TABLE },
+        (payload: {
+          eventType?: 'INSERT' | 'UPDATE' | 'DELETE';
+          new?: Record<string, unknown>;
+          old?: Record<string, unknown>;
+        }) => {
+          void (async () => {
+            try {
+              if (payload.eventType === 'DELETE') {
+                const oldId =
+                  typeof payload.old?.movie_id === 'string' ? payload.old.movie_id : null;
+                if (oldId) handlers.onDelete(oldId);
+                return;
+              }
+              const newId =
+                typeof payload.new?.movie_id === 'string' ? payload.new.movie_id : null;
+              if (!newId) return;
+              const movie = await loadPublicMovieById(supabase, newId);
+              if (movie) handlers.onUpsert(movie);
+            } catch (err) {
+              handlers.onError?.(err);
+            }
+          })();
+        }
+      )
+      .subscribe();
+  } catch (err) {
+    handlers.onError?.(err);
+  }
+
+  return () => {
+    if (channel) {
+      try {
+        void supabase.removeChannel(channel);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+}
+
+/**
+ * 把当前匿名用户的 `filmbase_saved_movies` 数据合并迁移到 `filmbase_public_movies`。
+ * - 标记保存在 localStorage：`filmbase_saved_to_public_migrated_v1_<uid>`，幂等。
+ * - 字段合并规则：
+ *   - 公共行 **存在** 时，仅以 saved 中**非空**字段覆盖公共行的**空字段**。
+ *   - 公共行 **不存在** 时，直接以 saved 行写入（保留高分辨率海报路径与外链）。
+ *   - `personal_rating` 与 `is_favorite` 取较大值（0/false 不覆盖非 0/true）。
+ *   - 数组字段（cast / castDetails / alsoKnownAs / productionCompanies / genre）：取较长者。
+ *
+ * 失败时整体抛错；调用方决定是否吞错（迁移不应阻塞 UI 加载）。
+ */
+export async function migrateSavedMoviesToPublic(
+  supabase: SupabaseClient,
+  uid: string
+): Promise<{ migrated: number; merged: number; skipped: number }> {
+  const markerKey = `${LOCALSTORAGE_SAVED_TO_PUBLIC_MARKER}_${uid}`;
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(markerKey) === 'true') {
+    return { migrated: 0, merged: 0, skipped: 0 };
+  }
+
+  const { data: savedData, error: savedErr } = await supabase
+    .from(SAVED_MOVIES_TABLE)
+    .select(['owner_id', LIBRARY_MOVIE_SELECT_COLUMNS].join(','))
+    .eq('owner_id', uid);
+  if (savedErr) throw savedErr;
+
+  const savedRows = ((savedData ?? []) as unknown as SavedMovieRow[]).map(
+    ({ owner_id: _ownerId, ...rest }) => rest as LibraryMovieRow
+  );
+  if (!savedRows.length) {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(markerKey, 'true');
+    return { migrated: 0, merged: 0, skipped: 0 };
+  }
+
+  const ids = savedRows.map((r) => r.movie_id).filter((s): s is string => !!s);
+  let publicByIdMap = new Map<string, LibraryMovieRow>();
+  if (ids.length) {
+    const { data: publicData, error: publicErr } = await supabase
+      .from(PUBLIC_MOVIES_TABLE)
+      .select(LIBRARY_MOVIE_SELECT_COLUMNS)
+      .in('movie_id', ids);
+    if (publicErr) throw publicErr;
+    publicByIdMap = new Map(
+      ((publicData ?? []) as unknown as LibraryMovieRow[]).map((r) => [r.movie_id, r])
+    );
+  }
+
+  let migrated = 0;
+  let merged = 0;
+  let skipped = 0;
+
+  for (const saved of savedRows) {
+    const existing = publicByIdMap.get(saved.movie_id) ?? null;
+    const recordToWrite = mergeSavedRowIntoPublic(saved, existing);
+    if (!recordToWrite) {
+      skipped++;
+      continue;
+    }
+    const { error: upErr } = await supabase
+      .from(PUBLIC_MOVIES_TABLE)
+      .upsert(recordToWrite, { onConflict: 'movie_id' });
+    if (upErr) throw upErr;
+    if (existing) merged++;
+    else migrated++;
+  }
+
+  if (typeof localStorage !== 'undefined') localStorage.setItem(markerKey, 'true');
+  return { migrated, merged, skipped };
+}
+
+/**
+ * 合并 saved → public 的字段策略：保守，绝不用空覆盖非空。
+ * 返回 `null` 表示无任何变化（仅在公共行已包含 saved 全部非空字段时）。
+ */
+function mergeSavedRowIntoPublic(
+  saved: LibraryMovieRow,
+  existing: LibraryMovieRow | null
+): LibraryMovieRow | null {
+  const isNonEmptyText = (v: string | null | undefined) =>
+    typeof v === 'string' && v.trim().length > 0;
+  const isNonEmptyArr = <T,>(v: T[] | null | undefined) =>
+    Array.isArray(v) && v.length > 0;
+  const preferNonEmptyStr = (a: string | null | undefined, b: string | null | undefined) =>
+    isNonEmptyText(a) ? a! : isNonEmptyText(b) ? b! : null;
+  const preferLongerArr = <T,>(a: T[] | null | undefined, b: T[] | null | undefined) => {
+    const al = isNonEmptyArr(a) ? a!.length : 0;
+    const bl = isNonEmptyArr(b) ? b!.length : 0;
+    return al >= bl ? (isNonEmptyArr(a) ? a! : []) : isNonEmptyArr(b) ? b! : [];
+  };
+  const preferNumberMax = (a: number | null | undefined, b: number | null | undefined) => {
+    const av = typeof a === 'number' && Number.isFinite(a) ? a : null;
+    const bv = typeof b === 'number' && Number.isFinite(b) ? b : null;
+    if (av == null) return bv;
+    if (bv == null) return av;
+    return Math.max(av, bv);
+  };
+  const preferTrueOrA = (a: boolean | null | undefined, b: boolean | null | undefined) => {
+    if (a === true || b === true) return true;
+    return a ?? b ?? false;
+  };
+
+  if (!existing) {
+    return saved;
+  }
+
+  const next: LibraryMovieRow = {
+    movie_id: existing.movie_id,
+    title: preferNonEmptyStr(existing.title, saved.title),
+    year:
+      typeof existing.year === 'number' && existing.year > 0
+        ? existing.year
+        : typeof saved.year === 'number' && saved.year > 0
+          ? saved.year
+          : existing.year ?? saved.year ?? null,
+    genre: preferLongerArr(existing.genre, saved.genre),
+    imdb_rating:
+      typeof existing.imdb_rating === 'number' && existing.imdb_rating > 0
+        ? existing.imdb_rating
+        : typeof saved.imdb_rating === 'number' && saved.imdb_rating > 0
+          ? saved.imdb_rating
+          : existing.imdb_rating ?? saved.imdb_rating ?? null,
+    rotten_tomatoes:
+      typeof existing.rotten_tomatoes === 'number' && existing.rotten_tomatoes > 0
+        ? existing.rotten_tomatoes
+        : typeof saved.rotten_tomatoes === 'number' && saved.rotten_tomatoes > 0
+          ? saved.rotten_tomatoes
+          : existing.rotten_tomatoes ?? saved.rotten_tomatoes ?? null,
+    personal_rating: preferNumberMax(existing.personal_rating, saved.personal_rating),
+
+    poster_url: preferNonEmptyStr(existing.poster_url, saved.poster_url),
+    poster_storage_path: preferNonEmptyStr(
+      existing.poster_storage_path,
+      saved.poster_storage_path
+    ),
+
+    director: preferNonEmptyStr(existing.director, saved.director),
+    language: preferNonEmptyStr(existing.language, saved.language),
+    runtime: preferNonEmptyStr(existing.runtime, saved.runtime),
+    cast_members: preferLongerArr(existing.cast_members, saved.cast_members),
+    trailer_url: preferNonEmptyStr(existing.trailer_url, saved.trailer_url),
+    date_added: existing.date_added ?? saved.date_added ?? null,
+
+    is_favorite: preferTrueOrA(existing.is_favorite, saved.is_favorite),
+    badge: preferNonEmptyStr(existing.badge, saved.badge),
+
+    content_rating: preferNonEmptyStr(existing.content_rating, saved.content_rating),
+    plot: preferNonEmptyStr(existing.plot, saved.plot),
+    writer: preferNonEmptyStr(existing.writer, saved.writer),
+    tagline: preferNonEmptyStr(existing.tagline, saved.tagline),
+    release_date: preferNonEmptyStr(existing.release_date, saved.release_date),
+    country_of_origin: preferNonEmptyStr(existing.country_of_origin, saved.country_of_origin),
+    also_known_as: preferLongerArr(existing.also_known_as, saved.also_known_as),
+    production_companies: preferLongerArr(
+      existing.production_companies,
+      saved.production_companies
+    ),
+    box_office: preferNonEmptyStr(existing.box_office, saved.box_office),
+    cast_details: preferLongerArr(existing.cast_details, saved.cast_details),
+  };
+
+  return next;
 }
 

@@ -16,13 +16,16 @@ import { MOCK_MOVIES } from './constants';
 import { Movie, MovieCastDetail } from './types';
 import { getSupabaseClient, signInAnonymously } from './lib/supabaseClient';
 import {
-  deleteSavedMovie,
+  deletePublicMovie,
   loadPublicMovies,
-  loadSavedMovies,
   migrateLocalStorageOnce,
-  syncPosterMetadataFromStorage,
-  uploadPosterFileAndSign,
-  upsertSavedMovieFromUI,
+  migrateSavedMoviesToPublic,
+  subscribeToPublicMovies,
+  syncPublicMoviePosterFromStorage,
+  updatePublicMoviePoster,
+  updatePublicMovieTrailerUrl,
+  uploadPublicPosterFileAndSign,
+  upsertPublicMovie,
 } from './lib/filmbaseSupabase';
 
 /**
@@ -325,6 +328,21 @@ function findMergedMovieForSource(map: Map<string, Movie>, source: Movie): Movie
 }
 
 /**
+ * 共享公共片单首屏排序：按 `dateAdded` 倒序，保留 0/缺省值在末尾；title 升序作为次序。
+ * 仅用于初始 hydrate；后续用户切换 `sortMode` 时会被 `filteredMovies` 覆盖。
+ */
+function sortMoviesForInitialDisplay(list: Movie[]): Movie[] {
+  const getMs = (d: Movie['dateAdded']) =>
+    typeof d === 'number' ? d : new Date(d || 0).getTime();
+  return [...list].sort((a, b) => {
+    const da = getMs(a.dateAdded);
+    const db = getMs(b.dateAdded);
+    if (db !== da) return db - da;
+    return (a.title || '').localeCompare(b.title || '');
+  });
+}
+
+/**
  * 列表 sticky 表头 IMDb / RT 图标：仅用 SVG 区分状态，不用 `opacity` 压色深。
  * - 非当前排序列：`imdb-source-muted` / `rt-source-muted`
  * - 当前排序列（常态）：`imdb-source-header` / `rt-source-header`
@@ -491,6 +509,16 @@ export default function App() {
   const [editTrailerUrlInput, setEditTrailerUrlInput] = useState('');
   const [editTrailerError, setEditTrailerError] = useState('');
   const [isEditingTrailer, setIsEditingTrailer] = useState(false);
+  /**
+   * 全局共享公共片单写操作（删除 / 评分 / 海报 / 预告片 / 新增）失败时的可见错误。
+   * 用一个轻量的 fixed 顶部小 toast 展示，避免破坏列表 / 详情布局。
+   */
+  const [libraryActionError, setLibraryActionError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!libraryActionError) return;
+    const t = window.setTimeout(() => setLibraryActionError(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [libraryActionError]);
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
     year: false,
@@ -556,6 +584,8 @@ export default function App() {
     if (hasHydratedRef.current) return;
     hasHydratedRef.current = true;
 
+    let unsubscribeRealtime: (() => void) | null = null;
+
     void (async () => {
       const supabase = getSupabaseClient();
       supabaseRef.current = supabase;
@@ -563,128 +593,76 @@ export default function App() {
       const uid = await signInAnonymously(supabase);
       supabaseUidRef.current = uid;
 
-      // 一次性迁移 localStorage -> Supabase（无 UI，静默进行）
-      await migrateLocalStorageOnce(supabase, uid);
+      /**
+       * 兼容历史路径：先把 localStorage(filmbase_movies) 落到 saved 表，
+       * 再把当前用户的 saved → public 安全合并迁移；二者都按 uid 维度幂等。
+       */
+      try {
+        await migrateLocalStorageOnce(supabase, uid);
+      } catch (err) {
+        console.warn('localStorage → saved migration failed:', err);
+      }
+      try {
+        await migrateSavedMoviesToPublic(supabase, uid);
+      } catch (err) {
+        console.warn('saved → public migration failed:', err);
+      }
 
-      const publicMovies = await loadPublicMovies(supabase);
-      const savedMovies = await loadSavedMovies(supabase, uid);
-
-      const seedMovies = MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
-      const getDateMs = (date: Movie['dateAdded']) => (
-        typeof date === 'number' ? date : new Date(date || 0).getTime()
+      /** 仅以共享公共片单作为可见库；失败或为空时回退到本地 seed。 */
+      const seedFallback = MOCK_MOVIES.filter(
+        (m) => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title)
       );
 
-      /**
-       * 合并：private > public > seed；主键仍为 `normTitle|year`，
-       * 但若与已有条目标题相同且年份差 ≤1，则并入同一条（高优先级覆盖 id/year/海报等）。
-       * 演员表：private 若仍 ≤3 条且 public 更长，则保留 public 的 cast；其余 private 字段仍覆盖。
-       */
-      const mergedByIdentity = new Map<string, Movie>();
-
-      const mergeInto = (base: Movie, incoming: Movie): Movie => ({
-        ...base,
-        ...incoming,
-        dateAdded: Math.max(getDateMs(base.dateAdded), getDateMs(incoming.dateAdded)),
-      });
-
-      const mergePrivateOverDemo = (base: Movie, privateMovie: Movie): Movie => {
-        const merged: Movie = {
-          ...base,
-          ...privateMovie,
-          dateAdded: Math.max(getDateMs(base.dateAdded), getDateMs(privateMovie.dateAdded)),
-        };
-        if (!privateMovie.contentRating?.trim() && base.contentRating?.trim()) {
-          merged.contentRating = base.contentRating;
-        }
-        const baseCastLen = base.cast?.length ?? 0;
-        const privCastLen = privateMovie.cast?.length ?? 0;
-        if (privCastLen <= 3 && baseCastLen > privCastLen) {
-          merged.cast = base.cast;
-          const baseCdLen = base.castDetails?.length ?? 0;
-          const privCdLen = privateMovie.castDetails?.length ?? 0;
-          if (baseCdLen > privCdLen) {
-            merged.castDetails = base.castDetails;
-          }
-        }
-        return merged;
-      };
-
-      const upsertWithFuzzy = (incoming: Movie): void => {
-        const fuzzyKey = findFuzzyMapKey(mergedByIdentity, incoming);
-        if (fuzzyKey !== null) {
-          const existing = mergedByIdentity.get(fuzzyKey)!;
-          const merged = mergeInto(existing, incoming);
-          const newKey = getMovieIdentityKey(merged);
-          if (fuzzyKey !== newKey) mergedByIdentity.delete(fuzzyKey);
-          mergedByIdentity.set(newKey, merged);
-          return;
-        }
-        const pk = getMovieIdentityKey(incoming);
-        if (mergedByIdentity.has(pk)) {
-          mergedByIdentity.set(pk, mergeInto(mergedByIdentity.get(pk)!, incoming));
-        } else {
-          mergedByIdentity.set(pk, { ...incoming });
-        }
-      };
-
-      const upsertWithFuzzyPrivate = (incoming: Movie): void => {
-        const fuzzyKey = findFuzzyMapKey(mergedByIdentity, incoming);
-        if (fuzzyKey !== null) {
-          const existing = mergedByIdentity.get(fuzzyKey)!;
-          const merged = mergePrivateOverDemo(existing, incoming);
-          const newKey = getMovieIdentityKey(merged);
-          if (fuzzyKey !== newKey) mergedByIdentity.delete(fuzzyKey);
-          mergedByIdentity.set(newKey, merged);
-          return;
-        }
-        const pk = getMovieIdentityKey(incoming);
-        if (mergedByIdentity.has(pk)) {
-          mergedByIdentity.set(pk, mergePrivateOverDemo(mergedByIdentity.get(pk)!, incoming));
-        } else {
-          mergedByIdentity.set(pk, { ...incoming });
-        }
-      };
-
-      for (const m of seedMovies) upsertWithFuzzy(m);
-      for (const m of publicMovies) upsertWithFuzzy(m);
-      for (const m of savedMovies) upsertWithFuzzyPrivate(m);
-
-      /** 输出顺序：seed 顺序 → public-only → private-only；同一合并后主键只输出一次 */
-      const orderedMovies: Movie[] = [];
-      const seenResolvedPrimaryKey = new Set<string>();
-
-      for (const m of seedMovies) {
-        const finalMovie = findMergedMovieForSource(mergedByIdentity, m);
-        if (!finalMovie) continue;
-        const rk = getMovieIdentityKey(finalMovie);
-        if (seenResolvedPrimaryKey.has(rk)) continue;
-        seenResolvedPrimaryKey.add(rk);
-        orderedMovies.push(finalMovie);
-      }
-      for (const m of publicMovies) {
-        const finalMovie = findMergedMovieForSource(mergedByIdentity, m);
-        if (!finalMovie) continue;
-        const rk = getMovieIdentityKey(finalMovie);
-        if (seenResolvedPrimaryKey.has(rk)) continue;
-        seenResolvedPrimaryKey.add(rk);
-        orderedMovies.push(finalMovie);
-      }
-      for (const m of savedMovies) {
-        const finalMovie = findMergedMovieForSource(mergedByIdentity, m);
-        if (!finalMovie) continue;
-        const rk = getMovieIdentityKey(finalMovie);
-        if (seenResolvedPrimaryKey.has(rk)) continue;
-        seenResolvedPrimaryKey.add(rk);
-        orderedMovies.push(finalMovie);
+      let publicMovies: Movie[] = [];
+      let publicLoadFailed = false;
+      try {
+        publicMovies = await loadPublicMovies(supabase);
+      } catch (err) {
+        console.error('loadPublicMovies failed:', err);
+        publicLoadFailed = true;
+        setLibraryActionError('Could not load shared library; showing local fallback.');
       }
 
-      setMovies(orderedMovies);
+      const usePublic = !publicLoadFailed && publicMovies.length > 0;
+      const initial = usePublic
+        ? sortMoviesForInitialDisplay(publicMovies)
+        : seedFallback;
+
+      setMovies(initial);
       setIsMoviesHydrated(true);
+
+      /**
+       * 订阅公共表行变更，让其它用户的新增 / 海报 / 预告片更新对当前会话即时可见。
+       * 失败不阻塞 UI（订阅本身被 try/catch 包住）。
+       */
+      unsubscribeRealtime = subscribeToPublicMovies(supabase, {
+        onUpsert: (movie) => {
+          setMovies((prev) => {
+            const idx = prev.findIndex((m) => m.id === movie.id);
+            if (idx >= 0) {
+              const next = prev.slice();
+              next[idx] = movie;
+              return next;
+            }
+            return [movie, ...prev];
+          });
+        },
+        onDelete: (movieId) => {
+          setMovies((prev) => prev.filter((m) => m.id !== movieId));
+        },
+        onError: (err) => {
+          console.warn('Realtime update failed:', err);
+        },
+      });
     })().catch((err) => {
-      // 本地 seed 仍能跑，失败不会阻塞 UI
       console.error('Failed to initialize Supabase:', err);
+      setLibraryActionError('Could not connect to shared library.');
       setIsMoviesHydrated(true);
     });
+
+    return () => {
+      if (unsubscribeRealtime) unsubscribeRealtime();
+    };
   }, []);
 
   /**
@@ -813,6 +791,9 @@ export default function App() {
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       if (isPosterPreviewOpen) {
+        const awaiting =
+          isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying;
+        if (awaiting) return;
         closePosterPreview();
         return;
       }
@@ -820,20 +801,41 @@ export default function App() {
         setSelectedMovie(null);
       }
     },
-    [isPosterPreviewOpen, selectedMovie, modalMode, closePosterPreview],
+    [
+      isPosterPreviewOpen,
+      isScopedPosterUploadOpen,
+      pendingPosterUrl,
+      isPosterApplying,
+      selectedMovie,
+      modalMode,
+      closePosterPreview,
+    ],
   );
 
-  /** 预览打开时 ESC 关闭预览（仅挂载本监听）。 */
+  /** 预览打开时 ESC 关闭预览（仅挂载本监听）；选图待 Apply/Cancel 时不响应 ESC。 */
   useEffect(() => {
     if (!isPosterPreviewOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (
+        isScopedPosterUploadOpen &&
+        Boolean(pendingPosterUrl) &&
+        !isPosterApplying
+      ) {
+        return;
+      }
       e.preventDefault();
       closePosterPreview();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isPosterPreviewOpen, closePosterPreview]);
+  }, [
+    isPosterPreviewOpen,
+    isScopedPosterUploadOpen,
+    pendingPosterUrl,
+    isPosterApplying,
+    closePosterPreview,
+  ]);
 
   /**
    * 海报预览打开时：`Z` 仅在 Fit 与 Fit Width 间切换（不到 100%）；预览区内任意位置生效。
@@ -1085,33 +1087,47 @@ export default function App() {
   };
 
   const handleDeleteMovie = (movie: Movie) => {
-    setMovies(prev => {
-      const updated = prev.filter(m => m.id !== movie.id);
-      return updated;
-    });
+    const prevSnapshot = movies;
+    setMovies((prev) => prev.filter((m) => m.id !== movie.id));
 
     const supabase = supabaseRef.current;
-    const uid = supabaseUidRef.current;
-    if (!supabase || !uid) return;
-    void deleteSavedMovie(supabase, uid, movie.id).catch((err) => {
-      console.error('Failed to delete saved movie:', err);
+    if (!supabase) {
+      setLibraryActionError('Could not delete movie: not connected to shared library.');
+      setMovies(prevSnapshot);
+      return;
+    }
+    void deletePublicMovie(supabase, movie.id).catch((err) => {
+      console.error('Failed to delete public movie:', err);
+      setLibraryActionError(
+        err instanceof Error
+          ? `Failed to delete movie: ${err.message}`
+          : 'Failed to delete movie.'
+      );
+      setMovies(prevSnapshot);
     });
   };
 
   const handleRatingChange = (movieId: string, newRating: number) => {
-    const current = movies.find(m => m.id === movieId);
-    setMovies(prev => {
-      const updated = prev.map(m => m.id === movieId ? { ...m, personalRating: newRating } : m);
-      return updated;
-    });
+    const current = movies.find((m) => m.id === movieId);
+    if (!current) return;
+    const prevSnapshot = movies;
+    setMovies((prev) =>
+      prev.map((m) => (m.id === movieId ? { ...m, personalRating: newRating } : m))
+    );
 
     const supabase = supabaseRef.current;
-    const uid = supabaseUidRef.current;
-    if (!supabase || !uid) return;
-    if (!current) return;
+    if (!supabase) {
+      setLibraryActionError('Could not save rating: not connected to shared library.');
+      setMovies(prevSnapshot);
+      return;
+    }
     const updatedMovie: Movie = { ...current, personalRating: newRating };
-    void upsertSavedMovieFromUI(supabase, uid, updatedMovie).catch((err) => {
+    void upsertPublicMovie(supabase, updatedMovie).catch((err) => {
       console.error('Failed to update personal rating:', err);
+      setLibraryActionError(
+        err instanceof Error ? `Failed to save rating: ${err.message}` : 'Failed to save rating.'
+      );
+      setMovies(prevSnapshot);
     });
   };
 
@@ -1127,8 +1143,8 @@ export default function App() {
   };
 
   /**
-   * 应用新的预告片 URL：规范化为 YouTube embed，更新 `movies` 与 `selectedMovie`，并通过 Supabase 持久化。
-   * 失败时仅显示错误，不关闭弹窗以便用户重试。
+   * 应用新的预告片 URL：规范化为 YouTube embed，更新 `movies` 与 `selectedMovie`，并写入共享公共表。
+   * 失败时回滚乐观更新并保留弹窗，便于用户重试。
    */
   const handleApplyEditTrailerUrl = async () => {
     if (!selectedMovie) return;
@@ -1144,20 +1160,39 @@ export default function App() {
     }
     setIsEditingTrailer(true);
     setEditTrailerError('');
+    const previousTrailer = selectedMovie.trailerUrl ?? '';
     const updatedMovie: Movie = { ...selectedMovie, trailerUrl: normalized };
     setMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
     setSelectedMovie(updatedMovie);
+
     const supabase = supabaseRef.current;
-    const uid = supabaseUidRef.current;
-    if (supabase && uid) {
-      try {
-        await upsertSavedMovieFromUI(supabase, uid, updatedMovie);
-      } catch (err) {
-        console.error('Failed to persist trailer URL:', err);
-      }
+    if (!supabase) {
+      setEditTrailerError('Not connected to shared library. Please try again.');
+      setIsEditingTrailer(false);
+      setMovies((prev) =>
+        prev.map((m) => (m.id === updatedMovie.id ? { ...m, trailerUrl: previousTrailer } : m))
+      );
+      setSelectedMovie({ ...updatedMovie, trailerUrl: previousTrailer });
+      return;
     }
-    setIsEditingTrailer(false);
-    setIsEditTrailerModalOpen(false);
+
+    try {
+      await updatePublicMovieTrailerUrl(supabase, updatedMovie.id, normalized);
+      setIsEditingTrailer(false);
+      setIsEditTrailerModalOpen(false);
+    } catch (err) {
+      console.error('Failed to persist trailer URL to public library:', err);
+      setMovies((prev) =>
+        prev.map((m) => (m.id === updatedMovie.id ? { ...m, trailerUrl: previousTrailer } : m))
+      );
+      setSelectedMovie({ ...updatedMovie, trailerUrl: previousTrailer });
+      setEditTrailerError(
+        err instanceof Error
+          ? `Could not save trailer URL: ${err.message}`
+          : 'Could not save trailer URL. Please try again.'
+      );
+      setIsEditingTrailer(false);
+    }
   };
 
   const resizePosterImage = (file: File) => new Promise<string>((resolve, reject) => {
@@ -1229,8 +1264,7 @@ export default function App() {
     }
 
     const supabase = supabaseRef.current;
-    const uid = supabaseUidRef.current;
-    if (!supabase || !uid) {
+    if (!supabase) {
       setPosterUploadError(
         'Unable to upload poster. Please check your connection and try again.',
       );
@@ -1242,9 +1276,8 @@ export default function App() {
     void (async () => {
       setIsPosterApplying(true);
       try {
-        const { posterStoragePath, signedPosterUrl } = await uploadPosterFileAndSign(
+        const { posterStoragePath, signedPosterUrl } = await uploadPublicPosterFileAndSign(
           supabase,
-          uid,
           targetMovie.id,
           pendingPosterFile
         );
@@ -1255,7 +1288,10 @@ export default function App() {
           posterStoragePath,
         };
 
-        await upsertSavedMovieFromUI(supabase, uid, updatedMovie);
+        await updatePublicMoviePoster(supabase, targetMovie.id, {
+          storagePath: posterStoragePath,
+          posterUrl: null,
+        });
 
         setMovies((prev) =>
           prev.map((movie) => (movie.id === targetMovie.id ? updatedMovie : movie)),
@@ -1283,20 +1319,19 @@ export default function App() {
   }, [pendingPosterUrl]);
 
   /**
-   * 从 Storage 拉取该片已存海报，刷新签名 URL，并把库表元数据改为以 Storage 为准（清空外链 `poster_url`）。
+   * 从 Storage 拉取该片已存海报，刷新签名 URL，并把共享公共行的海报来源以 Storage 为准（清空外链 `poster_url`）。
    */
   const handleSyncPosterFromStorage = () => {
     if (!selectedMovie) return;
 
     const supabase = supabaseRef.current;
-    const uid = supabaseUidRef.current;
-    if (!supabase || !uid) return;
+    if (!supabase) return;
 
     setPosterUploadError('');
     void (async () => {
       setIsPosterSyncing(true);
       try {
-        const updatedMovie = await syncPosterMetadataFromStorage(supabase, uid, selectedMovie);
+        const updatedMovie = await syncPublicMoviePosterFromStorage(supabase, selectedMovie);
         setMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
         setSelectedMovie(updatedMovie);
         setPendingPosterUrl(null);
@@ -1442,7 +1477,7 @@ export default function App() {
       };
 
       /**
-       * 写入前必须拿到匿名 uid（hydrate 未完成时 ref 可能仍为空），禁止在无 uid 时假装已保存。
+       * 公共表写入只需已认证（匿名亦可），但确保我们拥有 uid 以便满足 RLS。
        */
       let uid = supabaseUidRef.current;
       if (!uid) {
@@ -1462,11 +1497,13 @@ export default function App() {
       }
 
       try {
-        await upsertSavedMovieFromUI(supabase, uid, newMovie);
+        await upsertPublicMovie(supabase, newMovie);
       } catch (saveErr) {
-        console.error('Failed to save new movie:', saveErr);
+        console.error('Failed to save new movie to public library:', saveErr);
         setAddError(
-          saveErr instanceof Error ? saveErr.message : 'Failed to save movie. Please try again.',
+          saveErr instanceof Error
+            ? saveErr.message
+            : 'Failed to save movie to shared library. Please try again.',
         );
         setIsAdding(false);
         return;
@@ -1706,6 +1743,26 @@ export default function App() {
     );
   }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent, previewSliderMaxPercent]);
 
+  /**
+   * 选好新本地海报（`pendingPosterUrl` 改变）后，把 thumb 复位到最左侧 fit 位置并清平移：
+   * 新图可能与原海报尺寸差异大，旧 zoom 不再有意义；随后 `<img onLoad>` 拿到新尺寸时会再次精准对齐 minPct。
+   */
+  const lastPendingPosterUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isPosterPreviewOpen) {
+      lastPendingPosterUrlRef.current = null;
+      return;
+    }
+    if (!pendingPosterUrl) {
+      lastPendingPosterUrlRef.current = null;
+      return;
+    }
+    if (lastPendingPosterUrlRef.current === pendingPosterUrl) return;
+    lastPendingPosterUrlRef.current = pendingPosterUrl;
+    setPreviewPan({ x: 0, y: 0 });
+    setPreviewSliderPercent(previewSliderMinPercent);
+  }, [pendingPosterUrl, isPosterPreviewOpen, previewSliderMinPercent]);
+
   posterPreviewLayoutRef.current = posterPreviewLayout;
   previewSliderPercentRef.current = previewSliderPercent;
 
@@ -1744,8 +1801,21 @@ export default function App() {
   /** 无缩放区间（max≤min）时锁定 Fit↔最大 控件。 */
   const isPreviewZoomSliderLocked = previewSliderMaxPercent <= previewSliderMinPercent;
 
-  /** 锁定或 min=max 时禁用滑块与 ±。 */
-  const isPreviewZoomSliderDisabled = isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
+  /**
+   * 海报预览内已选本地图、等待底部 Apply / Cancel 期间：仅锁定可能丢弃当前选图的关闭类入口
+   * （顶栏 Back / Upload Poster、背景点击、ESC、shell 点击关浮层），
+   * 不锁定缩放交互（slider / FIT / 100% / 鼠标点击缩放 / 拖拽 / 滚轮平移 / Z 键）。
+   */
+  const isAwaitingPosterApplyConfirm = Boolean(
+    isPosterPreviewOpen &&
+      isScopedPosterUploadOpen &&
+      pendingPosterUrl &&
+      !isPosterApplying,
+  );
+
+  /** 锁定或 min=max 时禁用滑块与 ±；缩放交互在「待 Apply/Cancel」状态下保持可用。 */
+  const isPreviewZoomSliderDisabled =
+    isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
@@ -1762,6 +1832,34 @@ export default function App() {
         
         {/* Window Top Edge Highlighter (1px shine) */}
         <div className="absolute top-0 left-0 right-0 h-px bg-white/10 z-50 pointer-events-none"></div>
+
+        {/* 共享公共片单写操作错误：固定在顶部居中、自动消失，不影响列表/详情布局 */}
+        <AnimatePresence>
+          {libraryActionError ? (
+            <motion.div
+              key="library-action-error-toast"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="pointer-events-none absolute left-1/2 top-3 z-[300] -translate-x-1/2"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="pointer-events-auto flex items-center gap-2 rounded-md border border-red-400/40 bg-red-900/85 px-3 py-1.5 text-[12px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+                <span className="truncate max-w-[60vw]">{libraryActionError}</span>
+                <button
+                  type="button"
+                  onClick={() => setLibraryActionError(null)}
+                  className="ml-1 rounded-sm p-0.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  aria-label="Dismiss error"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         <div className="flex h-full w-full overflow-hidden relative">
           {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
@@ -1804,7 +1902,9 @@ export default function App() {
 
       {/* Sidebar */}
 	      <aside
-          className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10`}
+          className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
+            isAwaitingPosterApplyConfirm ? 'opacity-50 transition-opacity' : ''
+          }`}
           onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
         >
         {/* Spacer for Window Controls (Axis A) */}
@@ -2054,6 +2154,26 @@ export default function App() {
             Recently Added
           </button>
         </div>
+
+        {/**
+         * 等待 Apply / Cancel 时遮住整个 sidebar：阻断 hover/click，显示禁止光标和原生 tooltip。
+         * 不影响左上角 `Toggle Sidebar`（在 aside 之外、`z-[200]`），用户仍可折叠以更好预览海报。
+         */}
+        {isAwaitingPosterApplyConfirm ? (
+          <div
+            className="absolute inset-0 z-30 cursor-not-allowed"
+            title="Use Apply or Cancel below to finish poster upload"
+            aria-hidden
+            onPointerDownCapture={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClickCapture={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          />
+        ) : null}
       </aside>
 
       {/* Main Content：顶栏与主列表分区滚动，海报预览 overlay 仅盖住列表区 */}
@@ -2065,14 +2185,20 @@ export default function App() {
             isPosterPreviewOpen ? undefined : onShellPointerDownCloseScopedOverlays
           }
         >
-          {/** 固定 `h-10`：普通模式 FilmBase；预览模式仅片名（色/字号与 FilmBase 一致）；尺寸行在下方工具栏与 slider 同行垂直居中 */}
+          {/**
+           * 标题行固定 `h-10`：预览与普通模式总高度一致，避免工具栏整体下移 8px；
+           * 两种 `h1` 用同一套 class 并 `m-0` 抵消浏览器默认 heading margin，
+           * 让 FilmBase 与预览片名垂直 / 排版完全一致，无 Y 轴偏移。
+           */}
           <header className="relative flex h-10 shrink-0 items-center justify-center overflow-hidden px-8 text-center">
             {isPosterPreviewOpen && posterPreviewMovie ? (
-              <h1 className="max-w-full truncate text-[13px] font-bold tracking-tight text-white/40">
+              <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
                 {posterPreviewMovie.title}
               </h1>
             ) : (
-              <h1 className="text-[13px] font-bold tracking-tight text-white/40">FilmBase</h1>
+              <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
+                FilmBase
+              </h1>
             )}
           </header>
 
@@ -2084,9 +2210,14 @@ export default function App() {
                 <div className="flex h-9 min-w-[5.5rem] shrink-0 items-center justify-start gap-2">
                   <button
                     type="button"
+                    disabled={isAwaitingPosterApplyConfirm}
                     onClick={() => closePosterPreview()}
-                    className="group/backprev relative p-1.5 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-                    title="Back"
+                    className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/80"
+                    title={
+                      isAwaitingPosterApplyConfirm
+                        ? 'Use Apply or Cancel below'
+                        : 'Back'
+                    }
                     aria-label="Close poster preview"
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
@@ -2563,13 +2694,29 @@ export default function App() {
           </div>
 
           <div className="relative z-10 flex min-w-[5.5rem] shrink-0 items-center justify-end gap-2">
-              {isPosterPreviewOpen && posterPreviewMovie ? (
+              {isPosterPreviewOpen && posterPreviewMovie ? (() => {
+                /**
+                 * 仅当底部 action bar 真的可见时，按钮才作为「Close upload panel」toggle；
+                 * 否则永远走「打开系统选图对话框」分支，避免 `isScopedPosterUploadOpen` 残留
+                 * 状态导致用户需要点 2 次（取消系统对话框 / 取消选图后再尝试上传的场景）。
+                 */
+                const hasVisibleUploadPanel =
+                  isScopedPosterUploadOpen &&
+                  (Boolean(pendingPosterUrl) || Boolean(posterUploadError) || isPosterApplying);
+                return (
                 <button
                   type="button"
+                  disabled={isAwaitingPosterApplyConfirm}
+                  /**
+                   * 父级 toolbar 在 capture 阶段挂了 `onShellPointerDownCloseScopedOverlays`，
+                   * 会在 trailer / blur 抖动场景下重渲该按钮所在子树，导致首次 click 丢失。
+                   * 在按钮 capture 阶段提前 stopPropagation，确保第一次点击就能触发 onClick。
+                   */
+                  onPointerDownCapture={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!posterPreviewMovie) return;
-                    if (isScopedPosterUploadOpen) {
+                    if (hasVisibleUploadPanel) {
                       closeScopedPosterUpload();
                     } else {
                       setPosterUploadError('');
@@ -2578,40 +2725,54 @@ export default function App() {
                       posterFileInputRef.current?.click();
                     }
                   }}
-                  className="group/uploadprev relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] font-medium text-white/40 transition-colors hover:bg-white/5 hover:text-white"
-                  title={isScopedPosterUploadOpen ? 'Close upload panel' : 'Upload Poster'}
+                  className="group/uploadprev relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] font-medium text-white/40 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:text-white/15 disabled:hover:bg-transparent disabled:hover:text-white/15"
+                  title={
+                    isAwaitingPosterApplyConfirm
+                      ? 'Use Apply or Cancel below'
+                      : hasVisibleUploadPanel
+                        ? 'Close upload panel'
+                        : 'Upload Poster'
+                  }
                 >
+                  {/* 禁用态：`upload-poster-disabled.svg` 已含 fill-opacity；按钮不再叠加 disabled:opacity-* */}
                   <span className="relative block h-[18px] w-[18px] shrink-0">
-                    <img
-                      src="/icons/upload-poster.svg"
-                      alt=""
-                      width={18}
-                      height={18}
-                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity duration-150 ease-out ${
-                        isScopedPosterUploadOpen
-                          ? 'opacity-0'
-                          : 'opacity-100 group-hover/uploadprev:opacity-0'
-                      }`}
-                      decoding="async"
-                      aria-hidden
-                    />
-                    <img
-                      src="/icons/upload-poster-hover.svg"
-                      alt=""
-                      width={18}
-                      height={18}
-                      className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity duration-150 ease-out ${
-                        isScopedPosterUploadOpen
-                          ? 'opacity-100'
-                          : 'opacity-0 group-hover/uploadprev:opacity-100'
-                      }`}
-                      decoding="async"
-                      aria-hidden
-                    />
+                    {isAwaitingPosterApplyConfirm ? (
+                      <img
+                        src="/icons/upload-poster-disabled.svg"
+                        alt=""
+                        width={18}
+                        height={18}
+                        className="pointer-events-none block h-[18px] w-[18px]"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : (
+                      <>
+                        <img
+                          src="/icons/upload-poster.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          src="/icons/upload-poster-hover.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </>
+                    )}
                   </span>
                   Upload Poster
                 </button>
-              ) : (
+                );
+              })() : (
                 <>
                   <button
                     type="button"
@@ -2738,13 +2899,13 @@ export default function App() {
           previewNaturalSize.w > 0 &&
           previewNaturalSize.h > 0 &&
           posterPreviewMovie ? (
-            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium text-white tabular-nums">
+            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums">
               {isScopedPosterUploadOpen && isPosterApplying ? (
-                <span className="inline-block w-[11ch] text-left tabular-nums">
+                <span className="inline-block w-[11ch] text-left tabular-nums leading-5">
                   {`Applying${'.'.repeat(applyingDots)}`}
                 </span>
               ) : isScopedPosterUploadOpen && pendingPosterUrl ? (
-                <span className="inline-block w-[11ch] text-left tabular-nums">Ready</span>
+                <span className="tabular-nums leading-5">Ready</span>
               ) : (
                 <>
                   {previewNaturalSize.w} × {previewNaturalSize.h},{' '}
@@ -3109,7 +3270,10 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md"
-            onClick={closePosterPreview}
+            onClick={() => {
+              if (isAwaitingPosterApplyConfirm) return;
+              closePosterPreview();
+            }}
             onWheel={(e) => {
               // 预览打开时阻止底层主内容滚动；缩放仅由滑块/快捷键控制。
               e.preventDefault();
@@ -3366,7 +3530,7 @@ export default function App() {
                                     e.stopPropagation();
                                     handleUsePoster();
                                   }}
-                                  className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/80 transition-colors hover:bg-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                  className="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-[12px] font-bold tracking-widest text-black shadow-xl transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Apply
                                 </button>
