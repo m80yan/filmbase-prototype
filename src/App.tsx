@@ -3247,7 +3247,7 @@ export default function App() {
                   openEditTrailerModal();
                 }}
                 className="group/edittrailer inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
-                title="Edit trailer URL"
+                title="Edit Trailer URL"
               >
                 <span className="relative block h-4 w-4 shrink-0">
                   <img
@@ -3269,7 +3269,7 @@ export default function App() {
                     aria-hidden
                   />
                 </span>
-                Edit Trailer Url
+                Edit Trailer URL
               </motion.button>
             </div>
           </motion.div>
