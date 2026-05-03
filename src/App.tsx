@@ -154,6 +154,13 @@ function getPreviewScaleCapByViewportWidth(maxW: number, nw: number): number {
 /** 与滑块取整/浮点误差兼容，判定两档「实际百分比」是否视为同一点。 */
 const PREVIEW_ZOOM_PERCENT_NEAR = 0.75;
 
+/**
+ * 海报预览缩放滑块右端吸附阈值（百分点）：
+ * 拖到 ≥ `max - PREVIEW_ZOOM_SLIDER_SNAP_TO_MAX` 时把受控 value 吸附到 `max`，
+ * 让「最右 = 100%」与气泡 `Math.round(s*100)` 及右侧 100 图标 disabled 状态保持一致。
+ */
+const PREVIEW_ZOOM_SLIDER_SNAP_TO_MAX = 1;
+
 function isNearPreviewZoomPercent(a: number, b: number): boolean {
   return Math.abs(a - b) <= PREVIEW_ZOOM_PERCENT_NEAR;
 }
@@ -2350,8 +2357,15 @@ export default function App() {
                         disabled={isPreviewZoomSliderDisabled}
                         onChange={(e) => {
                           const v = Number(e.target.value);
+                          const snapped =
+                            previewSliderMaxPercent - v <= PREVIEW_ZOOM_SLIDER_SNAP_TO_MAX
+                              ? previewSliderMaxPercent
+                              : v;
                           setPreviewSliderPercent(
-                            Math.min(previewSliderMaxPercent, Math.max(previewSliderMinPercent, v)),
+                            Math.min(
+                              previewSliderMaxPercent,
+                              Math.max(previewSliderMinPercent, snapped),
+                            ),
                           );
                           setPreviewPan({ x: 0, y: 0 });
                         }}
