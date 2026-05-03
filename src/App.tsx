@@ -148,24 +148,62 @@ function getPreviewScaleCapByViewportWidth(maxW: number, nw: number): number {
   return Math.min(1, maxW / nw);
 }
 
+/** 与滑块取整/浮点误差兼容，判定两档「实际百分比」是否视为同一点。 */
+const PREVIEW_ZOOM_PERCENT_NEAR = 0.75;
+
+function isNearPreviewZoomPercent(a: number, b: number): boolean {
+  return Math.abs(a - b) <= PREVIEW_ZOOM_PERCENT_NEAR;
+}
+
+/**
+ * 海报点击缩放下一档：Fit → Fit Width → 100% → Fit。
+ * 若 Fit 与 Fit Width 等效则退化为 Fit ↔ 100%。
+ *
+ * @returns `panReset` 为 true 时表示回到 Fit / Fit Width 时居中平移。
+ */
+function getNextPosterPreviewClickPercent(
+  currentPct: number,
+  fitPct: number,
+  fitWidthPct: number,
+): { next: number; panReset: boolean } {
+  const sameFitAndWidth = isNearPreviewZoomPercent(fitPct, fitWidthPct);
+  if (sameFitAndWidth) {
+    if (isNearPreviewZoomPercent(currentPct, fitPct)) return { next: 100, panReset: false };
+    if (isNearPreviewZoomPercent(currentPct, 100)) return { next: fitPct, panReset: true };
+    if (currentPct < (fitPct + 100) / 2) return { next: 100, panReset: false };
+    return { next: fitPct, panReset: true };
+  }
+
+  /**
+   * Fit 与 Fit Width 数值可能很接近。当前值到达 Fit Width 后，如果先判断 near Fit，
+   * 第二次点击会被误吞并重复回到 Fit Width，表现为轻微抖动而不是进到 100%。
+   * 因此三档模式下必须优先判断 Fit Width，再判断 Fit。
+   */
+  if (isNearPreviewZoomPercent(currentPct, fitWidthPct)) return { next: 100, panReset: false };
+  if (isNearPreviewZoomPercent(currentPct, fitPct)) return { next: fitWidthPct, panReset: true };
+  if (isNearPreviewZoomPercent(currentPct, 100)) return { next: fitPct, panReset: true };
+  if (currentPct < (fitPct + fitWidthPct) / 2) return { next: fitWidthPct, panReset: true };
+  if (currentPct < (fitWidthPct + 100) / 2) return { next: 100, panReset: false };
+  return { next: fitPct, panReset: true };
+}
+
 /**
  * 滑块刻度为「实际显示比例 ×100」：`sliderPercent/100` 经 clamp 到
- * `[min(effectiveFit,sCap), max(effectiveFit,sCap)]`，其中 `effectiveFit = min(1, sFill)`。
+ * `[effectiveFit, 1]`。Fit 可能是 35%，但滑轨仍是 0–100 的真实百分比坐标，
+ * 因此 thumb 应显示在 35% 位置，而不是滑轨最左端。
  *
  * @param sFill contain 倍率（可大于 1）
  * @param sliderPercent 滑块当前值（与 UI 刻度一致）
- * @param sCap 宽顶格上限倍率
+ * @param _sCap 保留参数以兼容调用方；当前最大缩放统一为 1:1，不用宽顶格截断
  */
 function getPreviewDisplayScaleFromSlider(
   sFill: number,
   sliderPercent: number,
-  sCap: number,
+  _sCap: number,
 ): number {
   const effectiveFitScale = Math.min(1, sFill);
-  const minScale = Math.min(effectiveFitScale, sCap);
-  const maxScale = Math.max(effectiveFitScale, sCap);
   const rawScale = sliderPercent / 100;
-  return Math.max(minScale, Math.min(maxScale, rawScale));
+  return Math.max(effectiveFitScale, Math.min(1, rawScale));
 }
 
 /**
@@ -315,6 +353,16 @@ const POSTER_SIZE_SLIDER_TRACK_H_PX = 6;
 const POSTER_SIZE_SLIDER_THUMB_PX = 16;
 
 /**
+ * 主内容区全屏遮罩（预告片 / 添加影片）的 opacity 过渡，与 `backdrop-blur` 同帧淡出，减轻关闭时「瞬间消失」抖动。
+ */
+const MAIN_MODAL_OVERLAY_TRANSITION = { duration: 0.3, ease: 'easeInOut' } as const;
+
+/**
+ * 上述遮罩内卡片（播放器 / 表单）的 scale+opacity 过渡；略短于遮罩时序时内容先收，遮罩再淡出。
+ */
+const MAIN_MODAL_PANEL_TRANSITION = { duration: 0.24, ease: 'easeInOut' } as const;
+
+/**
  * 将海报尺寸限制在 slider 合法区间，避免 `value < min` 时自定义拇指 `left` 线性比例变负而冲出轨道。
  *
  * @param px 原始像素值
@@ -422,8 +470,12 @@ export default function App() {
     dispH: number;
     needsPan: boolean;
   } | null>(null);
-  /** 与 `previewSliderMinPercent` / `previewSliderMaxPercent` 同步，供 Z 监听早于 useMemo 声明处读取。 */
-  const previewSliderRangeRef = useRef({ min: 100, max: 100 });
+  /** Fit / Fit Width 百分数，供 Z 与点击早于部分 useMemo 处读取。 */
+  const previewSliderRangeRef = useRef({ fitPct: 100, fitWidthPct: 100 });
+  /** 滑块无可调区间时 Z 不生效（与 `previewSliderMaxPercent <= previewSliderMinPercent` 同步）。 */
+  const previewSliderInteractionLockedRef = useRef(false);
+  /** 供 Z 键读取当前滑块百分数（避免 effect 闭包陈旧）。 */
+  const previewSliderPercentRef = useRef(100);
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -434,6 +486,11 @@ export default function App() {
   const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
   const [addError, setAddError] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  /** 预告片浮层「Edit Trailer URL」弹窗：仅打开/关闭，与 `selectedMovie` 当前 `trailerUrl` 关联。 */
+  const [isEditTrailerModalOpen, setIsEditTrailerModalOpen] = useState(false);
+  const [editTrailerUrlInput, setEditTrailerUrlInput] = useState('');
+  const [editTrailerError, setEditTrailerError] = useState('');
+  const [isEditingTrailer, setIsEditingTrailer] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
     year: false,
@@ -478,6 +535,7 @@ export default function App() {
       if (selectedMovie && modalMode === 'trailer') return;
       if (selectedMovie && modalMode === 'poster') return;
       if (isAddModalOpen) return;
+      if (isEditTrailerModalOpen) return;
       if (isSortDropdownOpen) return;
       e.preventDefault();
       setIsEditing(false);
@@ -490,6 +548,7 @@ export default function App() {
     selectedMovie,
     modalMode,
     isAddModalOpen,
+    isEditTrailerModalOpen,
     isSortDropdownOpen,
   ]);
 
@@ -777,7 +836,7 @@ export default function App() {
   }, [isPosterPreviewOpen, closePosterPreview]);
 
   /**
-   * 海报预览打开且指针在预览图上：`Z` 在 Fit 与「宽顶格」最大刻度间切换（不锚 pan；忽略连发；不在表单控件内触发）。
+   * 海报预览打开时：`Z` 仅在 Fit 与 Fit Width 间切换（不到 100%）；预览区内任意位置生效。
    */
   useEffect(() => {
     if (!isPosterPreviewOpen) {
@@ -796,11 +855,13 @@ export default function App() {
       ) {
         return;
       }
-      if (!previewPointerOverImgRef.current) return;
-      const { min: minPct, max: maxPct } = previewSliderRangeRef.current;
-      if (maxPct <= minPct) return;
+      const { fitPct, fitWidthPct } = previewSliderRangeRef.current;
+      if (isNearPreviewZoomPercent(fitPct, fitWidthPct)) return;
+      if (previewSliderInteractionLockedRef.current) return;
+      const p = previewSliderPercentRef.current;
+      const nearFitWidth = isNearPreviewZoomPercent(p, fitWidthPct);
       e.preventDefault();
-      setPreviewSliderPercent((p) => (p <= minPct ? maxPct : minPct));
+      setPreviewSliderPercent(nearFitWidth ? fitPct : fitWidthPct);
       setPreviewPan({ x: 0, y: 0 });
     };
     window.addEventListener('keydown', onKeyDown);
@@ -810,17 +871,32 @@ export default function App() {
     };
   }, [isPosterPreviewOpen]);
 
-  /** 主区内预告片 overlay 打开时 ESC 关闭。 */
+  /** 主区内预告片 overlay 打开时 ESC 关闭（Edit Trailer URL 弹窗占用 ESC 时跳过）。 */
   useEffect(() => {
     if (!selectedMovie || modalMode !== 'trailer') return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (isEditTrailerModalOpen) return;
       e.preventDefault();
       setSelectedMovie(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedMovie, modalMode]);
+  }, [selectedMovie, modalMode, isEditTrailerModalOpen]);
+
+  /** Edit Trailer URL 弹窗 ESC 关闭（不影响底部预告片浮层）。 */
+  useEffect(() => {
+    if (!isEditTrailerModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isEditingTrailer) return;
+      e.preventDefault();
+      setIsEditTrailerModalOpen(false);
+      setEditTrailerError('');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isEditTrailerModalOpen, isEditingTrailer]);
 
   /**
    * 从海报区域 DOM 取 `getBoundingClientRect()` 再打开预览（列表/网格共用 hero）。
@@ -1037,6 +1113,51 @@ export default function App() {
     void upsertSavedMovieFromUI(supabase, uid, updatedMovie).catch((err) => {
       console.error('Failed to update personal rating:', err);
     });
+  };
+
+  /**
+   * 打开 Edit Trailer URL 弹窗：以当前 `selectedMovie.trailerUrl` 作为初始值，重置错误并清理上一轮 loading。
+   */
+  const openEditTrailerModal = () => {
+    if (!selectedMovie) return;
+    setEditTrailerUrlInput(selectedMovie.trailerUrl ?? '');
+    setEditTrailerError('');
+    setIsEditingTrailer(false);
+    setIsEditTrailerModalOpen(true);
+  };
+
+  /**
+   * 应用新的预告片 URL：规范化为 YouTube embed，更新 `movies` 与 `selectedMovie`，并通过 Supabase 持久化。
+   * 失败时仅显示错误，不关闭弹窗以便用户重试。
+   */
+  const handleApplyEditTrailerUrl = async () => {
+    if (!selectedMovie) return;
+    const raw = editTrailerUrlInput.trim();
+    if (!raw) {
+      setEditTrailerError('Please enter a trailer URL.');
+      return;
+    }
+    const normalized = getYouTubeEmbedUrl(raw);
+    if (!normalized.includes('/embed/')) {
+      setEditTrailerError('Could not parse this as a YouTube trailer URL.');
+      return;
+    }
+    setIsEditingTrailer(true);
+    setEditTrailerError('');
+    const updatedMovie: Movie = { ...selectedMovie, trailerUrl: normalized };
+    setMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
+    setSelectedMovie(updatedMovie);
+    const supabase = supabaseRef.current;
+    const uid = supabaseUidRef.current;
+    if (supabase && uid) {
+      try {
+        await upsertSavedMovieFromUI(supabase, uid, updatedMovie);
+      } catch (err) {
+        console.error('Failed to persist trailer URL:', err);
+      }
+    }
+    setIsEditingTrailer(false);
+    setIsEditTrailerModalOpen(false);
   };
 
   const resizePosterImage = (file: File) => new Promise<string>((resolve, reject) => {
@@ -1530,35 +1651,52 @@ export default function App() {
     return getPreviewSliderMinPercent(sFill);
   }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
 
-  /** 与 range `max` 一致：宽顶格 `sCap` 的百分数，且不小于 `previewSliderMinPercent`。 */
-  const previewSliderMaxPercent = useMemo(() => {
+  /** Fit Width：`min(1, maxW/nw)×100`%，与 Z / 点击第二档一致。 */
+  const previewFitWidthPercent = useMemo(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return 100;
     const host = mainPreviewHostRef.current?.getBoundingClientRect();
     if (!host || host.width < 80 || host.height < 80) return 100;
     const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
     const maxW = Math.max(80, host.width - pad * 2);
-    const maxH = Math.max(80, host.height - pad * 2);
     const nw = previewNaturalSize.w;
-    const sFill = getPreviewFillScale(previewNaturalSize.w, previewNaturalSize.h, maxW, maxH);
-    const sCap = getPreviewScaleCapByViewportWidth(maxW, nw);
-    const minPct = getPreviewSliderMinPercent(sFill);
-    const maxPct = Math.min(100, Math.max(0, sCap * 100));
-    return Math.max(minPct, maxPct);
+    return Math.min(100, getPreviewScaleCapByViewportWidth(maxW, nw) * 100);
   }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
 
+  /** 与 range `max` 一致：Photos 式真实百分比右端固定为 100%，不超过 1:1 原图。 */
+  const previewSliderMaxPercent = useMemo(() => {
+    if (!isPosterPreviewOpen || !previewNaturalSize) return 100;
+    return Math.max(previewSliderMinPercent, 100);
+  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent]);
+
   const previewZoomSliderRange = previewSliderMaxPercent - previewSliderMinPercent;
+  /**
+   * 仅以滑块百分数判定 Fit 视觉状态：thumb 固定在最左侧、hover 显示 `Fit`。
+   * 不再把「图像 contained / !needsPan」视为 Fit；Fit Width 在小图上同样可能 contained，
+   * 若把它当成 Fit 会让 thumb 误回到最左端。
+   */
+  const isPosterPreviewAtFitVisual =
+    posterPreviewLayout != null &&
+    isNearPreviewZoomPercent(previewSliderPercent, previewSliderMinPercent);
   const previewZoomSliderNorm =
     previewZoomSliderRange > 1e-6
-      ? (previewSliderPercent - previewSliderMinPercent) / previewZoomSliderRange
+      ? Math.min(
+          1,
+          Math.max(
+            0,
+            (previewSliderPercent - previewSliderMinPercent) / previewZoomSliderRange,
+          ),
+        )
       : 0;
 
   /** 无可用区间（min≈max）时禁用滑块与 ±。 */
   const isPreviewZoomSliderNoRange = previewZoomSliderRange <= 1e-6;
 
   previewSliderRangeRef.current = {
-    min: previewSliderMinPercent,
-    max: previewSliderMaxPercent,
+    fitPct: previewSliderMinPercent,
+    fitWidthPct: previewFitWidthPercent,
   };
+  previewSliderInteractionLockedRef.current =
+    previewSliderMaxPercent <= previewSliderMinPercent;
 
   /** 视口变化导致 fit/max 变化时，保持 slider 值落在 `[min, max]`。 */
   useEffect(() => {
@@ -1569,15 +1707,39 @@ export default function App() {
   }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent, previewSliderMaxPercent]);
 
   posterPreviewLayoutRef.current = posterPreviewLayout;
+  previewSliderPercentRef.current = previewSliderPercent;
 
-  /** 高于 Fit 百分数且滑块有区间时视为「可点按缩小回 Fit」（Photos 式 zoom out）。 */
-  const isPreviewZoomed =
-    previewSliderMaxPercent > previewSliderMinPercent &&
-    previewSliderPercent > previewSliderMinPercent;
+  /** 1:1 显示且内容超出可视框时，光标为 zoom-out（Fit Width 仍可拖到 100%，不显示 zoom-out）。 */
+  const isPreviewZoomOutCursor = Boolean(
+    posterPreviewLayout?.needsPan && posterPreviewLayout.s >= 1 - 1e-6,
+  );
 
-  /** 悬停提示：始终显示当前相对原图的实际显示比例。 */
+  /** 悬停提示：Fit 时显示 Fit，否则显示当前相对原图的实际显示比例。 */
   const previewSliderHoverLabel =
-    posterPreviewLayout == null ? '' : `${Math.round(posterPreviewLayout.s * 100)}%`;
+    posterPreviewLayout == null
+      ? ''
+      : isPosterPreviewAtFitVisual
+        ? 'Fit'
+        : `${Math.round(posterPreviewLayout.s * 100)}%`;
+
+  /** 预览标题下尺寸行后的 Z 键说明（Fit 与 Fit Width 等效时不显示）。 */
+  const posterPreviewZoomHintSuffix = useMemo(() => {
+    if (!isPosterPreviewOpen || !previewNaturalSize) return '';
+    if (Math.abs(previewFitWidthPercent - previewSliderMinPercent) < 0.5) return '';
+    if (isNearPreviewZoomPercent(previewSliderPercent, previewSliderMinPercent)) {
+      return ', Press Z to Zoom in';
+    }
+    if (isNearPreviewZoomPercent(previewSliderPercent, previewFitWidthPercent)) {
+      return ', Press Z to Zoom out';
+    }
+    return '';
+  }, [
+    isPosterPreviewOpen,
+    previewNaturalSize,
+    previewFitWidthPercent,
+    previewSliderMinPercent,
+    previewSliderPercent,
+  ]);
 
   /** 无缩放区间（max≤min）时锁定 Fit↔最大 控件。 */
   const isPreviewZoomSliderLocked = previewSliderMaxPercent <= previewSliderMinPercent;
@@ -1587,6 +1749,8 @@ export default function App() {
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
+  /** 预告片播放时锁定主工具栏（Grid/List、海报尺寸、编辑/新增），避免与播放层交互冲突。 */
+  const isTrailerToolbarDisabled = isTrailerOverlayInMain;
   const isMainContentOverlayActive =
     isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen;
 
@@ -2049,7 +2213,7 @@ export default function App() {
                       <input
                         type="range"
                         min={previewSliderMinPercent}
-                        max={previewSliderMaxPercent}
+                        max={100}
                         step="0.1"
                         value={previewSliderPercent}
                         disabled={isPreviewZoomSliderDisabled}
@@ -2061,7 +2225,7 @@ export default function App() {
                           setPreviewPan({ x: 0, y: 0 });
                         }}
                         className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
-                        aria-label="Poster preview: fit versus max width scale"
+                        aria-label="Poster preview: fit versus 100 percent scale"
                       />
                     </div>
                   </div>
@@ -2080,7 +2244,7 @@ export default function App() {
                       previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled
                     }
                     className="group/prev100 relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title="Toward max width scale"
+                    title="Toward 100%"
                   >
                     {previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled ? (
                       <img
@@ -2123,83 +2287,117 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setViewMode('grid')}
-                    title="Grid view"
+                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Grid view'}
                     aria-label="Grid view"
                     aria-pressed={viewMode === 'grid'}
-                    className={`group/viewgrid relative p-1.5 rounded-md transition-colors ${
-                      viewMode === 'grid'
-                        ? 'bg-white/10 text-white'
-                        : 'text-white/40 hover:text-white hover:bg-white/5'
+                    disabled={isTrailerToolbarDisabled}
+                    className={`group/viewgrid relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isTrailerToolbarDisabled
+                        ? 'text-white/25'
+                        : viewMode === 'grid'
+                          ? 'bg-white/10 text-white'
+                          : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      <img
-                        src="/icons/view-grid.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          viewMode === 'grid'
-                            ? 'opacity-0'
-                            : 'opacity-100 group-hover/viewgrid:opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/view-grid-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          viewMode === 'grid'
-                            ? 'opacity-100'
-                            : 'opacity-0 group-hover/viewgrid:opacity-100'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
+                      {isTrailerToolbarDisabled ? (
+                        <img
+                          src="/icons/view-grid-hover-disabled.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <>
+                          <img
+                            src="/icons/view-grid.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              viewMode === 'grid'
+                                ? 'opacity-0'
+                                : 'opacity-100 group-hover/viewgrid:opacity-0'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/view-grid-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              viewMode === 'grid'
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover/viewgrid:opacity-100'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      )}
                     </span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setViewMode('list')}
-                    title="List view"
+                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'List view'}
                     aria-label="List view"
                     aria-pressed={viewMode === 'list'}
-                    className={`group/viewlist relative p-1.5 rounded-md transition-colors ${
-                      viewMode === 'list'
-                        ? 'bg-white/10 text-white'
-                        : 'text-white/40 hover:text-white hover:bg-white/5'
+                    disabled={isTrailerToolbarDisabled}
+                    className={`group/viewlist relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isTrailerToolbarDisabled
+                        ? 'text-white/25'
+                        : viewMode === 'list'
+                          ? 'bg-white/10 text-white'
+                          : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      <img
-                        src="/icons/view-list.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          viewMode === 'list'
-                            ? 'opacity-0'
-                            : 'opacity-100 group-hover/viewlist:opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/view-list-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          viewMode === 'list'
-                            ? 'opacity-100'
-                            : 'opacity-0 group-hover/viewlist:opacity-100'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
+                      {isTrailerToolbarDisabled ? (
+                        <img
+                          src="/icons/view-list-hover-disabled.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <>
+                          <img
+                            src="/icons/view-list.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              viewMode === 'list'
+                                ? 'opacity-0'
+                                : 'opacity-100 group-hover/viewlist:opacity-0'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/view-list-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              viewMode === 'list'
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover/viewlist:opacity-100'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      )}
                     </span>
                   </button>
                 </div>
@@ -2210,11 +2408,19 @@ export default function App() {
                     onClick={() =>
                       setPosterSize(Math.max(GRID_POSTER_SIZE_MIN_PX, posterSize - GRID_POSTER_SIZE_STEP_PX))
                     }
-                    disabled={viewMode === 'list' || posterSize <= GRID_POSTER_SIZE_MIN_PX}
+                    disabled={
+                      viewMode === 'list' ||
+                      posterSize <= GRID_POSTER_SIZE_MIN_PX ||
+                      isTrailerToolbarDisabled
+                    }
                     className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title="Decrease poster size"
+                    title={
+                      isTrailerToolbarDisabled ? 'Trailer playing' : 'Decrease poster size'
+                    }
                   >
-                    {viewMode === 'list' || posterSize <= GRID_POSTER_SIZE_MIN_PX ? (
+                    {viewMode === 'list' ||
+                    posterSize <= GRID_POSTER_SIZE_MIN_PX ||
+                    isTrailerToolbarDisabled ? (
                       <img
                         src="/icons/poster-size-decrease-disabled.svg"
                         alt=""
@@ -2250,14 +2456,14 @@ export default function App() {
                   <div
                     className="relative h-8 w-32 shrink-0"
                     onPointerDownCapture={(e) => {
-                      if (viewMode === 'list') return;
+                      if (viewMode === 'list' || isTrailerToolbarDisabled) return;
                       if (e.button !== 0) return;
                       setIsPosterSizeSliderPressed(true);
                     }}
                   >
                     <div
                       className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                        viewMode === 'list' ? 'opacity-15' : 'opacity-100'
+                        viewMode === 'list' || isTrailerToolbarDisabled ? 'opacity-15' : 'opacity-100'
                       }`}
                       style={{
                         height: POSTER_SIZE_SLIDER_TRACK_H_PX,
@@ -2267,7 +2473,7 @@ export default function App() {
                     />
                     <img
                       src={
-                        viewMode === 'list'
+                        viewMode === 'list' || isTrailerToolbarDisabled
                           ? '/icons/poster-size-slider-thumb-disabled.svg'
                           : isPosterSizeSliderPressed
                             ? '/icons/poster-size-slider-thumb-pressed.svg'
@@ -2296,7 +2502,7 @@ export default function App() {
                       max={GRID_POSTER_SIZE_MAX_PX}
                       step={GRID_POSTER_SIZE_STEP_PX}
                       value={posterSize}
-                      disabled={viewMode === 'list'}
+                      disabled={viewMode === 'list' || isTrailerToolbarDisabled}
                       onChange={(e) => setPosterSize(clampPosterSizePx(Number(e.target.value)))}
                       className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
                     />
@@ -2306,11 +2512,19 @@ export default function App() {
                     onClick={() =>
                       setPosterSize(Math.min(GRID_POSTER_SIZE_MAX_PX, posterSize + GRID_POSTER_SIZE_STEP_PX))
                     }
-                    disabled={viewMode === 'list' || posterSize >= GRID_POSTER_SIZE_MAX_PX}
+                    disabled={
+                      viewMode === 'list' ||
+                      posterSize >= GRID_POSTER_SIZE_MAX_PX ||
+                      isTrailerToolbarDisabled
+                    }
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title="Increase poster size"
+                    title={
+                      isTrailerToolbarDisabled ? 'Trailer playing' : 'Increase poster size'
+                    }
                   >
-                    {viewMode === 'list' || posterSize >= GRID_POSTER_SIZE_MAX_PX ? (
+                    {viewMode === 'list' ||
+                    posterSize >= GRID_POSTER_SIZE_MAX_PX ||
+                    isTrailerToolbarDisabled ? (
                       <img
                         src="/icons/poster-size-increase-disabled.svg"
                         alt=""
@@ -2402,85 +2616,117 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsEditing(!isEditing)}
-                    className={`group/editlib relative p-1.5 rounded-md transition-colors ${
-                      isEditing
-                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
-                        : 'text-white/40 hover:text-white hover:bg-white/5'
+                    disabled={isTrailerToolbarDisabled}
+                    className={`group/editlib relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isTrailerToolbarDisabled
+                        ? 'text-white/25'
+                        : isEditing
+                          ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                          : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
-                    title="Edit Library"
+                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Edit Library'}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      <img
-                        src="/icons/edit-library.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          isEditing ? 'opacity-0' : 'opacity-100 group-hover/editlib:opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/edit-library-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          isEditing ? 'opacity-0' : 'opacity-0 group-hover/editlib:opacity-100'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/edit-library-active.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          isEditing ? 'opacity-100 group-hover/editlib:opacity-0' : 'opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/edit-library-active-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
-                          isEditing ? 'opacity-0 group-hover/editlib:opacity-100' : 'opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
+                      {isTrailerToolbarDisabled ? (
+                        <img
+                          src="/icons/edit-library-disabled.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <>
+                          <img
+                            src="/icons/edit-library.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              isEditing ? 'opacity-0' : 'opacity-100 group-hover/editlib:opacity-0'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/edit-library-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              isEditing ? 'opacity-0' : 'opacity-0 group-hover/editlib:opacity-100'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/edit-library-active.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              isEditing ? 'opacity-100 group-hover/editlib:opacity-0' : 'opacity-0'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/edit-library-active-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                              isEditing ? 'opacity-0 group-hover/editlib:opacity-100' : 'opacity-0'
+                            }`}
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      )}
                     </span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(true)}
-                    className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors hover:bg-white/5 hover:text-white"
-                    title="Add Movie"
+                    disabled={isTrailerToolbarDisabled}
+                    className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Add Movie'}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      <img
-                        src="/icons/add-movie.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img
-                        src="/icons/add-movie-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
+                      {isTrailerToolbarDisabled ? (
+                        <img
+                          src="/icons/add-movie-disabled.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <>
+                          <img
+                            src="/icons/add-movie.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img
+                            src="/icons/add-movie-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      )}
                     </span>
                   </button>
                 </>
@@ -2503,6 +2749,7 @@ export default function App() {
                 <>
                   {previewNaturalSize.w} × {previewNaturalSize.h},{' '}
                   {inferPosterImageFormatLabel(posterPreviewMovie.posterUrl)}
+                  {posterPreviewZoomHintSuffix}
                 </>
               )}
             </p>
@@ -2766,50 +3013,90 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={MAIN_MODAL_OVERLAY_TRANSITION}
             onClick={() => setSelectedMovie(null)}
             className="absolute inset-0 z-[104] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
-            <motion.div
-              key={`trailer-panel-${selectedMovie.id}`}
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="relative aspect-video w-full max-w-5xl cursor-default overflow-hidden bg-black shadow-[0_0_100px_rgba(255,255,255,0.1)]"
-            >
-              {(() => {
-                const embedUrl = getYouTubeEmbedUrl(selectedMovie.trailerUrl);
-                const isEmbeddable = embedUrl.includes('/embed/');
-                if (isEmbeddable) {
+            <div className="flex w-full max-w-5xl flex-col items-center gap-4">
+              <motion.div
+                key={`trailer-panel-${selectedMovie.id}`}
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                transition={MAIN_MODAL_PANEL_TRANSITION}
+                onClick={(e) => e.stopPropagation()}
+                className="relative aspect-video w-full cursor-default overflow-hidden bg-black shadow-[0_0_100px_rgba(255,255,255,0.1)]"
+              >
+                {(() => {
+                  const embedUrl = getYouTubeEmbedUrl(selectedMovie.trailerUrl);
+                  const isEmbeddable = embedUrl.includes('/embed/');
+                  if (isEmbeddable) {
+                    return (
+                      <iframe
+                        ref={trailerIframeRef}
+                        src={getTrailerEmbedSrc(selectedMovie.trailerUrl)}
+                        title={`${selectedMovie.title} Trailer`}
+                        className="h-full w-full border-none"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    );
+                  }
                   return (
-                    <iframe
-                      ref={trailerIframeRef}
-                      src={getTrailerEmbedSrc(selectedMovie.trailerUrl)}
-                      title={`${selectedMovie.title} Trailer`}
-                      className="h-full w-full border-none"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
+                    <div className="flex h-full w-full flex-col items-center justify-center bg-zinc-900 p-8 text-center">
+                      <Film size={48} className="mb-4 text-white/20" />
+                      <h3 className="mb-2 text-xl font-bold">Trailer Not Found</h3>
+                      <p className="mb-6 text-white/60">{"We couldn't find a direct trailer for this film."}</p>
+                      <a
+                        href={selectedMovie.trailerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 rounded-full bg-white px-8 py-3 font-bold text-black transition-colors hover:bg-white/90"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Search on YouTube
+                      </a>
+                    </div>
                   );
-                }
-                return (
-                  <div className="flex h-full w-full flex-col items-center justify-center bg-zinc-900 p-8 text-center">
-                    <Film size={48} className="mb-4 text-white/20" />
-                    <h3 className="mb-2 text-xl font-bold">Trailer Not Found</h3>
-                    <p className="mb-6 text-white/60">{"We couldn't find a direct trailer for this film."}</p>
-                    <a
-                      href={selectedMovie.trailerUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 rounded-full bg-white px-8 py-3 font-bold text-black transition-colors hover:bg-white/90"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Search on YouTube
-                    </a>
-                  </div>
-                );
-              })()}
-            </motion.div>
+                })()}
+              </motion.div>
+              <motion.button
+                key={`trailer-edit-url-${selectedMovie.id}`}
+                type="button"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={MAIN_MODAL_PANEL_TRANSITION}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openEditTrailerModal();
+                }}
+                className="group/edittrailer inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
+                title="Edit trailer URL"
+              >
+                <span className="relative block h-4 w-4 shrink-0">
+                  <img
+                    src="/icons/edit-trailer-url.svg"
+                    alt=""
+                    width={16}
+                    height={16}
+                    className="pointer-events-none absolute left-0 top-0 h-4 w-4 select-none transition-opacity duration-150 ease-out opacity-100 group-hover/edittrailer:opacity-0"
+                    decoding="async"
+                    aria-hidden
+                  />
+                  <img
+                    src="/icons/edit-trailer-url-hover.svg"
+                    alt=""
+                    width={16}
+                    height={16}
+                    className="pointer-events-none absolute left-0 top-0 h-4 w-4 select-none transition-opacity duration-150 ease-out opacity-0 group-hover/edittrailer:opacity-100"
+                    decoding="async"
+                    aria-hidden
+                  />
+                </span>
+                Edit Trailer Url
+              </motion.button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2824,17 +3111,9 @@ export default function App() {
             className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md"
             onClick={closePosterPreview}
             onWheel={(e) => {
+              // 预览打开时阻止底层主内容滚动；缩放仅由滑块/快捷键控制。
               e.preventDefault();
               e.stopPropagation();
-              if (previewSliderMaxPercent <= previewSliderMinPercent) return;
-              const step = e.deltaY > 0 ? -4 : 4;
-              setPreviewSliderPercent((p) =>
-                Math.min(
-                  previewSliderMaxPercent,
-                  Math.max(previewSliderMinPercent, p + step),
-                ),
-              );
-              setPreviewPan({ x: 0, y: 0 });
             }}
             onTouchMove={(e) => e.preventDefault()}
           >
@@ -2858,6 +3137,20 @@ export default function App() {
                         }
                       : { width: 'min(100%, 560px)', height: 'min(85dvh, 920px)' }
                 }
+                onWheel={(e) => {
+                  const L = posterPreviewLayoutRef.current;
+                  if (!L?.needsPan) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPreviewPan((prev) => {
+                    const maxX = Math.max(0, (L.dispW - L.maxW) / 2);
+                    const maxY = Math.max(0, (L.dispH - L.maxH) / 2);
+                    return {
+                      x: Math.max(-maxX, Math.min(maxX, prev.x - e.deltaX)),
+                      y: Math.max(-maxY, Math.min(maxY, prev.y - e.deltaY)),
+                    };
+                  });
+                }}
               >
                   <img
                     src={
@@ -2874,7 +3167,7 @@ export default function App() {
                     onPointerLeave={() => {
                       previewPointerOverImgRef.current = false;
                     }}
-                    className="select-none object-contain"
+                    className="max-h-none max-w-none select-none object-contain"
                     style={
                       posterPreviewLayout
                         ? {
@@ -2883,10 +3176,12 @@ export default function App() {
                             top: '50%',
                             width: posterPreviewLayout.dispW,
                             height: posterPreviewLayout.dispH,
+                            maxWidth: 'none',
+                            maxHeight: 'none',
                             transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
                             cursor: isPreviewDragging && posterPreviewLayout.needsPan
                               ? 'grabbing'
-                              : isPreviewZoomed
+                              : isPreviewZoomOutCursor
                                 ? 'zoom-out'
                                 : 'zoom-in',
                           }
@@ -2897,6 +3192,8 @@ export default function App() {
                               top: '50%',
                               width: previewPosterFrameFallback.dispW,
                               height: previewPosterFrameFallback.dispH,
+                              maxWidth: 'none',
+                              maxHeight: 'none',
                               transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
                               cursor:
                                 isPreviewDragging &&
@@ -2905,8 +3202,13 @@ export default function App() {
                                   previewPosterFrameFallback.dispH >
                                     previewPosterFrameFallback.maxH + 0.5)
                                   ? 'grabbing'
-                                  : isPreviewZoomed
-                                    ? 'zoom-out'
+                                  : previewPosterFrameFallback.dispW >
+                                        previewPosterFrameFallback.maxW + 0.5 ||
+                                      previewPosterFrameFallback.dispH >
+                                        previewPosterFrameFallback.maxH + 0.5
+                                    ? previewPosterFrameFallback.s >= 1 - 1e-6
+                                      ? 'zoom-out'
+                                      : 'zoom-in'
                                     : 'zoom-in',
                             }
                           : {
@@ -2943,16 +3245,24 @@ export default function App() {
                       }
                       const L = posterPreviewLayoutRef.current;
                       if (!L) return;
-                      if (previewSliderMaxPercent <= previewSliderMinPercent) return;
-                      if (previewSliderPercent > previewSliderMinPercent) {
-                        setPreviewSliderPercent(previewSliderMinPercent);
+                      if (previewSliderInteractionLockedRef.current) return;
+                      const { fitPct, fitWidthPct } = previewSliderRangeRef.current;
+                      const cur = previewSliderPercentRef.current;
+                      const { next, panReset } = getNextPosterPreviewClickPercent(
+                        cur,
+                        fitPct,
+                        fitWidthPct,
+                      );
+                      const nextClamped = Math.min(100, Math.max(fitPct, next));
+                      if (panReset) {
+                        setPreviewSliderPercent(nextClamped);
                         setPreviewPan({ x: 0, y: 0 });
                         return;
                       }
                       const sOld = L.s;
                       const sNew = getPreviewDisplayScaleFromSlider(
                         L.sFill,
-                        previewSliderMaxPercent,
+                        nextClamped,
                         L.sCap,
                       );
                       if (sOld <= 1e-9) return;
@@ -2968,7 +3278,7 @@ export default function App() {
                       const maxPanY = Math.max(0, (dispHNew - L.maxH) / 2);
                       nextPanX = Math.max(-maxPanX, Math.min(maxPanX, nextPanX));
                       nextPanY = Math.max(-maxPanY, Math.min(maxPanY, nextPanY));
-                      setPreviewSliderPercent(previewSliderMaxPercent);
+                      setPreviewSliderPercent(nextClamped);
                       setPreviewPan({ x: nextPanX, y: nextPanY });
                     }}
                     onPointerDown={(e) => {
@@ -3042,23 +3352,23 @@ export default function App() {
                                   disabled={isPosterApplying}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleUsePoster();
+                                    setPendingPosterUrl(null);
+                                    setPosterUploadError('');
                                   }}
-                                  className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold uppercase tracking-widest text-white/80 transition-colors hover:bg-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                  className="rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-40"
                                 >
-                                  Apply
+                                  Cancel
                                 </button>
                                 <button
                                   type="button"
                                   disabled={isPosterApplying}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setPendingPosterUrl(null);
-                                    setPosterUploadError('');
+                                    handleUsePoster();
                                   }}
-                                  className="rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold uppercase tracking-widest text-white/60 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-40"
+                                  className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/80 transition-colors hover:bg-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                  Cancel
+                                  Apply
                                 </button>
                               </>
                             ) : null}
@@ -3101,6 +3411,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={MAIN_MODAL_OVERLAY_TRANSITION}
             onClick={() => {
               if (isAdding) return;
               setIsAddModalOpen(false);
@@ -3116,6 +3427,7 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-md cursor-default bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
             >
@@ -3205,6 +3517,100 @@ export default function App() {
                     </>
                   ) : (
                     'Add'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Trailer URL Modal：浮于预告片浮层之上（z=107 > trailer overlay z=104） */}
+      <AnimatePresence>
+        {isEditTrailerModalOpen && selectedMovie && (
+          <motion.div
+            key={`edit-trailer-overlay-${selectedMovie.id}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={MAIN_MODAL_OVERLAY_TRANSITION}
+            onClick={() => {
+              if (isEditingTrailer) return;
+              setIsEditTrailerModalOpen(false);
+              setEditTrailerError('');
+            }}
+            className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={MAIN_MODAL_PANEL_TRANSITION}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md cursor-default bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
+            >
+              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Edit Trailer URL</h2>
+
+              <div className="space-y-4">
+                {editTrailerError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
+                    {editTrailerError}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                    Trailer URL
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    value={editTrailerUrlInput}
+                    onChange={(e) => {
+                      setEditTrailerUrlInput(e.target.value);
+                      if (editTrailerError) setEditTrailerError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && editTrailerUrlInput.trim() && !isEditingTrailer) {
+                        e.preventDefault();
+                        void handleApplyEditTrailerUrl();
+                      }
+                    }}
+                    disabled={isEditingTrailer}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditTrailerModalOpen(false);
+                    setEditTrailerError('');
+                  }}
+                  disabled={isEditingTrailer}
+                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleApplyEditTrailerUrl()}
+                  disabled={isEditingTrailer || !editTrailerUrlInput.trim()}
+                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                    isEditingTrailer || !editTrailerUrlInput.trim()
+                      ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                      : 'bg-white/80 text-black hover:bg-white shadow-xl'
+                  }`}
+                >
+                  {isEditingTrailer ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent opacity-70 rounded-full animate-spin" />
+                      Applying...
+                    </>
+                  ) : (
+                    'Apply'
                   )}
                 </button>
               </div>
