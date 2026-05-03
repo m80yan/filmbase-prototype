@@ -1726,10 +1726,10 @@ export default function App() {
                 className="overflow-hidden"
               >
                 <ul className="space-y-0.5">
-                  {ratings.map(rating => (
+                  {ratings.map((rating) => (
                     <li key={rating}>
-                      <SidebarItem 
-                        label={rating === 0 ? 'Unrated' : `${rating} ${rating === 1 ? 'star' : 'stars'}`}
+                      <SidebarMyRatingFilterRow
+                        rating={rating}
                         active={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
                       />
@@ -2658,10 +2658,11 @@ export default function App() {
                 gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
               } : {}}
             >
-              {filteredMovies.map(movie => (
+              {filteredMovies.map((movie, posterListIndex) => (
                 <MovieCard 
                   key={movie.id} 
                   movie={movie} 
+                  posterListIndex={posterListIndex}
                   size={posterSize} 
                   viewMode={viewMode} 
                   isEditing={isEditing}
@@ -3362,6 +3363,8 @@ function PosterGenreIconWithTooltip({
 
 interface MovieCardProps {
   movie: Movie;
+  /** 在 `filteredMovies` 中的下标，用于海报 `loading` / `fetchPriority`。 */
+  posterListIndex: number;
   size: number;
   viewMode: 'grid' | 'list';
   isEditing: boolean;
@@ -3411,6 +3414,14 @@ const LIST_TITLE_COLUMN_PT_PX = 62;
  * 网格海报 hover 右上角「预览」点击热区边长（px）：与 overlay 内「Play Trailer」全宽胶囊同高（`py-2.5` + `text-[12px]` 单行约 40–42px）。
  */
 const GRID_POSTER_PREVIEW_HIT_PX = 42;
+/**
+ * 片库网格/列表海报：前若干张 `loading="eager"`，其余 `lazy`，减轻首帧解码与带宽竞争。
+ */
+const LIBRARY_POSTER_EAGER_COUNT = 14;
+/**
+ * 上述 eager 段内，前几张使用 `fetchPriority="high"`（规范上宜 ≤2～4）。
+ */
+const LIBRARY_POSTER_HIGH_FETCH_PRIORITY_COUNT = 2;
 /** 单行平移时长（ms）。 */
 const LIST_CAST_SCROLL_MOTION_MS = 420;
 /** 每步之间停顿（ms），与 motion 衔接为一步总周期。 */
@@ -3424,6 +3435,22 @@ function gridStripMarqueeDurationSec(stripScrollWidth: number): number {
   const distancePx = stripScrollWidth / 2;
   const refVelocityPxPerSec = CAST_MARQUEE_REF_WIDTH_PX / CAST_MARQUEE_REF_DURATION_SEC;
   return Math.min(180, Math.max(4, distancePx / refVelocityPxPerSec));
+}
+
+/**
+ * 按筛后列表顺序生成海报 `loading` / `fetchPriority`（网格与列表共用）。
+ *
+ * @param listIndex `filteredMovies.map` 下标，从 0 起
+ */
+function libraryPosterFetchProps(listIndex: number): {
+  loading: 'eager' | 'lazy';
+  fetchPriority: 'high' | 'low';
+} {
+  const useLazy = listIndex >= LIBRARY_POSTER_EAGER_COUNT;
+  return {
+    loading: useLazy ? 'lazy' : 'eager',
+    fetchPriority: !useLazy && listIndex < LIBRARY_POSTER_HIGH_FETCH_PRIORITY_COUNT ? 'high' : 'low',
+  };
 }
 
 const formatDirectorName = (name: string) => {
@@ -3520,7 +3547,82 @@ function listCastScrollReducer(state: ListCastScrollState, action: ListCastScrol
   }
 }
 
-function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange, onPlayTrailer, onShowPoster, onOpenPosterPreview }: MovieCardProps) {
+/** 侧栏「My Rating」筛选项悬停副文案：与海报区星级 hover 行一致（全大写、`#D4AF37`、`text-[10px]`）。 */
+const SIDEBAR_MY_RATING_HOVER_LABEL_UPPER: Record<number, string> = {
+  0: 'UNRATED',
+  1: 'AWFUL',
+  2: 'BAD',
+  3: 'OKAY',
+  4: 'RECOMMENDED',
+  5: 'EXCELLENT',
+};
+
+/**
+ * 侧栏「My Rating」下单条筛选：默认仅星标（N 颗粉星或 Unrated 五颗描边空星）；悬停时星标不隐藏，星排与文案间距同侧栏 Genre 图标与文案（`mr-[10px]`），标签样式与海报星级 hover 一致（不改行高与背景态）。
+ *
+ * @param rating 筛选项分值 `0`…`5`（与 `selectedRatings` 一致）
+ */
+function SidebarMyRatingFilterRow({
+  rating,
+  active,
+  onClick,
+}: {
+  rating: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const aria =
+    rating === 0
+      ? 'Filter by unrated'
+      : rating === 1
+        ? 'Filter by 1 star'
+        : `Filter by ${rating} stars`;
+  const hoverUpper = SIDEBAR_MY_RATING_HOVER_LABEL_UPPER[rating] ?? '';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={aria}
+      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md px-2.5 py-0 text-left text-[13px] transition-colors ${
+        active
+          ? 'bg-[#EB9692]/20 font-bold text-white'
+          : 'text-white/70 hover:bg-white/5 hover:text-white'
+      }`}
+    >
+      <div className="flex min-h-0 min-w-0 flex-1 items-center">
+        <span className="mr-[10px] flex shrink-0 items-center gap-0.5" aria-hidden>
+          {rating === 0
+            ? [0, 1, 2, 3, 4].map((i) => (
+                <Star key={i} size={11} fill="none" stroke="#D4AF37" className="opacity-30" />
+              ))
+            : Array.from({ length: rating }, (_, i) => (
+                <Star key={i} size={11} fill="#EB9692" stroke="#EB9692" />
+              ))}
+        </span>
+        <span
+          className="min-w-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-bold uppercase leading-none tracking-[0.1em] text-[#D4AF37] opacity-0 transition-[max-width,opacity] duration-150 ease-out group-hover/sidebarrow:max-w-[200px] group-hover/sidebarrow:opacity-100"
+        >
+          {hoverUpper}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function MovieCard({
+  movie,
+  posterListIndex,
+  size,
+  viewMode,
+  isEditing,
+  onDelete,
+  onRatingChange,
+  onPlayTrailer,
+  onShowPoster,
+  onOpenPosterPreview,
+}: MovieCardProps) {
+  const posterFetch = libraryPosterFetchProps(posterListIndex);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isSelectedForDeletion, setIsSelectedForDeletion] = useState(false);
   const titleRef = useRef<HTMLDivElement>(null);
@@ -3857,6 +3959,9 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
               alt={movie.title} 
               className="relative z-0 h-full w-full object-cover"
               referrerPolicy="no-referrer"
+              loading={posterFetch.loading}
+              fetchPriority={posterFetch.fetchPriority}
+              decoding="async"
             />
             {isEditing ? (
               <div
@@ -4096,6 +4201,9 @@ function MovieCard({ movie, size, viewMode, isEditing, onDelete, onRatingChange,
 	          alt={movie.title}
 	          className="pointer-events-none relative z-0 h-full w-full object-cover"
 	          referrerPolicy="no-referrer"
+	          loading={posterFetch.loading}
+	          fetchPriority={posterFetch.fetchPriority}
+	          decoding="async"
 	        />
         {isEditing ? (
           <div
