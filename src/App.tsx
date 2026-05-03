@@ -127,26 +127,45 @@ function getPreviewFillScale(nw: number, nh: number, maxW: number, maxH: number)
 }
 
 /**
- * 与 macOS「照片」一致：slider 表示相对原图的实际显示比例百分数，左端为 Fit、右端为 100%。
+ * 滑块左端百分数：有效 Fit 比例 `min(1, contain)`×100（不超 1:1 原图）。
+ * 返回精确小数百分比；UI label 再单独 round，避免 Fit 端点被取整后偏大导致轻微裁切。
  *
- * @param fitScale `getPreviewFillScale`（contain 倍率，即相对原图的 fit 比例）
+ * @param fitScale `getPreviewFillScale`（contain 倍率，可大于 1）
  */
 function getPreviewSliderMinPercent(fitScale: number): number {
-  if (fitScale >= 1) return 100;
-  return Math.min(100, Math.round(fitScale * 100));
+  if (!Number.isFinite(fitScale)) return 100;
+  return Math.min(100, Math.max(0, Math.min(1, fitScale) * 100));
 }
 
 /**
- * `sliderPercent` 为实际显示比例百分数（`fitPercent`…100）；显示倍率 = `sliderPercent/100`，夹在 `[fitScale, 1]`。
+ * 预览「宽顶格」缩放上限：`maxW/nw` 与 1:1 取小（原图比视窗窄时不强行放大铺满宽）。
  *
- * @param sFill `getPreviewFillScale` 结果
- * @param sliderPercent Fit 时为 `getPreviewSliderMinPercent(sFill)`，最大为 100
+ * @param maxW 可视框最大宽（px）
+ * @param nw 原图自然宽（px）
  */
-function getPreviewDisplayScaleFromSlider(sFill: number, sliderPercent: number): number {
-  if (sFill >= 1) return 1;
-  const minPct = getPreviewSliderMinPercent(sFill);
-  const p = Math.min(100, Math.max(minPct, sliderPercent));
-  return Math.min(1, Math.max(sFill, p / 100));
+function getPreviewScaleCapByViewportWidth(maxW: number, nw: number): number {
+  if (!(nw > 0) || !(maxW > 0)) return 1;
+  return Math.min(1, maxW / nw);
+}
+
+/**
+ * 滑块刻度为「实际显示比例 ×100」：`sliderPercent/100` 经 clamp 到
+ * `[min(effectiveFit,sCap), max(effectiveFit,sCap)]`，其中 `effectiveFit = min(1, sFill)`。
+ *
+ * @param sFill contain 倍率（可大于 1）
+ * @param sliderPercent 滑块当前值（与 UI 刻度一致）
+ * @param sCap 宽顶格上限倍率
+ */
+function getPreviewDisplayScaleFromSlider(
+  sFill: number,
+  sliderPercent: number,
+  sCap: number,
+): number {
+  const effectiveFitScale = Math.min(1, sFill);
+  const minScale = Math.min(effectiveFitScale, sCap);
+  const maxScale = Math.max(effectiveFitScale, sCap);
+  const rawScale = sliderPercent / 100;
+  return Math.max(minScale, Math.min(maxScale, rawScale));
 }
 
 /**
@@ -163,7 +182,7 @@ type PreviewHeroRect = { left: number; top: number; width: number; height: numbe
  * @param hostRect `mainPreviewHostRef` 的 `getBoundingClientRect()`
  * @param nw 海报自然宽
  * @param nh 海报自然高
- * @param sliderPercent 实际显示比例百分数（`fitPercent`…100）
+ * @param sliderPercent 滑块百分数（Fit 左端…`previewSliderMaxPercent` 右端）；刻度与 `sliderPercent/100` 即缩放一致。
  * @param padPx 与 `POSTER_PREVIEW_LAYOUT_PAD_PX` 一致
  */
 function computePreviewPosterFrameDims(
@@ -172,14 +191,25 @@ function computePreviewPosterFrameDims(
   nh: number,
   sliderPercent: number,
   padPx: number,
-): { maxW: number; maxH: number; dispW: number; dispH: number } {
+): {
+  maxW: number;
+  maxH: number;
+  dispW: number;
+  dispH: number;
+  s: number;
+  sCap: number;
+  sFill: number;
+  effectiveFitScale: number;
+} {
   const cw = hostRect.width;
   const ch = hostRect.height;
   const maxW = Math.max(80, cw - padPx * 2);
   const maxH = Math.max(80, ch - padPx * 2);
   const sFill = getPreviewFillScale(nw, nh, maxW, maxH);
-  const s = getPreviewDisplayScaleFromSlider(sFill, sliderPercent);
-  return { maxW, maxH, dispW: nw * s, dispH: nh * s };
+  const sCap = getPreviewScaleCapByViewportWidth(maxW, nw);
+  const effectiveFitScale = Math.min(1, sFill);
+  const s = getPreviewDisplayScaleFromSlider(sFill, sliderPercent, sCap);
+  return { maxW, maxH, dispW: nw * s, dispH: nh * s, s, sCap, sFill, effectiveFitScale };
 }
 
 /**
@@ -330,7 +360,7 @@ export default function App() {
   const [previewSliderPercent, setPreviewSliderPercent] = useState(100);
   /** 宿主尺寸变化时递增，驱动预览布局 `useMemo` 重算。 */
   const [previewLayoutTick, setPreviewLayoutTick] = useState(0);
-  /** 海报预览 Fit↔100% 滑块：按下/拖动中为 true（`isPreviewZoomSliderLocked` 时不用 pressed 图）。 */
+  /** 海报预览 Fit↔最大刻度 滑块：按下/拖动中为 true（禁用时不用 pressed 图）。 */
   const [isPreviewZoomSliderPressed, setIsPreviewZoomSliderPressed] = useState(false);
   const [isMoviesHydrated, setIsMoviesHydrated] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
@@ -385,11 +415,15 @@ export default function App() {
     nw: number;
     nh: number;
     sFill: number;
+    effectiveFitScale: number;
     s: number;
+    sCap: number;
     dispW: number;
     dispH: number;
     needsPan: boolean;
   } | null>(null);
+  /** 与 `previewSliderMinPercent` / `previewSliderMaxPercent` 同步，供 Z 监听早于 useMemo 声明处读取。 */
+  const previewSliderRangeRef = useRef({ min: 100, max: 100 });
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -743,7 +777,7 @@ export default function App() {
   }, [isPosterPreviewOpen, closePosterPreview]);
 
   /**
-   * 海报预览打开且指针在预览图上：`Z` 在 Fit 与 100% 间切换（不锚 pan；忽略连发；不在表单控件内触发）。
+   * 海报预览打开且指针在预览图上：`Z` 在 Fit 与「宽顶格」最大刻度间切换（不锚 pan；忽略连发；不在表单控件内触发）。
    */
   useEffect(() => {
     if (!isPosterPreviewOpen) {
@@ -763,11 +797,10 @@ export default function App() {
         return;
       }
       if (!previewPointerOverImgRef.current) return;
-      const L = posterPreviewLayoutRef.current;
-      if (!L || L.sFill >= 1 - 1e-6) return;
-      const fitPct = getPreviewSliderMinPercent(L.sFill);
+      const { min: minPct, max: maxPct } = previewSliderRangeRef.current;
+      if (maxPct <= minPct) return;
       e.preventDefault();
-      setPreviewSliderPercent((p) => (p <= fitPct ? 100 : fitPct));
+      setPreviewSliderPercent((p) => (p <= minPct ? maxPct : minPct));
       setPreviewPan({ x: 0, y: 0 });
     };
     window.addEventListener('keydown', onKeyDown);
@@ -891,13 +924,13 @@ export default function App() {
     const maxW = Math.max(80, host.width - pad * 2);
     const maxH = Math.max(80, host.height - pad * 2);
     const sFill = getPreviewFillScale(posterHeroNaturalSize.w, posterHeroNaturalSize.h, maxW, maxH);
-    const sliderT = sFill < 1 - 1e-6 ? getPreviewSliderMinPercent(sFill) : 100;
-    setPreviewSliderPercent(sliderT);
+    const minPct = getPreviewSliderMinPercent(sFill);
+    setPreviewSliderPercent(minPct);
     const target = computePreviewPosterDisplayRect(
       host,
       posterHeroNaturalSize.w,
       posterHeroNaturalSize.h,
-      sliderT,
+      minPct,
       pad,
       { x: 0, y: 0 },
     );
@@ -1465,17 +1498,10 @@ export default function App() {
     const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
     const nw = previewNaturalSize.w;
     const nh = previewNaturalSize.h;
-    const { maxW, maxH, dispW, dispH } = computePreviewPosterFrameDims(
-      host,
-      nw,
-      nh,
-      previewSliderPercent,
-      pad,
-    );
-    const sFill = getPreviewFillScale(nw, nh, maxW, maxH);
-    const s = getPreviewDisplayScaleFromSlider(sFill, previewSliderPercent);
+    const { maxW, maxH, dispW, dispH, s, sCap, sFill, effectiveFitScale } =
+      computePreviewPosterFrameDims(host, nw, nh, previewSliderPercent, pad);
     const needsPan = dispW > maxW + 0.5 || dispH > maxH + 0.5;
-    return { maxW, maxH, nw, nh, sFill, s, dispW, dispH, needsPan };
+    return { maxW, maxH, nw, nh, sFill, effectiveFitScale, s, sCap, dispW, dispH, needsPan };
   }, [isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick]);
 
   /** `posterPreviewLayout` 尚不可算时（首帧 host 未就绪），与 hero 后首帧同一套 maxW/maxH/disp。 */
@@ -1492,7 +1518,7 @@ export default function App() {
     );
   }, [posterPreviewLayout, isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick]);
 
-  /** 与 range `min` 一致：大图 Fit 左端百分数；小图恒为 100。 */
+  /** 与 range `min` 一致：有效 Fit `round(min(1,sFill)×100)`。 */
   const previewSliderMinPercent = useMemo(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return 100;
     const host = mainPreviewHostRef.current?.getBoundingClientRect();
@@ -1504,27 +1530,60 @@ export default function App() {
     return getPreviewSliderMinPercent(sFill);
   }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
 
-  /** 视口变化导致 `fitPercent` 变大时，保持 slider 值落在 [min, 100]。 */
+  /** 与 range `max` 一致：宽顶格 `sCap` 的百分数，且不小于 `previewSliderMinPercent`。 */
+  const previewSliderMaxPercent = useMemo(() => {
+    if (!isPosterPreviewOpen || !previewNaturalSize) return 100;
+    const host = mainPreviewHostRef.current?.getBoundingClientRect();
+    if (!host || host.width < 80 || host.height < 80) return 100;
+    const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
+    const maxW = Math.max(80, host.width - pad * 2);
+    const maxH = Math.max(80, host.height - pad * 2);
+    const nw = previewNaturalSize.w;
+    const sFill = getPreviewFillScale(previewNaturalSize.w, previewNaturalSize.h, maxW, maxH);
+    const sCap = getPreviewScaleCapByViewportWidth(maxW, nw);
+    const minPct = getPreviewSliderMinPercent(sFill);
+    const maxPct = Math.min(100, Math.max(0, sCap * 100));
+    return Math.max(minPct, maxPct);
+  }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
+
+  const previewZoomSliderRange = previewSliderMaxPercent - previewSliderMinPercent;
+  const previewZoomSliderNorm =
+    previewZoomSliderRange > 1e-6
+      ? (previewSliderPercent - previewSliderMinPercent) / previewZoomSliderRange
+      : 0;
+
+  /** 无可用区间（min≈max）时禁用滑块与 ±。 */
+  const isPreviewZoomSliderNoRange = previewZoomSliderRange <= 1e-6;
+
+  previewSliderRangeRef.current = {
+    min: previewSliderMinPercent,
+    max: previewSliderMaxPercent,
+  };
+
+  /** 视口变化导致 fit/max 变化时，保持 slider 值落在 `[min, max]`。 */
   useEffect(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return;
-    setPreviewSliderPercent((p) => Math.min(100, Math.max(previewSliderMinPercent, p)));
-  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent]);
+    setPreviewSliderPercent((p) =>
+      Math.min(previewSliderMaxPercent, Math.max(previewSliderMinPercent, p)),
+    );
+  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent, previewSliderMaxPercent]);
 
   posterPreviewLayoutRef.current = posterPreviewLayout;
 
-  /** 高于 Fit 百分数时视为「可点按缩小回 Fit」（Photos 式 zoom out）。 */
+  /** 高于 Fit 百分数且滑块有区间时视为「可点按缩小回 Fit」（Photos 式 zoom out）。 */
   const isPreviewZoomed =
-    posterPreviewLayout != null &&
-    posterPreviewLayout.sFill < 1 - 1e-6 &&
+    previewSliderMaxPercent > previewSliderMinPercent &&
     previewSliderPercent > previewSliderMinPercent;
 
   /** 悬停提示：始终显示当前相对原图的实际显示比例。 */
   const previewSliderHoverLabel =
     posterPreviewLayout == null ? '' : `${Math.round(posterPreviewLayout.s * 100)}%`;
 
-  /** 自然尺寸已不大于视口时禁用 Fit↔100% 控件（scale 恒为 1）。 */
-  const isPreviewZoomSliderLocked =
-    posterPreviewLayout != null && posterPreviewLayout.sFill >= 1 - 1e-6;
+  /** 无缩放区间（max≤min）时锁定 Fit↔最大 控件。 */
+  const isPreviewZoomSliderLocked = previewSliderMaxPercent <= previewSliderMinPercent;
+
+  /** 锁定或 min=max 时禁用滑块与 ±。 */
+  const isPreviewZoomSliderDisabled = isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
@@ -1892,14 +1951,21 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setPreviewSliderPercent((p) => Math.max(previewSliderMinPercent, p - 5));
+                      setPreviewSliderPercent((p) =>
+                        Math.max(
+                          previewSliderMinPercent,
+                          Math.min(previewSliderMaxPercent, p - 5),
+                        ),
+                      );
                       setPreviewPan({ x: 0, y: 0 });
                     }}
-                    disabled={previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderLocked}
+                    disabled={
+                      previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderDisabled
+                    }
                     className="group/prevfit relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward fit / fill"
                   >
-                    {previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderLocked ? (
+                    {previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderDisabled ? (
                       <img
                         src="/icons/poster-preview-fit-disabled.svg"
                         alt=""
@@ -1937,13 +2003,7 @@ export default function App() {
                       <span
                         className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white/90 opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
                         style={{
-                          left: `${
-                            100 - previewSliderMinPercent > 0
-                              ? ((previewSliderPercent - previewSliderMinPercent) /
-                                  (100 - previewSliderMinPercent)) *
-                                100
-                              : 100
-                          }%`,
+                          left: `${previewZoomSliderNorm * 100}%`,
                           transform: 'translateX(-50%)',
                         }}
                       >
@@ -1953,14 +2013,14 @@ export default function App() {
                     <div
                       className="relative h-8 w-full"
                       onPointerDownCapture={(e) => {
-                        if (isPreviewZoomSliderLocked) return;
+                        if (isPreviewZoomSliderDisabled) return;
                         if (e.button !== 0) return;
                         setIsPreviewZoomSliderPressed(true);
                       }}
                     >
                       <div
                         className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                          isPreviewZoomSliderLocked ? 'opacity-15' : 'opacity-100'
+                          isPreviewZoomSliderDisabled ? 'opacity-15' : 'opacity-100'
                         }`}
                         style={{
                           height: POSTER_SIZE_SLIDER_TRACK_H_PX,
@@ -1970,7 +2030,7 @@ export default function App() {
                       />
                       <img
                         src={
-                          isPreviewZoomSliderLocked
+                          isPreviewZoomSliderDisabled
                             ? '/icons/poster-size-slider-thumb-disabled.svg'
                             : isPreviewZoomSliderPressed
                               ? '/icons/poster-size-slider-thumb-pressed.svg'
@@ -1981,12 +2041,7 @@ export default function App() {
                         height={POSTER_SIZE_SLIDER_THUMB_PX}
                         className="pointer-events-none absolute top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none"
                         style={{
-                          left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${
-                            100 - previewSliderMinPercent > 0
-                              ? (previewSliderPercent - previewSliderMinPercent) /
-                                (100 - previewSliderMinPercent)
-                              : 0
-                          })`,
+                          left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${previewZoomSliderNorm})`,
                         }}
                         decoding="async"
                         aria-hidden
@@ -1994,33 +2049,40 @@ export default function App() {
                       <input
                         type="range"
                         min={previewSliderMinPercent}
-                        max={100}
-                        step="1"
+                        max={previewSliderMaxPercent}
+                        step="0.1"
                         value={previewSliderPercent}
-                        disabled={isPreviewZoomSliderLocked}
+                        disabled={isPreviewZoomSliderDisabled}
                         onChange={(e) => {
                           const v = Number(e.target.value);
                           setPreviewSliderPercent(
-                            Math.min(100, Math.max(previewSliderMinPercent, v)),
+                            Math.min(previewSliderMaxPercent, Math.max(previewSliderMinPercent, v)),
                           );
                           setPreviewPan({ x: 0, y: 0 });
                         }}
                         className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
-                        aria-label="Poster preview: fit to fill versus 100 percent"
+                        aria-label="Poster preview: fit versus max width scale"
                       />
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setPreviewSliderPercent((p) => Math.min(100, p + 5));
+                      setPreviewSliderPercent((p) =>
+                        Math.min(
+                          previewSliderMaxPercent,
+                          Math.max(previewSliderMinPercent, p + 5),
+                        ),
+                      );
                       setPreviewPan({ x: 0, y: 0 });
                     }}
-                    disabled={previewSliderPercent >= 100 || isPreviewZoomSliderLocked}
+                    disabled={
+                      previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled
+                    }
                     className="group/prev100 relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title="Toward 100%"
+                    title="Toward max width scale"
                   >
-                    {previewSliderPercent >= 100 || isPreviewZoomSliderLocked ? (
+                    {previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled ? (
                       <img
                         src="/icons/poster-preview-100-disabled.svg"
                         alt=""
@@ -2764,11 +2826,14 @@ export default function App() {
             onWheel={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              const L = posterPreviewLayoutRef.current;
-              if (!L || L.sFill >= 1 - 1e-6) return;
-              const minPct = getPreviewSliderMinPercent(L.sFill);
+              if (previewSliderMaxPercent <= previewSliderMinPercent) return;
               const step = e.deltaY > 0 ? -4 : 4;
-              setPreviewSliderPercent((p) => Math.min(100, Math.max(minPct, p + step)));
+              setPreviewSliderPercent((p) =>
+                Math.min(
+                  previewSliderMaxPercent,
+                  Math.max(previewSliderMinPercent, p + step),
+                ),
+              );
               setPreviewPan({ x: 0, y: 0 });
             }}
             onTouchMove={(e) => e.preventDefault()}
@@ -2865,9 +2930,8 @@ export default function App() {
                       const maxW = Math.max(80, cw - pad * 2);
                       const maxH = Math.max(80, ch - pad * 2);
                       const sFill = getPreviewFillScale(nw, nh, maxW, maxH);
-                      setPreviewSliderPercent(
-                        sFill < 1 - 1e-6 ? getPreviewSliderMinPercent(sFill) : 100,
-                      );
+                      const minPct = getPreviewSliderMinPercent(sFill);
+                      setPreviewSliderPercent(minPct);
                       setPreviewPan({ x: 0, y: 0 });
                       setPreviewLayoutTick((t) => t + 1);
                     }}
@@ -2879,15 +2943,18 @@ export default function App() {
                       }
                       const L = posterPreviewLayoutRef.current;
                       if (!L) return;
-                      if (L.sFill >= 1 - 1e-6) return;
-                      const fitPct = getPreviewSliderMinPercent(L.sFill);
-                      if (previewSliderPercent > fitPct) {
-                        setPreviewSliderPercent(fitPct);
+                      if (previewSliderMaxPercent <= previewSliderMinPercent) return;
+                      if (previewSliderPercent > previewSliderMinPercent) {
+                        setPreviewSliderPercent(previewSliderMinPercent);
                         setPreviewPan({ x: 0, y: 0 });
                         return;
                       }
                       const sOld = L.s;
-                      const sNew = 1;
+                      const sNew = getPreviewDisplayScaleFromSlider(
+                        L.sFill,
+                        previewSliderMaxPercent,
+                        L.sCap,
+                      );
                       if (sOld <= 1e-9) return;
                       const targetScale = sNew / sOld;
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -2901,7 +2968,7 @@ export default function App() {
                       const maxPanY = Math.max(0, (dispHNew - L.maxH) / 2);
                       nextPanX = Math.max(-maxPanX, Math.min(maxPanX, nextPanX));
                       nextPanY = Math.max(-maxPanY, Math.min(maxPanY, nextPanY));
-                      setPreviewSliderPercent(100);
+                      setPreviewSliderPercent(previewSliderMaxPercent);
                       setPreviewPan({ x: nextPanX, y: nextPanY });
                     }}
                     onPointerDown={(e) => {
