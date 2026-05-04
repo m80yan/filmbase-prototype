@@ -18,6 +18,7 @@ const corsHeaders: Record<string, string> = {
 
 type TmdbFindResponse = {
   movie_results?: Array<{ id: number }>;
+  tv_results?: Array<{ id: number }>;
 };
 
 type TmdbMovie = {
@@ -31,6 +32,22 @@ type TmdbMovie = {
   production_countries?: Array<{ name?: string }>;
   production_companies?: Array<{ name?: string }>;
   revenue?: number | null;
+};
+
+/** TMDb `/tv/{id}` 详情（与电影路径共用归一化逻辑的字段子集）。 */
+type TmdbTv = {
+  name?: string;
+  original_name?: string;
+  first_air_date?: string;
+  episode_run_time?: number[];
+  genres?: Array<{ name: string }>;
+  poster_path?: string | null;
+  overview?: string | null;
+  tagline?: string | null;
+  production_countries?: Array<{ name?: string }>;
+  production_companies?: Array<{ name?: string }>;
+  /** 用于季级 videos 回退（`season_number`， specials 常为 0）。 */
+  seasons?: Array<{ season_number?: number }>;
 };
 
 type TmdbCrewMember = { job?: string; name?: string };
@@ -49,6 +66,7 @@ type TmdbVideo = {
   site?: string;
   official?: boolean;
   key?: string;
+  name?: string;
 };
 
 type TmdbVideos = { results?: TmdbVideo[] };
@@ -61,6 +79,7 @@ type EnrichRequestBody = {
 type CastDetailEntry = { name: string; character: string };
 
 type EnrichSuccess = {
+  mediaType: "movie" | "tv";
   title: string;
   year: number;
   runtime: string;
@@ -220,6 +239,19 @@ function formatRuntimeMinutes(minutes: number | null | undefined): string {
 }
 
 /**
+ * 从 TV `episode_run_time` 取第一个有效整数分钟数。
+ *
+ * @param times TMDb 返回的单集时长列表（分钟）
+ */
+function pickFirstEpisodeRunTimeMinutes(times: number[] | undefined): number | undefined {
+  if (!Array.isArray(times)) return undefined;
+  for (const n of times) {
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
+/**
  * 从 `release_date` 解析发行年份。
  */
 function parseYear(releaseDate: string | undefined): number {
@@ -285,6 +317,38 @@ function pickYoutubeTrailerEmbed(videos: TmdbVideos | null): string | null {
 }
 
 /**
+ * 剧集专用：仅从 YouTube 的 Trailer / Teaser 中选 embed，顺序为
+ * 官方 Trailer → 任意 Trailer → 官方 Teaser → 任意 Teaser；不使用 Clip / Featurette。
+ *
+ * @param videos TMDb `/tv/{id}/videos` 响应体
+ */
+function pickYoutubeTvTrailerOrTeaserEmbed(videos: TmdbVideos | null): string | null {
+  const results = videos?.results ?? [];
+
+  const pickOfficialFirst = (type: "Trailer" | "Teaser"): TmdbVideo | null => {
+    const list = results.filter(
+      (v) =>
+        v.type === type &&
+        v.site === "YouTube" &&
+        typeof v.key === "string" &&
+        v.key.length > 0
+    );
+    if (!list.length) return null;
+    const official = list.find((v) => v.official === true);
+    const chosen = official ?? list[0];
+    return chosen ?? null;
+  };
+
+  const trailerPick = pickOfficialFirst("Trailer");
+  if (trailerPick?.key) return `https://www.youtube.com/embed/${trailerPick.key}`;
+
+  const teaserPick = pickOfficialFirst("Teaser");
+  if (teaserPick?.key) return `https://www.youtube.com/embed/${teaserPick.key}`;
+
+  return null;
+}
+
+/**
  * 调用 TMDb v3 API（使用 Read Access Token，Bearer 鉴权）。
  *
  * @param pathWithQuery 路径，可含查询串，例如 `/find/tt0111161?external_source=imdb_id`
@@ -298,6 +362,99 @@ async function tmdbFetch(pathWithQuery: string, token: string): Promise<Response
       Authorization: `Bearer ${token}`,
     },
   });
+}
+
+/** TEMP：仅 TV 预告调试，确认后删除。 */
+const TV_TRAILER_DEBUG_PREFIX = "[tv-trailer-debug]";
+
+/**
+ * TEMP：打印每条 video 的 site / type / name / key / official（JSON 一行）。
+ *
+ * @param label 日志前缀说明（如 show-level、season N）
+ * @param videos TMDb videos 响应
+ */
+function logTvTrailerVideoRows(label: string, videos: TmdbVideos | null): void {
+  const rows = (videos?.results ?? []).map((v) => ({
+    site: v.site ?? null,
+    type: v.type ?? null,
+    name: typeof v.name === "string" ? v.name : null,
+    key: typeof v.key === "string" ? v.key : null,
+    official: v.official === true ? true : v.official === false ? false : null,
+  }));
+  console.log(`${TV_TRAILER_DEBUG_PREFIX} ${label}`, JSON.stringify(rows));
+}
+
+/**
+ * TV：先试 show 级 videos；无命中则据 `/tv/{id}` 的 `seasons` 取最多 3 个正季号（升序）逐季请求
+ * `/tv/{id}/season/{n}/videos`；仍无则最后试 specials（season 0）。每步使用 `pickYoutubeTvTrailerOrTeaserEmbed`，首条命中即返回。
+ *
+ * @param token TMDb Read Access Token
+ * @param tmdbId TMDb TV id
+ * @param showVideos show 级 `/tv/{id}/videos` 解析结果
+ * @param tvDetail 已拉取的 `/tv/{id}` 详情（含 `seasons`）
+ */
+async function pickYoutubeTvTrailerAcrossShowAndSeasons(
+  token: string,
+  tmdbId: number,
+  showVideos: TmdbVideos | null,
+  tvDetail: TmdbTv,
+): Promise<string | null> {
+  console.log(`${TV_TRAILER_DEBUG_PREFIX} resolved tv tmdbId:`, tmdbId);
+  logTvTrailerVideoRows("show-level videos", showVideos);
+
+  let trailer = pickYoutubeTvTrailerOrTeaserEmbed(showVideos);
+  if (trailer != null) {
+    console.log(`${TV_TRAILER_DEBUG_PREFIX} final selected trailerUrl:`, trailer);
+    return trailer;
+  }
+
+  const seasons = Array.isArray(tvDetail.seasons) ? tvDetail.seasons : [];
+  const regularSeasonNumbers = [...new Set(
+    seasons
+      .map((s) => s.season_number)
+      .filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0),
+  )].sort((a, b) => a - b).slice(0, 3);
+
+  for (const sn of regularSeasonNumbers) {
+    console.log(`${TV_TRAILER_DEBUG_PREFIX} checking season:`, sn);
+    const res = await tmdbFetch(`/tv/${tmdbId}/season/${sn}/videos`, token);
+    if (!res.ok) {
+      console.log(`${TV_TRAILER_DEBUG_PREFIX} season ${sn} videos fetch not ok, status:`, res.status);
+      continue;
+    }
+    try {
+      const j = (await res.json()) as TmdbVideos;
+      logTvTrailerVideoRows(`season ${sn} videos`, j);
+      trailer = pickYoutubeTvTrailerOrTeaserEmbed(j);
+      if (trailer != null) {
+        console.log(`${TV_TRAILER_DEBUG_PREFIX} final selected trailerUrl:`, trailer);
+        return trailer;
+      }
+    } catch {
+      /* 继续下一季 */
+    }
+  }
+
+  console.log(`${TV_TRAILER_DEBUG_PREFIX} checking season:`, 0);
+  const s0Res = await tmdbFetch(`/tv/${tmdbId}/season/0/videos`, token);
+  if (!s0Res.ok) {
+    console.log(`${TV_TRAILER_DEBUG_PREFIX} season 0 videos fetch not ok, status:`, s0Res.status);
+  } else {
+    try {
+      const j = (await s0Res.json()) as TmdbVideos;
+      logTvTrailerVideoRows("season 0 videos", j);
+      trailer = pickYoutubeTvTrailerOrTeaserEmbed(j);
+      if (trailer != null) {
+        console.log(`${TV_TRAILER_DEBUG_PREFIX} final selected trailerUrl:`, trailer);
+        return trailer;
+      }
+    } catch {
+      /* 无预告 */
+    }
+  }
+
+  console.log(`${TV_TRAILER_DEBUG_PREFIX} final selected trailerUrl:`, null);
+  return null;
 }
 
 type OmdbBundle = {
@@ -460,12 +617,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const findJson = (await findRes.json()) as TmdbFindResponse;
-  const movieId = findJson.movie_results?.[0]?.id;
-  if (movieId == null || !Number.isFinite(movieId)) {
+  const movieIdRaw = findJson.movie_results?.[0]?.id;
+  const tvIdRaw = findJson.tv_results?.[0]?.id;
+  const mediaType: "movie" | "tv" =
+    movieIdRaw != null && Number.isFinite(movieIdRaw) ? "movie" : "tv";
+  const tmdbId =
+    mediaType === "movie"
+      ? (movieIdRaw as number)
+      : tvIdRaw != null && Number.isFinite(tvIdRaw)
+        ? tvIdRaw
+        : null;
+
+  if (tmdbId == null) {
     return new Response(
       JSON.stringify({
         error: "Not found",
-        message: `No TMDb movie_results for IMDb id ${ttId}`,
+        message: `No TMDb movie or TV result for IMDb id ${ttId}`,
       }),
       {
         status: 404,
@@ -475,21 +642,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const omdbKey = Deno.env.get("OMDB_API_KEY");
+  const pathPrefix = mediaType === "movie" ? "movie" : "tv";
 
-  const [movieRes, creditsRes, videosRes, altTitlesRes, omdb] = await Promise.all([
-    tmdbFetch(`/movie/${movieId}`, token),
-    tmdbFetch(`/movie/${movieId}/credits`, token),
-    tmdbFetch(`/movie/${movieId}/videos`, token),
-    tmdbFetch(`/movie/${movieId}/alternative_titles`, token),
+  const [detailRes, creditsRes, videosRes, altTitlesRes, omdb] = await Promise.all([
+    tmdbFetch(`/${pathPrefix}/${tmdbId}`, token),
+    tmdbFetch(`/${pathPrefix}/${tmdbId}/credits`, token),
+    tmdbFetch(`/${pathPrefix}/${tmdbId}/videos`, token),
+    tmdbFetch(`/${pathPrefix}/${tmdbId}/alternative_titles`, token),
     fetchOmdbBundle(ttId, omdbKey),
   ]);
 
-  if (!movieRes.ok) {
-    const t = await movieRes.text();
+  if (!detailRes.ok) {
+    const t = await detailRes.text();
     return new Response(
       JSON.stringify({
-        error: "TMDb movie failed",
-        status: movieRes.status,
+        error: mediaType === "movie" ? "TMDb movie failed" : "TMDb tv failed",
+        status: detailRes.status,
         detail: t.slice(0, 500),
       }),
       {
@@ -499,7 +667,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const movie = (await movieRes.json()) as TmdbMovie;
   const credits: TmdbCredits = creditsRes.ok
     ? ((await creditsRes.json()) as TmdbCredits)
     : {};
@@ -510,39 +677,91 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ? ((await altTitlesRes.json()) as TmdbAltTitlesResponse)
     : null;
 
-  const overview = typeof movie.overview === "string" ? movie.overview.trim() : "";
-  const tmdbWriterFallback = extractWritersFromCrew(credits.crew);
-  const tmdbCountries = (movie.production_countries ?? [])
-    .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
-    .filter(Boolean)
-    .join(", ");
-  const tmdbBoxOffice = formatUsdRevenue(movie.revenue ?? undefined);
-  const omdbBox = omdb.boxOffice;
+  let payload: EnrichSuccess;
 
-  const payload: EnrichSuccess = {
-    title: movie.title ?? "",
-    year: parseYear(movie.release_date),
-    runtime: formatRuntimeMinutes(movie.runtime ?? undefined),
-    genres: (movie.genres ?? []).map((g) => g.name).filter(Boolean),
-    director: extractDirectors(credits.crew),
-    cast: extractCastTop(credits.cast, 15),
-    posterUrl: posterUrlFromPath(movie.poster_path),
-    trailerUrl: pickYoutubeTrailerEmbed(videos),
-    imdbRating: omdb.imdbRating,
-    rottenTomatoes: omdb.rottenTomatoes,
-    contentRating: omdb.contentRating,
-    plot: omdb.plot || overview,
-    writer: omdb.writer || tmdbWriterFallback,
-    tagline: typeof movie.tagline === "string" ? movie.tagline.trim() : "",
-    releaseDate: omdb.releaseDate || (typeof movie.release_date === "string" ? movie.release_date.trim() : ""),
-    countryOfOrigin: omdb.countryOfOrigin || tmdbCountries,
-    alsoKnownAs: pickAlsoKnownAs(altTitlesJson),
-    productionCompanies: (movie.production_companies ?? [])
+  if (mediaType === "movie") {
+    const movie = (await detailRes.json()) as TmdbMovie;
+    const overview = typeof movie.overview === "string" ? movie.overview.trim() : "";
+    const tmdbWriterFallback = extractWritersFromCrew(credits.crew);
+    const tmdbCountries = (movie.production_countries ?? [])
       .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
-      .filter(Boolean),
-    boxOffice: omdbBox || tmdbBoxOffice,
-    castDetails: extractCastDetails(credits.cast, 15),
-  };
+      .filter(Boolean)
+      .join(", ");
+    const tmdbBoxOffice = formatUsdRevenue(movie.revenue ?? undefined);
+    const omdbBox = omdb.boxOffice;
+
+    payload = {
+      mediaType: "movie",
+      title: movie.title ?? "",
+      year: parseYear(movie.release_date),
+      runtime: formatRuntimeMinutes(movie.runtime ?? undefined),
+      genres: (movie.genres ?? []).map((g) => g.name).filter(Boolean),
+      director: extractDirectors(credits.crew),
+      cast: extractCastTop(credits.cast, 15),
+      posterUrl: posterUrlFromPath(movie.poster_path),
+      trailerUrl: pickYoutubeTrailerEmbed(videos),
+      imdbRating: omdb.imdbRating,
+      rottenTomatoes: omdb.rottenTomatoes,
+      contentRating: omdb.contentRating,
+      plot: omdb.plot || overview,
+      writer: omdb.writer || tmdbWriterFallback,
+      tagline: typeof movie.tagline === "string" ? movie.tagline.trim() : "",
+      releaseDate: omdb.releaseDate || (typeof movie.release_date === "string" ? movie.release_date.trim() : ""),
+      countryOfOrigin: omdb.countryOfOrigin || tmdbCountries,
+      alsoKnownAs: pickAlsoKnownAs(altTitlesJson),
+      productionCompanies: (movie.production_companies ?? [])
+        .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
+        .filter(Boolean),
+      boxOffice: omdbBox || tmdbBoxOffice,
+      castDetails: extractCastDetails(credits.cast, 15),
+    };
+  } else {
+    const tv = (await detailRes.json()) as TmdbTv;
+    const overview = typeof tv.overview === "string" ? tv.overview.trim() : "";
+    const tmdbWriterFallback = extractWritersFromCrew(credits.crew);
+    const tmdbCountries = (tv.production_countries ?? [])
+      .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
+      .filter(Boolean)
+      .join(", ");
+    const omdbBox = omdb.boxOffice;
+
+    const title =
+      typeof tv.name === "string" && tv.name.trim()
+        ? tv.name.trim()
+        : typeof tv.original_name === "string"
+          ? tv.original_name.trim()
+          : "";
+
+    const trailerUrl = await pickYoutubeTvTrailerAcrossShowAndSeasons(token, tmdbId, videos, tv);
+
+    payload = {
+      mediaType: "tv",
+      title,
+      year: parseYear(tv.first_air_date),
+      runtime: formatRuntimeMinutes(pickFirstEpisodeRunTimeMinutes(tv.episode_run_time)),
+      genres: (tv.genres ?? []).map((g) => g.name).filter(Boolean),
+      director: extractDirectors(credits.crew),
+      cast: extractCastTop(credits.cast, 15),
+      posterUrl: posterUrlFromPath(tv.poster_path),
+      trailerUrl,
+      imdbRating: omdb.imdbRating,
+      rottenTomatoes: omdb.rottenTomatoes,
+      contentRating: omdb.contentRating,
+      plot: omdb.plot || overview,
+      writer: omdb.writer || tmdbWriterFallback,
+      tagline: typeof tv.tagline === "string" ? tv.tagline.trim() : "",
+      releaseDate:
+        omdb.releaseDate ||
+        (typeof tv.first_air_date === "string" ? tv.first_air_date.trim() : ""),
+      countryOfOrigin: omdb.countryOfOrigin || tmdbCountries,
+      alsoKnownAs: pickAlsoKnownAs(altTitlesJson),
+      productionCompanies: (tv.production_companies ?? [])
+        .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
+        .filter(Boolean),
+      boxOffice: omdbBox,
+      castDetails: extractCastDetails(credits.cast, 15),
+    };
+  }
 
   return new Response(JSON.stringify(payload), {
     status: 200,

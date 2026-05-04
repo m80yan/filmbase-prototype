@@ -40,6 +40,10 @@ export interface Movie {
    * 仅客户端 UI：搜索快加后 enrich 尚未完成时为 true；与 DB 无关。
    */
   isMetadataPending?: boolean;
+  /**
+   * 来自 `enrich-movie-from-imdb`（`movie` | `tv`）。当前 `filmbase_*` 表无对应列，不落库；刷新后可能缺失。
+   */
+  mediaType?: 'movie' | 'tv';
 }
 
 export type FilterType = 'genre' | 'year' | 'rating';

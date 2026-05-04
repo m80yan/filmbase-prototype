@@ -498,12 +498,18 @@ const LIBRARY_LOADING_REEL_SRC = '/icons/library-loading-reel.svg';
  * 若实际加载短于音轨时长则中途截断；长于音轨则播完后静默直至 UI 就绪。
  */
 const LIBRARY_LOADING_SOUND_SRC = '/sounds/library-ready.mp3';
+/** 预览交互禁用提示音：例如 Z 缩放无可用区间时播放（`public/sounds/ui-disabled.mp3`）。 */
+const UI_DISABLED_SOUND_SRC = '/sounds/ui-disabled.mp3';
 
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const trailerIframeRef = useRef<HTMLIFrameElement>(null);
   /** 卡片全屏海报 modal 内 file input；与主内容区内 scoped 上传面板互斥挂载，可安全共用 ref。 */
   const posterFileInputRef = useRef<HTMLInputElement>(null);
+  /** 海报预览打开后将焦点移入 overlay，避免 Enter/Space 默认激活底层按钮导致重复 open/hero 闪回。 */
+  const posterPreviewOverlayRef = useRef<HTMLDivElement>(null);
+  const uiDisabledAudioRef = useRef<HTMLAudioElement | null>(null);
+  const uiDisabledAudioLastPlayAtRef = useRef(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [movies, setMovies] = useState<Movie[]>(() => {
     return MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
@@ -1032,6 +1038,29 @@ export default function App() {
     closePosterPreview,
   ]);
 
+  /** 预览打开时将焦点移入 overlay；并屏蔽 Enter/Space 的默认「激活按钮」行为（预览仅响应 ESC 与 Z）。 */
+  useEffect(() => {
+    if (!isPosterPreviewOpen) return;
+    posterPreviewOverlayRef.current?.focus?.();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const ae = document.activeElement;
+      if (
+        ae instanceof HTMLInputElement ||
+        ae instanceof HTMLTextAreaElement ||
+        ae instanceof HTMLSelectElement ||
+        (ae instanceof HTMLElement && ae.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as any);
+  }, [isPosterPreviewOpen]);
+
   /**
    * 海报预览打开时：`Z` 仅在 Fit 与 Fit Width 间切换（不到 100%）；预览区内任意位置生效。
    */
@@ -1053,7 +1082,22 @@ export default function App() {
         return;
       }
       const { fitPct, fitWidthPct } = previewSliderRangeRef.current;
-      if (isNearPreviewZoomPercent(fitPct, fitWidthPct)) return;
+      if (isNearPreviewZoomPercent(fitPct, fitWidthPct)) {
+        const now = Date.now();
+        if (now - uiDisabledAudioLastPlayAtRef.current > 180) {
+          uiDisabledAudioLastPlayAtRef.current = now;
+          const audio =
+            uiDisabledAudioRef.current ?? new Audio(UI_DISABLED_SOUND_SRC);
+          uiDisabledAudioRef.current = audio;
+          try {
+            audio.currentTime = 0;
+          } catch {
+            // no-op
+          }
+          void audio.play().catch(() => {});
+        }
+        return;
+      }
       if (previewSliderInteractionLockedRef.current) return;
       const p = previewSliderPercentRef.current;
       const nearFitWidth = isNearPreviewZoomPercent(p, fitWidthPct);
@@ -1338,8 +1382,8 @@ export default function App() {
   };
 
   /**
-   * 应用新的预告片 URL：规范化为 YouTube embed，更新 `movies` 与 `selectedMovie`，并写入共享公共表。
-   * 失败时回滚乐观更新并保留弹窗，便于用户重试。
+   * 应用新的预告片 URL：先校验并写入 Supabase，成功后再更新 `movies` / `selectedMovie` 并关弹窗；
+   * 失败则保留弹窗与背后预告预览不变。
    */
   const handleApplyEditTrailerUrl = async () => {
     if (!selectedMovie) return;
@@ -1353,38 +1397,26 @@ export default function App() {
       setEditTrailerError('Could not parse this as a YouTube trailer URL.');
       return;
     }
+
     setIsEditingTrailer(true);
     setEditTrailerError('');
-    const previousTrailer = selectedMovie.trailerUrl ?? '';
-    const updatedMovie: Movie = { ...selectedMovie, trailerUrl: normalized };
-    setMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
-    setSelectedMovie(updatedMovie);
 
-    const supabase = supabaseRef.current;
-    if (!supabase) {
-      setEditTrailerError('Not connected to shared library. Please try again.');
-      setIsEditingTrailer(false);
-      setMovies((prev) =>
-        prev.map((m) => (m.id === updatedMovie.id ? { ...m, trailerUrl: previousTrailer } : m))
-      );
-      setSelectedMovie({ ...updatedMovie, trailerUrl: previousTrailer });
-      return;
-    }
+    const supabase = supabaseRef.current ?? getSupabaseClient();
+    supabaseRef.current = supabase;
 
     try {
-      await updatePublicMovieTrailerUrl(supabase, updatedMovie.id, normalized);
+      await updatePublicMovieTrailerUrl(supabase, selectedMovie.id, normalized);
+      const updatedMovie: Movie = { ...selectedMovie, trailerUrl: normalized };
+      setMovies((prev) => prev.map((m) => (m.id === updatedMovie.id ? updatedMovie : m)));
+      setSelectedMovie(updatedMovie);
       setIsEditingTrailer(false);
       setIsEditTrailerModalOpen(false);
     } catch (err) {
       console.error('Failed to persist trailer URL to public library:', err);
-      setMovies((prev) =>
-        prev.map((m) => (m.id === updatedMovie.id ? { ...m, trailerUrl: previousTrailer } : m))
-      );
-      setSelectedMovie({ ...updatedMovie, trailerUrl: previousTrailer });
       setEditTrailerError(
         err instanceof Error
           ? `Could not save trailer URL: ${err.message}`
-          : 'Could not save trailer URL. Please try again.'
+          : 'Could not save trailer URL. Please try again.',
       );
       setIsEditingTrailer(false);
     }
@@ -1564,6 +1596,7 @@ export default function App() {
     }
 
     const payload = data as {
+      mediaType?: 'movie' | 'tv';
       title?: string;
       year?: number;
       runtime?: string;
@@ -1660,6 +1693,8 @@ export default function App() {
         : [],
       boxOffice: typeof payload.boxOffice === 'string' ? payload.boxOffice : '',
       castDetails,
+      mediaType:
+        payload.mediaType === 'tv' ? 'tv' : payload.mediaType === 'movie' ? 'movie' : 'movie',
     };
 
     let uid = supabaseUidRef.current;
@@ -3721,10 +3756,12 @@ export default function App() {
       <AnimatePresence>
         {isPosterPreviewOpen && posterPreviewMovie && (
           <motion.div
+            ref={posterPreviewOverlayRef}
+            tabIndex={-1}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md"
+            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md outline-none focus:outline-none focus-visible:outline-none"
             onClick={() => {
               if (isAwaitingPosterApplyConfirm) return;
               closePosterPreview();
@@ -4071,7 +4108,7 @@ export default function App() {
                 )}
                 <div className="relative">
                   <label className="block text-xs font-medium text-white/50 mb-2">
-                    Search by title
+                    Search movies by title
                   </label>
                   <div className="relative w-full">
                     <input
@@ -4237,7 +4274,7 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-medium text-white/50 mb-2">
-                    Or paste IMDb URL
+                    Or paste IMDb movie / TV URL
                   </label>
                   <input
                     type="text"
@@ -5468,7 +5505,7 @@ function MovieCard({
           </div>
         </div>
         
-        <div className="flex min-h-0 min-w-0 flex-col self-stretch pl-10">
+        <div className="flex min-h-0 min-w-0 flex-col self-stretch pl-0">
           {/** 片名 `text-base`/`leading-6`；`pt` 小于他列，首行略上移，year·runtime 仍与 starring 第 2 行对齐 */}
           <div
             className="relative flex min-h-0 flex-1 flex-col items-start justify-start text-left"
