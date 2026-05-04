@@ -36,6 +36,10 @@ export interface Movie {
   productionCompanies?: string[];
   boxOffice?: string;
   castDetails?: MovieCastDetail[];
+  /**
+   * 仅客户端 UI：搜索快加后 enrich 尚未完成时为 true；与 DB 无关。
+   */
+  isMetadataPending?: boolean;
 }
 
 export type FilterType = 'genre' | 'year' | 'rating';

@@ -64,6 +64,12 @@
   .animate-marquee-vertical-slow {
     animation: marquee-vertical-continuous 15s linear infinite;
   }
+
+  /** Edit Trailer URL 输入框内文本选中态，覆盖外层 macos-window 的金色 selection。 */
+  .edit-trailer-url-input::selection {
+    background-color: #76777f;
+    color: #ffffff;
+  }
 }
 
 @layer base {

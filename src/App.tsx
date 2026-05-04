@@ -29,6 +29,68 @@ import {
 } from './lib/filmbaseSupabase';
 
 /**
+ * `search-movies` Edge Function 返回的单条命中（展示建议时仅保留 `imdbId` 非空的项）。
+ */
+type MovieSearchHit = {
+  tmdbId: number;
+  imdbId: string | null;
+  title: string;
+  originalTitle: string;
+  releaseDate: string;
+  year: number | null;
+  posterUrl: string | null;
+  overview: string;
+  popularity: number;
+  voteAverage: number;
+};
+
+/**
+ * 从搜索命中构造快加占位 `Movie`（`isMetadataPending`，待 enrich 完成后替换）。
+ *
+ * @param hit 已保证含非空 `imdbId` 的搜索命中
+ */
+function buildPlaceholderMovieFromSearchHit(hit: MovieSearchHit & { imdbId: string }): Movie {
+  const imdbId = hit.imdbId.trim().toLowerCase();
+  const year =
+    typeof hit.year === 'number' && Number.isFinite(hit.year)
+      ? hit.year
+      : hit.releaseDate && /^\d{4}/.test(hit.releaseDate)
+        ? parseInt(hit.releaseDate.slice(0, 4), 10) || 0
+        : 0;
+  const posterUrl =
+    typeof hit.posterUrl === 'string' && hit.posterUrl.trim() ? hit.posterUrl.trim() : '';
+  return {
+    id: imdbId,
+    title: hit.title?.trim() || 'Unknown',
+    year,
+    genre: [],
+    director: '',
+    cast: [],
+    imdbRating: 0,
+    rottenTomatoes: 0,
+    personalRating: 0,
+    runtime: '',
+    posterUrl,
+    trailerUrl: '',
+    isFavorite: false,
+    language: '',
+    isRecentlyAdded: true,
+    dateAdded: Date.now(),
+    contentRating: '',
+    plot: '',
+    writer: '',
+    tagline: '',
+    releaseDate: typeof hit.releaseDate === 'string' ? hit.releaseDate : '',
+    countryOfOrigin: '',
+    alsoKnownAs: [],
+    productionCompanies: [],
+    boxOffice: '',
+    castDetails: [],
+    isMetadataPending: true,
+  };
+}
+
+/**
  * 规范化标题用于身份键：小写、trim、去掉标点类字符、合并连续空白。
  */
 function normalizeTitleForIdentity(title: string): string {
@@ -40,6 +102,24 @@ function normalizeTitleForIdentity(title: string): string {
     .trim();
 }
 
+/**
+ * 判断 Add Movie 搜索建议是否已在当前库中：`imdbId` 与 `movie.id` 一致，或规范化标题 + 年份与已有条目一致。
+ *
+ * @param hit — `search-movies` 单条命中。
+ * @param list — 当前片单 `Movie[]`。
+ */
+function isAddMovieSearchSuggestionInLibrary(hit: MovieSearchHit, list: Movie[]): boolean {
+  const imdb = typeof hit.imdbId === 'string' ? hit.imdbId.trim().toLowerCase() : '';
+  if (imdb && list.some((m) => m.id.toLowerCase() === imdb)) return true;
+
+  const nt = normalizeTitleForIdentity(hit.title);
+  if (!nt) return false;
+  const y = hit.year;
+  if (y == null || !Number.isFinite(y)) return false;
+
+  return list.some((m) => normalizeTitleForIdentity(m.title) === nt && m.year === y);
+}
+
 /** `public/icons` 下已有素材的类型 slug（与 `{slug}.svg` / `{slug}-hover.svg` 文件名一致）。 */
 const SIDEBAR_GENRE_ICON_SLUGS = new Set([
   'action',
@@ -48,16 +128,28 @@ const SIDEBAR_GENRE_ICON_SLUGS = new Set([
   'biography',
   'comedy',
   'crime',
+  'documentary',
   'drama',
   'family',
   'fantasy',
+  'film-noir',
+  'game-show',
   'history',
   'horror',
+  'music',
+  'musical',
   'mystery',
+  'news',
+  'reality-tv',
   'romance',
   'sci-fi',
+  'short',
+  'sport',
+  'talk-show',
   'thriller',
   'war',
+  /** `lasso.svg`：用于展示标签 `Western`（见 `genreLabelToIconSlug`）。 */
+  'lasso',
 ]);
 
 /**
@@ -79,13 +171,14 @@ function normalizeGenreDisplayLabel(g: string): string {
  * 将片库中的 genre 文案映射为侧栏图标 slug。
  * 无单独设计的类型统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
  *
- * @param label 如 `Sci-Fi`、`War`、`Animation`
+ * @param label 如 `Sci-Fi`、`War`、`Western`（映射为 `lasso` 素材）
  */
 function genreLabelToIconSlug(label: string): string {
   const t = label.trim();
   if (!t) return 'fallback';
   const lower = t.toLowerCase();
   if (lower === 'sci fi' || lower === 'science fiction') return 'sci-fi';
+  if (lower === 'western') return 'lasso';
   const slug = lower.replace(/\s+/g, '-');
   if (SIDEBAR_GENRE_ICON_SLUGS.has(slug)) return slug;
   return 'fallback';
@@ -415,10 +508,55 @@ export default function App() {
   const [movies, setMovies] = useState<Movie[]>(() => {
     return MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
   });
+  /** 供 Add Movie 去重等逻辑读取最新 `movies`，避免闭包陈旧。 */
+  const moviesRef = useRef<Movie[]>(movies);
+  moviesRef.current = movies;
 
   const supabaseRef = useRef<ReturnType<typeof getSupabaseClient> | null>(null);
   const supabaseUidRef = useRef<string | null>(null);
   const hasHydratedRef = useRef(false);
+
+  /**
+   * Storage 海报 signed URL 可能过期（1h TTL）；筛选/懒加载可能在过期后才触发请求。
+   * 对同一 `(movieId, storagePath)` 仅重签一次，避免无限重试循环。
+   */
+  const posterResignAttemptedRef = useRef<Set<string>>(new Set());
+  const refreshPosterSignedUrlOnce = useCallback(
+    async (movieId: string, storagePath: string): Promise<string | null> => {
+      const sp = storagePath.trim();
+      if (!sp) return null;
+      const supabase = supabaseRef.current;
+      if (!supabase) return null;
+
+      const attemptKey = `${movieId}::${sp}`;
+      if (posterResignAttemptedRef.current.has(attemptKey)) return null;
+      posterResignAttemptedRef.current.add(attemptKey);
+
+      const SIGNED_URL_TTL_SECONDS = 60 * 60;
+      const { data, error } = await supabase.storage
+        .from('filmbase-posters')
+        .createSignedUrl(sp, SIGNED_URL_TTL_SECONDS);
+      if (error) return null;
+      const signedUrl = data?.signedUrl;
+      if (!signedUrl || !signedUrl.trim()) return null;
+
+      const joiner = signedUrl.includes('?') ? '&' : '?';
+      const nextUrl = `${signedUrl}${joiner}v=${encodeURIComponent(String(Date.now()))}`;
+
+      setMovies((prev) =>
+        prev.map((m) => (m.id === movieId ? { ...m, posterUrl: nextUrl, posterStoragePath: sp } : m)),
+      );
+      setSelectedMovie((prev) =>
+        prev?.id === movieId ? { ...prev, posterUrl: nextUrl, posterStoragePath: sp } : prev,
+      );
+      setPosterPreviewMovie((prev) =>
+        prev?.id === movieId ? { ...prev, posterUrl: nextUrl, posterStoragePath: sp } : prev,
+      );
+
+      return nextUrl;
+    },
+    [],
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -504,6 +642,8 @@ export default function App() {
   const [sortMode, setSortMode] = useState<'title-asc' | 'title-desc' | 'duration-desc' | 'duration-asc' | 'imdb-asc' | 'imdb-desc' | 'rt-asc' | 'rt-desc' | 'personal-asc' | 'personal-desc'>('title-asc');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  /** 编辑库模式下「删除影片」二次确认弹窗当前选中的条目（与 Add / Edit Trailer 同宿主、同遮罩规范）。 */
+  const [deleteMovieConfirm, setDeleteMovieConfirm] = useState<Movie | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [newMovieTitle, setNewMovieTitle] = useState('');
   const [newMovieUrl, setNewMovieUrl] = useState('');
@@ -511,6 +651,40 @@ export default function App() {
   const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
   const [addError, setAddError] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  /** Add Movie 在线标题搜索：`search-movies` 返回且含 `imdbId` 的候选。 */
+  const [addMovieSearchHits, setAddMovieSearchHits] = useState<Array<MovieSearchHit & { imdbId: string }>>([]);
+  const [addMovieSearchLoading, setAddMovieSearchLoading] = useState(false);
+  const [addMovieSearchError, setAddMovieSearchError] = useState('');
+  /** 用户按 Esc 后暂隐藏建议下拉，直至查询变化。 */
+  const [addMovieSuggestionsDismissed, setAddMovieSuggestionsDismissed] = useState(false);
+  /** 键盘导航时当前高亮的建议索引（`-1` 表示无）。 */
+  const [addMovieActiveSuggestionIndex, setAddMovieActiveSuggestionIndex] = useState(-1);
+  const addMovieSearchSeqRef = useRef(0);
+  /** Add Movie modal「Search by title」输入框：打开 modal 时自动聚焦。 */
+  const addMovieTitleSearchInputRef = useRef<HTMLInputElement>(null);
+  /** 主片库纵向滚动容器（网格/列表共用），用于 `scrollIntoView` 的滚动祖先与可见区判断。 */
+  const mainLibraryScrollRef = useRef<HTMLDivElement>(null);
+  /** 片库中每部影片根节点（网格卡片 / 列表行）`movie.id → HTMLElement`。 */
+  const movieLibraryItemElsRef = useRef<Map<string, HTMLElement>>(new Map());
+  /**
+   * 新增影片写入 `movies` 后：在下一帧布局中滚动到该片。
+   * 成功添加后写入 id，`useLayoutEffect` 消费后置 `null`。
+   */
+  const [pendingScrollMovieId, setPendingScrollMovieId] = useState<string | null>(null);
+
+  /** 注册/卸载片库条目 DOM，供新增后滚动定位。 */
+  const registerMovieLibraryItemEl = useCallback((movieId: string, el: HTMLElement | null) => {
+    const map = movieLibraryItemElsRef.current;
+    if (el) map.set(movieId, el);
+    else map.delete(movieId);
+  }, []);
+  /**
+   * 遮罩关闭手势：仅当指针在遮罩层本身按下并松开（`target === currentTarget`），
+   * 避免从面板内拖选文本后在外围松手误触关闭。
+   */
+  const addMovieBackdropCloseArmedRef = useRef(false);
+  const editTrailerBackdropCloseArmedRef = useRef(false);
+  const deleteMovieBackdropCloseArmedRef = useRef(false);
   /** 预告片浮层「Edit Trailer URL」弹窗：仅打开/关闭，与 `selectedMovie` 当前 `trailerUrl` 关联。 */
   const [isEditTrailerModalOpen, setIsEditTrailerModalOpen] = useState(false);
   const [editTrailerUrlInput, setEditTrailerUrlInput] = useState('');
@@ -569,6 +743,7 @@ export default function App() {
       if (isPosterPreviewOpen) return;
       if (selectedMovie && modalMode === 'trailer') return;
       if (selectedMovie && modalMode === 'poster') return;
+      if (deleteMovieConfirm) return;
       if (isAddModalOpen) return;
       if (isEditTrailerModalOpen) return;
       if (isSortDropdownOpen) return;
@@ -579,6 +754,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isEditing,
+    deleteMovieConfirm,
     isPosterPreviewOpen,
     selectedMovie,
     modalMode,
@@ -586,6 +762,18 @@ export default function App() {
     isEditTrailerModalOpen,
     isSortDropdownOpen,
   ]);
+
+  /** 删除确认弹窗：`Esc` 关闭（不删片）。 */
+  useEffect(() => {
+    if (!deleteMovieConfirm) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setDeleteMovieConfirm(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [deleteMovieConfirm]);
 
   useEffect(() => {
     if (hasHydratedRef.current) return;
@@ -1353,183 +1541,341 @@ export default function App() {
     })();
   };
 
-  const handleAddMovie = async () => {
-    if (!newMovieUrl.trim()) return;
+  /**
+   * Enrich + 组装完整 `Movie` 并 `upsertPublicMovie`（不含 modal / `isAdding` / 本地列表写入）。
+   *
+   * @param imdbId 规范小写 `tt…` id
+   * @param userTrailerFromModal Add Movie modal 内用户填的预告片 URL（trim 后）
+   * @returns 写入后的完整影片
+   */
+  const enrichAndUpsertNewMovie = async (
+    imdbId: string,
+    userTrailerFromModal: string,
+  ): Promise<Movie> => {
+    const supabase = supabaseRef.current ?? getSupabaseClient();
+    supabaseRef.current = supabase;
+
+    const { data, error } = await supabase.functions.invoke('enrich-movie-from-imdb', {
+      body: { imdbId },
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Enrich failed');
+    }
+
+    const payload = data as {
+      title?: string;
+      year?: number;
+      runtime?: string;
+      genres?: string[];
+      director?: string;
+      cast?: string[];
+      posterUrl?: string;
+      trailerUrl?: string | null;
+      imdbRating?: number;
+      rottenTomatoes?: number;
+      contentRating?: string;
+      plot?: string;
+      writer?: string;
+      tagline?: string;
+      releaseDate?: string;
+      countryOfOrigin?: string;
+      alsoKnownAs?: string[];
+      productionCompanies?: string[];
+      boxOffice?: string;
+      castDetails?: Array<{ name?: string; character?: string }>;
+      error?: string;
+      message?: string;
+    };
+
+    if (!payload || typeof payload === 'string' || payload.error) {
+      throw new Error(
+        typeof payload?.message === 'string'
+          ? payload.message
+          : typeof payload?.error === 'string'
+            ? payload.error
+            : 'Failed to enrich movie',
+      );
+    }
+
+    const trailerFromEdge = payload.trailerUrl?.trim() ?? '';
+    const trailerUrl = userTrailerFromModal
+      ? getYouTubeEmbedUrl(userTrailerFromModal)
+      : trailerFromEdge
+        ? getYouTubeEmbedUrl(trailerFromEdge)
+        : '';
+
+    const posterUrl =
+      payload.posterUrl && payload.posterUrl.trim()
+        ? payload.posterUrl.trim()
+        : 'https://picsum.photos/seed/movie/400/600';
+
+    const castDetails: MovieCastDetail[] = Array.isArray(payload.castDetails)
+      ? payload.castDetails
+          .map((e) => {
+            if (!e || typeof e !== 'object') return null;
+            const name =
+              typeof (e as { name?: string }).name === 'string'
+                ? (e as { name: string }).name.trim()
+                : '';
+            if (!name) return null;
+            const character =
+              typeof (e as { character?: string }).character === 'string'
+                ? (e as { character: string }).character.trim()
+                : '';
+            return { name, character };
+          })
+          .filter((x): x is MovieCastDetail => x != null)
+          .slice(0, 15)
+      : [];
+
+    const newMovie: Movie = {
+      id: imdbId,
+      title: payload.title ?? 'Unknown',
+      year: typeof payload.year === 'number' && Number.isFinite(payload.year) ? payload.year : 0,
+      genre: Array.isArray(payload.genres) ? payload.genres : [],
+      director: payload.director ?? '',
+      cast: Array.isArray(payload.cast) ? payload.cast.slice(0, 15) : [],
+      imdbRating: typeof payload.imdbRating === 'number' ? payload.imdbRating : 0,
+      rottenTomatoes: typeof payload.rottenTomatoes === 'number' ? payload.rottenTomatoes : 0,
+      personalRating: 0,
+      runtime: payload.runtime ?? '',
+      posterUrl,
+      trailerUrl,
+      isFavorite: false,
+      language: '',
+      isRecentlyAdded: true,
+      dateAdded: Date.now(),
+      contentRating: String(payload.contentRating ?? ''),
+      plot: typeof payload.plot === 'string' ? payload.plot : '',
+      writer: typeof payload.writer === 'string' ? payload.writer : '',
+      tagline: typeof payload.tagline === 'string' ? payload.tagline : '',
+      releaseDate: typeof payload.releaseDate === 'string' ? payload.releaseDate : '',
+      countryOfOrigin: typeof payload.countryOfOrigin === 'string' ? payload.countryOfOrigin : '',
+      alsoKnownAs: Array.isArray(payload.alsoKnownAs)
+        ? payload.alsoKnownAs.filter((s): s is string => typeof s === 'string')
+        : [],
+      productionCompanies: Array.isArray(payload.productionCompanies)
+        ? payload.productionCompanies.filter((s): s is string => typeof s === 'string')
+        : [],
+      boxOffice: typeof payload.boxOffice === 'string' ? payload.boxOffice : '',
+      castDetails,
+    };
+
+    let uid = supabaseUidRef.current;
+    if (!uid) {
+      try {
+        uid = await signInAnonymously(supabase);
+        supabaseUidRef.current = uid;
+      } catch (authErr) {
+        console.error('Anonymous auth failed before save:', authErr);
+        throw new Error(
+          authErr instanceof Error
+            ? authErr.message
+            : 'Could not sign in to save your library. Please try again.',
+        );
+      }
+    }
+
+    try {
+      await upsertPublicMovie(supabase, newMovie);
+    } catch (saveErr) {
+      console.error('Failed to save new movie to public library:', saveErr);
+      throw new Error(
+        saveErr instanceof Error
+          ? saveErr.message
+          : 'Failed to save movie to shared library. Please try again.',
+      );
+    }
+
+    return newMovie;
+  };
+
+  /**
+   * 搜索建议快加：立即插入占位、关闭 modal、滚动；后台 enrich + upsert。
+   *
+   * @param hit 已含非空 `imdbId` 的命中
+   */
+  const fastAddMovieFromSearchHit = (hit: MovieSearchHit & { imdbId: string }) => {
+    const imdbId = hit.imdbId.trim().toLowerCase();
+    if (!imdbId) return;
+    if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
+      setAddError('This movie is already in FilmBase.');
+      return;
+    }
+    const userTrailerSnapshot = newMovieTrailerUrl.trim();
+    const placeholder = buildPlaceholderMovieFromSearchHit(hit);
+    setMovies((prev) => [placeholder, ...prev]);
+    setPendingScrollMovieId(imdbId);
+    setIsAddModalOpen(false);
+    setNewMovieTitle('');
+    setNewMovieUrl('');
+    setNewMovieTrailerUrl('');
+    setIsImdbEntered(false);
+    setAddError('');
+    addMovieSearchSeqRef.current += 1;
+    setAddMovieSearchHits([]);
+    setAddMovieSearchLoading(false);
+    setAddMovieSearchError('');
+    setAddMovieSuggestionsDismissed(true);
+    setAddMovieActiveSuggestionIndex(-1);
+
+    void (async () => {
+      try {
+        const newMovie = await enrichAndUpsertNewMovie(imdbId, userTrailerSnapshot);
+        setMovies((prev) => prev.map((m) => (m.id === imdbId ? { ...newMovie } : m)));
+      } catch (err) {
+        console.error('fast add enrich failed:', err);
+        setMovies((prev) => prev.filter((m) => m.id !== imdbId));
+        setLibraryActionError(
+          err instanceof Error ? err.message : 'Failed to add movie. It was removed from the list.',
+        );
+      }
+    })();
+  };
+
+  /**
+   * 使用已解析的 IMDb id 拉取元数据、写入 `filmbase_public_movies` 并更新本地列表后关闭 Add Movie modal。
+   *
+   * @param imdbIdRaw — 含 `tt…` 的片段或完整字符串（会规范为小写 `tt` id）。
+   * @returns 是否成功完成新增并关闭 modal。
+   */
+  const addMovieFromImdbId = async (imdbIdRaw: string): Promise<boolean> => {
+    const imdbIdMatch = imdbIdRaw.match(/tt\d+/i);
+    const imdbId = imdbIdMatch ? imdbIdMatch[0].toLowerCase() : null;
+    if (!imdbId) {
+      setAddError("Please enter a valid IMDb URL containing 'tt...'");
+      return false;
+    }
+
+    if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
+      setAddError('This movie is already in FilmBase.');
+      return false;
+    }
 
     setAddError('');
     setIsAdding(true);
 
-    const imdbIdMatch = newMovieUrl.match(/tt\d+/i);
-    if (!imdbIdMatch) {
-      setAddError("Please enter a valid IMDb URL containing 'tt...'");
-      setIsAdding(false);
-      return;
-    }
-    const imdbId = imdbIdMatch[0].toLowerCase();
-
-    const supabase = supabaseRef.current ?? getSupabaseClient();
-    supabaseRef.current = supabase;
-
     try {
-      const { data, error } = await supabase.functions.invoke('enrich-movie-from-imdb', {
-        body: { imdbId },
-      });
-
-      if (error) {
-        setAddError(error.message || 'Enrich failed');
-        setIsAdding(false);
-        return;
-      }
-
-      const payload = data as {
-        title?: string;
-        year?: number;
-        runtime?: string;
-        genres?: string[];
-        director?: string;
-        cast?: string[];
-        posterUrl?: string;
-        trailerUrl?: string | null;
-        imdbRating?: number;
-        rottenTomatoes?: number;
-        contentRating?: string;
-        plot?: string;
-        writer?: string;
-        tagline?: string;
-        releaseDate?: string;
-        countryOfOrigin?: string;
-        alsoKnownAs?: string[];
-        productionCompanies?: string[];
-        boxOffice?: string;
-        castDetails?: Array<{ name?: string; character?: string }>;
-        error?: string;
-        message?: string;
-      };
-
-      if (!payload || typeof payload === 'string' || payload.error) {
-        setAddError(
-          typeof payload?.message === 'string'
-            ? payload.message
-            : typeof payload?.error === 'string'
-              ? payload.error
-              : 'Failed to enrich movie',
-        );
-        setIsAdding(false);
-        return;
-      }
-
-      const userTrailer = newMovieTrailerUrl.trim();
-      const trailerFromEdge = payload.trailerUrl?.trim() ?? '';
-      const trailerUrl = userTrailer
-        ? getYouTubeEmbedUrl(userTrailer)
-        : trailerFromEdge
-          ? getYouTubeEmbedUrl(trailerFromEdge)
-          : '';
-
-      const posterUrl =
-        payload.posterUrl && payload.posterUrl.trim()
-          ? payload.posterUrl.trim()
-          : 'https://picsum.photos/seed/movie/400/600';
-
-      const castDetails: MovieCastDetail[] = Array.isArray(payload.castDetails)
-        ? payload.castDetails
-            .map((e) => {
-              if (!e || typeof e !== 'object') return null;
-              const name =
-                typeof (e as { name?: string }).name === 'string'
-                  ? (e as { name: string }).name.trim()
-                  : '';
-              if (!name) return null;
-              const character =
-                typeof (e as { character?: string }).character === 'string'
-                  ? (e as { character: string }).character.trim()
-                  : '';
-              return { name, character };
-            })
-            .filter((x): x is MovieCastDetail => x != null)
-            .slice(0, 15)
-        : [];
-
-      const newMovie: Movie = {
-        id: imdbId,
-        title: payload.title ?? 'Unknown',
-        year: typeof payload.year === 'number' && Number.isFinite(payload.year) ? payload.year : 0,
-        genre: Array.isArray(payload.genres) ? payload.genres : [],
-        director: payload.director ?? '',
-        cast: Array.isArray(payload.cast) ? payload.cast.slice(0, 15) : [],
-        imdbRating: typeof payload.imdbRating === 'number' ? payload.imdbRating : 0,
-        rottenTomatoes: typeof payload.rottenTomatoes === 'number' ? payload.rottenTomatoes : 0,
-        personalRating: 0,
-        runtime: payload.runtime ?? '',
-        posterUrl,
-        trailerUrl,
-        isFavorite: false,
-        language: '',
-        isRecentlyAdded: true,
-        dateAdded: Date.now(),
-        contentRating: String(payload.contentRating ?? ''),
-        plot: typeof payload.plot === 'string' ? payload.plot : '',
-        writer: typeof payload.writer === 'string' ? payload.writer : '',
-        tagline: typeof payload.tagline === 'string' ? payload.tagline : '',
-        releaseDate: typeof payload.releaseDate === 'string' ? payload.releaseDate : '',
-        countryOfOrigin: typeof payload.countryOfOrigin === 'string' ? payload.countryOfOrigin : '',
-        alsoKnownAs: Array.isArray(payload.alsoKnownAs)
-          ? payload.alsoKnownAs.filter((s): s is string => typeof s === 'string')
-          : [],
-        productionCompanies: Array.isArray(payload.productionCompanies)
-          ? payload.productionCompanies.filter((s): s is string => typeof s === 'string')
-          : [],
-        boxOffice: typeof payload.boxOffice === 'string' ? payload.boxOffice : '',
-        castDetails,
-      };
-
-      /**
-       * 公共表写入只需已认证（匿名亦可），但确保我们拥有 uid 以便满足 RLS。
-       */
-      let uid = supabaseUidRef.current;
-      if (!uid) {
-        try {
-          uid = await signInAnonymously(supabase);
-          supabaseUidRef.current = uid;
-        } catch (authErr) {
-          console.error('Anonymous auth failed before save:', authErr);
-          setAddError(
-            authErr instanceof Error
-              ? authErr.message
-              : 'Could not sign in to save your library. Please try again.',
-          );
-          setIsAdding(false);
-          return;
-        }
-      }
-
-      try {
-        await upsertPublicMovie(supabase, newMovie);
-      } catch (saveErr) {
-        console.error('Failed to save new movie to public library:', saveErr);
-        setAddError(
-          saveErr instanceof Error
-            ? saveErr.message
-            : 'Failed to save movie to shared library. Please try again.',
-        );
-        setIsAdding(false);
-        return;
-      }
-
+      const newMovie = await enrichAndUpsertNewMovie(imdbId, newMovieTrailerUrl.trim());
       setMovies((prev) => [newMovie, ...prev]);
+      setPendingScrollMovieId(newMovie.id);
 
       setIsAddModalOpen(false);
       setNewMovieTitle('');
       setNewMovieUrl('');
       setNewMovieTrailerUrl('');
       setIsImdbEntered(false);
+      return true;
     } catch (err) {
       console.error('Error invoking enrich-movie-from-imdb:', err);
       setAddError(err instanceof Error ? err.message : 'Failed to fetch movie data.');
+      return false;
     } finally {
       setIsAdding(false);
     }
   };
+
+  const handleAddMovie = async () => {
+    if (!newMovieUrl.trim()) return;
+    await addMovieFromImdbId(newMovieUrl);
+  };
+
+  /** Add Movie modal 内：标题 ≥2 字时防抖调用 `search-movies`。 */
+  useEffect(() => {
+    if (!isAddModalOpen) return;
+    const q = newMovieTitle.trim();
+    if (q.length < 2) {
+      setAddMovieSearchHits([]);
+      setAddMovieSearchLoading(false);
+      setAddMovieSearchError('');
+      setAddMovieActiveSuggestionIndex(-1);
+      return;
+    }
+
+    setAddMovieSearchLoading(true);
+    setAddMovieSearchError('');
+    setAddMovieSearchHits([]);
+    const seq = ++addMovieSearchSeqRef.current;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const supabase = supabaseRef.current ?? getSupabaseClient();
+        supabaseRef.current = supabase;
+        try {
+          const { data, error } = await supabase.functions.invoke('search-movies', {
+            body: { query: q },
+          });
+          if (seq !== addMovieSearchSeqRef.current) return;
+          if (error) {
+            setAddMovieSearchHits([]);
+            setAddMovieSearchError(error.message || 'Search failed');
+            return;
+          }
+          const raw = data as {
+            results?: MovieSearchHit[];
+            error?: string;
+            message?: string;
+          };
+          if (!raw || typeof raw === 'string' || raw.error) {
+            setAddMovieSearchHits([]);
+            setAddMovieSearchError(
+              typeof raw?.message === 'string'
+                ? raw.message
+                : typeof raw?.error === 'string'
+                  ? raw.error
+                  : 'Search failed',
+            );
+            return;
+          }
+          const list = Array.isArray(raw.results) ? raw.results : [];
+          const withImdb: Array<MovieSearchHit & { imdbId: string }> = [];
+          for (const h of list) {
+            if (!h || typeof h !== 'object') continue;
+            const id = (h as MovieSearchHit).imdbId;
+            if (typeof id !== 'string' || !id.trim()) continue;
+            withImdb.push({ ...(h as MovieSearchHit), imdbId: id.trim() });
+          }
+          const visible = withImdb.filter(
+            (h) => !isAddMovieSearchSuggestionInLibrary(h, moviesRef.current),
+          );
+          setAddMovieSearchHits(visible);
+          setAddMovieActiveSuggestionIndex(-1);
+        } catch (e) {
+          if (seq !== addMovieSearchSeqRef.current) return;
+          setAddMovieSearchHits([]);
+          setAddMovieSearchError(e instanceof Error ? e.message : 'Search failed');
+        } finally {
+          if (seq === addMovieSearchSeqRef.current) {
+            setAddMovieSearchLoading(false);
+          }
+        }
+      })();
+    }, 300);
+
+    return () => {
+      window.clearTimeout(t);
+    };
+  }, [newMovieTitle, isAddModalOpen]);
+
+  /** Add Movie modal 关闭时作废进行中的搜索请求并清空建议 UI。 */
+  useEffect(() => {
+    if (isAddModalOpen) return;
+    addMovieSearchSeqRef.current += 1;
+    setAddMovieSearchHits([]);
+    setAddMovieSearchLoading(false);
+    setAddMovieSearchError('');
+    setAddMovieSuggestionsDismissed(false);
+    setAddMovieActiveSuggestionIndex(-1);
+  }, [isAddModalOpen]);
+
+  /** Add Movie modal 打开时聚焦「Search by title」输入框。 */
+  useEffect(() => {
+    if (!isAddModalOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      addMovieTitleSearchInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [isAddModalOpen]);
 
   const resetFilters = () => {
     setSelectedGenres([]);
@@ -1593,6 +1939,61 @@ export default function App() {
     });
   }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
 
+  /** 新增影片后：将对应卡片/列表行滚入主片库视口顶部区域（不改变排序）。 */
+  useLayoutEffect(() => {
+    if (!pendingScrollMovieId || !isMoviesHydrated) return;
+
+    const id = pendingScrollMovieId;
+    const NEW_ITEM_SCROLL_TOP_BAND_PX = 100;
+    let cancelled = false;
+    let rafId = 0;
+    let scheduledRafRetry = false;
+
+    const tryScrollToMovie = (): boolean => {
+      const el = movieLibraryItemElsRef.current.get(id);
+      const container = mainLibraryScrollRef.current;
+      if (!el || !container) return false;
+
+      const cRect = container.getBoundingClientRect();
+      const eRect = el.getBoundingClientRect();
+      const alreadyNearTop =
+        eRect.top >= cRect.top - 4 &&
+        eRect.top <= cRect.top + NEW_ITEM_SCROLL_TOP_BAND_PX &&
+        eRect.bottom <= cRect.bottom + 12;
+
+      if (!alreadyNearTop) {
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+
+      return true;
+    };
+
+    if (tryScrollToMovie()) {
+      setPendingScrollMovieId(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    scheduledRafRetry = true;
+    rafId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        setPendingScrollMovieId(null);
+        return;
+      }
+      tryScrollToMovie();
+      setPendingScrollMovieId(null);
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+      if (scheduledRafRetry) {
+        setPendingScrollMovieId((p) => (p === id ? null : p));
+      }
+    };
+  }, [pendingScrollMovieId, filteredMovies, viewMode, isMoviesHydrated]);
+
   /** 侧栏「All Films」是否为默认筛选态（与 `resetFilters` 后一致）。 */
   const isAllFilmsDefaultView =
     !isRecentlyAddedFilter &&
@@ -1628,7 +2029,7 @@ export default function App() {
     >
       {iconSlug ? (
         <span className="relative mr-[10px] h-[20px] w-[20px] shrink-0">
-          <img
+          <img draggable={false}
             src={`/icons/${iconSlug}.svg`}
             alt=""
             width={20}
@@ -1639,7 +2040,7 @@ export default function App() {
             decoding="async"
             aria-hidden
           />
-          <img
+          <img draggable={false}
             src={`/icons/${iconSlug}-hover.svg`}
             alt=""
             width={20}
@@ -1826,10 +2227,20 @@ export default function App() {
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
-  /** 预告片播放时锁定主工具栏（Grid/List、海报尺寸、编辑/新增），避免与播放层交互冲突。 */
-  const isTrailerToolbarDisabled = isTrailerOverlayInMain;
+  /**
+   * 预告片播放或 Add Movie 弹窗打开时锁定主工具栏（Grid/List、海报尺寸、编辑/新增），
+   * 用户需先完成浮层内任务或关闭弹窗。
+   */
+  const mainLibraryToolbarLockReason = isTrailerOverlayInMain
+    ? 'Trailer playing'
+    : deleteMovieConfirm
+      ? 'Finish delete confirmation first'
+      : isAddModalOpen
+        ? 'Finish Add Movie first'
+        : null;
+  const isLibraryToolbarLocked = mainLibraryToolbarLockReason != null;
   const isMainContentOverlayActive =
-    isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen;
+    isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen || Boolean(deleteMovieConfirm);
 
   return (
     <div className="w-screen h-screen bg-[#000] antialiased font-sans overflow-hidden">
@@ -1886,7 +2297,7 @@ export default function App() {
           title="Toggle Sidebar"
           aria-label="Toggle sidebar"
         >
-          <img
+          <img draggable={false}
             src="/icons/toggle-sidebar.svg"
             alt=""
             width={20}
@@ -1895,7 +2306,7 @@ export default function App() {
             decoding="async"
             aria-hidden
           />
-          <img
+          <img draggable={false}
             src="/icons/toggle-sidebar-hover.svg"
             alt=""
             width={20}
@@ -1921,7 +2332,7 @@ export default function App() {
         <div className="h-12 flex items-center px-4 min-w-[256px] flex-shrink-0">
           <div className="relative group w-full">
             {/* 16×16 素材缩放到 14×14，与原先 lucide Search size={14} 一致。 */}
-            <img
+            <img draggable={false}
               src="/icons/search.svg"
               alt=""
               width={14}
@@ -1929,7 +2340,7 @@ export default function App() {
               className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-100 transition-opacity group-focus-within:opacity-0"
               aria-hidden
             />
-            <img
+            <img draggable={false}
               src="/icons/search-focus.svg"
               alt=""
               width={14}
@@ -1951,7 +2362,7 @@ export default function App() {
                   setSearchQuery('');
                   searchInputRef.current?.focus();
                 }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-colors"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-colors"
                 title="Clear search"
               >
                 <X size={10} strokeWidth={3} className="text-white" />
@@ -2086,7 +2497,7 @@ export default function App() {
             }`}
           >
             <span className="relative block h-[20px] w-[20px] shrink-0">
-              <img
+              <img draggable={false}
                 src="/icons/films.svg"
                 alt=""
                 width={20}
@@ -2099,7 +2510,7 @@ export default function App() {
                 decoding="async"
                 aria-hidden
               />
-              <img
+              <img draggable={false}
                 src="/icons/films-hover.svg"
                 alt=""
                 width={20}
@@ -2131,7 +2542,7 @@ export default function App() {
             }`}
           >
             <span className="relative block h-[20px] w-[20px] shrink-0">
-              <img
+              <img draggable={false}
                 src="/icons/recently-added.svg"
                 alt=""
                 width={20}
@@ -2144,7 +2555,7 @@ export default function App() {
                 decoding="async"
                 aria-hidden
               />
-              <img
+              <img draggable={false}
                 src="/icons/recently-added-hover.svg"
                 alt=""
                 width={20}
@@ -2228,7 +2639,7 @@ export default function App() {
                     aria-label="Close poster preview"
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      <img
+                      <img draggable={false}
                         src="/icons/back.svg"
                         alt=""
                         width={18}
@@ -2237,7 +2648,7 @@ export default function App() {
                         decoding="async"
                         aria-hidden
                       />
-                      <img
+                      <img draggable={false}
                         src="/icons/back-hover.svg"
                         alt=""
                         width={18}
@@ -2268,7 +2679,7 @@ export default function App() {
                     title="Toward fit / fill"
                   >
                     {previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderDisabled ? (
-                      <img
+                      <img draggable={false}
                         src="/icons/poster-preview-fit-disabled.svg"
                         alt=""
                         width={18}
@@ -2279,7 +2690,7 @@ export default function App() {
                       />
                     ) : (
                       <span className="relative block h-[18px] w-[18px] shrink-0">
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-preview-fit.svg"
                           alt=""
                           width={18}
@@ -2288,7 +2699,7 @@ export default function App() {
                           decoding="async"
                           aria-hidden
                         />
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-preview-fit-hover.svg"
                           alt=""
                           width={18}
@@ -2330,7 +2741,7 @@ export default function App() {
                         }}
                         aria-hidden
                       />
-                      <img
+                      <img draggable={false}
                         src={
                           isPreviewZoomSliderDisabled
                             ? '/icons/poster-size-slider-thumb-disabled.svg'
@@ -2392,7 +2803,7 @@ export default function App() {
                     title="Toward 100%"
                   >
                     {previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled ? (
-                      <img
+                      <img draggable={false}
                         src="/icons/poster-preview-100-disabled.svg"
                         alt=""
                         width={18}
@@ -2403,7 +2814,7 @@ export default function App() {
                       />
                     ) : (
                       <span className="relative block h-[18px] w-[18px] shrink-0">
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-preview-100.svg"
                           alt=""
                           width={18}
@@ -2412,7 +2823,7 @@ export default function App() {
                           decoding="async"
                           aria-hidden
                         />
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-preview-100-hover.svg"
                           alt=""
                           width={18}
@@ -2432,12 +2843,12 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setViewMode('grid')}
-                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Grid view'}
+                    title={mainLibraryToolbarLockReason ?? 'Grid view'}
                     aria-label="Grid view"
                     aria-pressed={viewMode === 'grid'}
-                    disabled={isTrailerToolbarDisabled}
-                    className={`group/viewgrid relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isTrailerToolbarDisabled
+                    disabled={isLibraryToolbarLocked}
+                    className={`group/viewgrid relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isLibraryToolbarLocked
                         ? 'text-white/25'
                         : viewMode === 'grid'
                           ? 'bg-white/10 text-white'
@@ -2445,8 +2856,8 @@ export default function App() {
                     }`}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      {isTrailerToolbarDisabled ? (
-                        <img
+                      {isLibraryToolbarLocked ? (
+                        <img draggable={false}
                           src="/icons/view-grid-hover-disabled.svg"
                           alt=""
                           width={18}
@@ -2457,7 +2868,7 @@ export default function App() {
                         />
                       ) : (
                         <>
-                          <img
+                          <img draggable={false}
                             src="/icons/view-grid.svg"
                             alt=""
                             width={18}
@@ -2470,7 +2881,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/view-grid-hover.svg"
                             alt=""
                             width={18}
@@ -2490,12 +2901,12 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setViewMode('list')}
-                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'List view'}
+                    title={mainLibraryToolbarLockReason ?? 'List view'}
                     aria-label="List view"
                     aria-pressed={viewMode === 'list'}
-                    disabled={isTrailerToolbarDisabled}
-                    className={`group/viewlist relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isTrailerToolbarDisabled
+                    disabled={isLibraryToolbarLocked}
+                    className={`group/viewlist relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isLibraryToolbarLocked
                         ? 'text-white/25'
                         : viewMode === 'list'
                           ? 'bg-white/10 text-white'
@@ -2503,8 +2914,8 @@ export default function App() {
                     }`}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      {isTrailerToolbarDisabled ? (
-                        <img
+                      {isLibraryToolbarLocked ? (
+                        <img draggable={false}
                           src="/icons/view-list-hover-disabled.svg"
                           alt=""
                           width={18}
@@ -2515,7 +2926,7 @@ export default function App() {
                         />
                       ) : (
                         <>
-                          <img
+                          <img draggable={false}
                             src="/icons/view-list.svg"
                             alt=""
                             width={18}
@@ -2528,7 +2939,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/view-list-hover.svg"
                             alt=""
                             width={18}
@@ -2556,17 +2967,15 @@ export default function App() {
                     disabled={
                       viewMode === 'list' ||
                       posterSize <= GRID_POSTER_SIZE_MIN_PX ||
-                      isTrailerToolbarDisabled
+                      isLibraryToolbarLocked
                     }
                     className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title={
-                      isTrailerToolbarDisabled ? 'Trailer playing' : 'Decrease poster size'
-                    }
+                    title={mainLibraryToolbarLockReason ?? 'Decrease poster size'}
                   >
                     {viewMode === 'list' ||
                     posterSize <= GRID_POSTER_SIZE_MIN_PX ||
-                    isTrailerToolbarDisabled ? (
-                      <img
+                    isLibraryToolbarLocked ? (
+                      <img draggable={false}
                         src="/icons/poster-size-decrease-disabled.svg"
                         alt=""
                         width={18}
@@ -2577,7 +2986,7 @@ export default function App() {
                       />
                     ) : (
                       <span className="relative block h-[18px] w-[18px] shrink-0">
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-size-decrease.svg"
                           alt=""
                           width={18}
@@ -2586,7 +2995,7 @@ export default function App() {
                           decoding="async"
                           aria-hidden
                         />
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-size-decrease-hover.svg"
                           alt=""
                           width={18}
@@ -2601,14 +3010,14 @@ export default function App() {
                   <div
                     className="relative h-8 w-32 shrink-0"
                     onPointerDownCapture={(e) => {
-                      if (viewMode === 'list' || isTrailerToolbarDisabled) return;
+                      if (viewMode === 'list' || isLibraryToolbarLocked) return;
                       if (e.button !== 0) return;
                       setIsPosterSizeSliderPressed(true);
                     }}
                   >
                     <div
                       className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                        viewMode === 'list' || isTrailerToolbarDisabled ? 'opacity-15' : 'opacity-100'
+                        viewMode === 'list' || isLibraryToolbarLocked ? 'opacity-15' : 'opacity-100'
                       }`}
                       style={{
                         height: POSTER_SIZE_SLIDER_TRACK_H_PX,
@@ -2616,9 +3025,9 @@ export default function App() {
                       }}
                       aria-hidden
                     />
-                    <img
+                    <img draggable={false}
                       src={
-                        viewMode === 'list' || isTrailerToolbarDisabled
+                        viewMode === 'list' || isLibraryToolbarLocked
                           ? '/icons/poster-size-slider-thumb-disabled.svg'
                           : isPosterSizeSliderPressed
                             ? '/icons/poster-size-slider-thumb-pressed.svg'
@@ -2647,7 +3056,7 @@ export default function App() {
                       max={GRID_POSTER_SIZE_MAX_PX}
                       step={GRID_POSTER_SIZE_STEP_PX}
                       value={posterSize}
-                      disabled={viewMode === 'list' || isTrailerToolbarDisabled}
+                      disabled={viewMode === 'list' || isLibraryToolbarLocked}
                       onChange={(e) => setPosterSize(clampPosterSizePx(Number(e.target.value)))}
                       className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
                     />
@@ -2660,17 +3069,15 @@ export default function App() {
                     disabled={
                       viewMode === 'list' ||
                       posterSize >= GRID_POSTER_SIZE_MAX_PX ||
-                      isTrailerToolbarDisabled
+                      isLibraryToolbarLocked
                     }
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
-                    title={
-                      isTrailerToolbarDisabled ? 'Trailer playing' : 'Increase poster size'
-                    }
+                    title={mainLibraryToolbarLockReason ?? 'Increase poster size'}
                   >
                     {viewMode === 'list' ||
                     posterSize >= GRID_POSTER_SIZE_MAX_PX ||
-                    isTrailerToolbarDisabled ? (
-                      <img
+                    isLibraryToolbarLocked ? (
+                      <img draggable={false}
                         src="/icons/poster-size-increase-disabled.svg"
                         alt=""
                         width={18}
@@ -2681,7 +3088,7 @@ export default function App() {
                       />
                     ) : (
                       <span className="relative block h-[18px] w-[18px] shrink-0">
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-size-increase.svg"
                           alt=""
                           width={18}
@@ -2690,7 +3097,7 @@ export default function App() {
                           decoding="async"
                           aria-hidden
                         />
-                        <img
+                        <img draggable={false}
                           src="/icons/poster-size-increase-hover.svg"
                           alt=""
                           width={18}
@@ -2751,7 +3158,7 @@ export default function App() {
                   {/* 禁用态：`upload-poster-disabled.svg` 已含 fill-opacity；按钮不再叠加 disabled:opacity-* */}
                   <span className="relative block h-[18px] w-[18px] shrink-0">
                     {isAwaitingPosterApplyConfirm ? (
-                      <img
+                      <img draggable={false}
                         src="/icons/upload-poster-disabled.svg"
                         alt=""
                         width={18}
@@ -2762,7 +3169,7 @@ export default function App() {
                       />
                     ) : (
                       <>
-                        <img
+                        <img draggable={false}
                           src="/icons/upload-poster.svg"
                           alt=""
                           width={18}
@@ -2771,7 +3178,7 @@ export default function App() {
                           decoding="async"
                           aria-hidden
                         />
-                        <img
+                        <img draggable={false}
                           src="/icons/upload-poster-hover.svg"
                           alt=""
                           width={18}
@@ -2791,19 +3198,19 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsEditing(!isEditing)}
-                    disabled={isTrailerToolbarDisabled}
-                    className={`group/editlib relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isTrailerToolbarDisabled
+                    disabled={isLibraryToolbarLocked}
+                    className={`group/editlib relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isLibraryToolbarLocked
                         ? 'text-white/25'
                         : isEditing
                           ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
                           : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
-                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Edit Library'}
+                    title={mainLibraryToolbarLockReason ?? 'Edit Library'}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      {isTrailerToolbarDisabled ? (
-                        <img
+                      {isLibraryToolbarLocked ? (
+                        <img draggable={false}
                           src="/icons/edit-library-disabled.svg"
                           alt=""
                           width={18}
@@ -2814,7 +3221,7 @@ export default function App() {
                         />
                       ) : (
                         <>
-                          <img
+                          <img draggable={false}
                             src="/icons/edit-library.svg"
                             alt=""
                             width={18}
@@ -2825,7 +3232,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/edit-library-hover.svg"
                             alt=""
                             width={18}
@@ -2836,7 +3243,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/edit-library-active.svg"
                             alt=""
                             width={18}
@@ -2847,7 +3254,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/edit-library-active-hover.svg"
                             alt=""
                             width={18}
@@ -2865,13 +3272,13 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(true)}
-                    disabled={isTrailerToolbarDisabled}
-                    className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                    title={isTrailerToolbarDisabled ? 'Trailer playing' : 'Add Movie'}
+                    disabled={isLibraryToolbarLocked}
+                    className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors enabled:hover:bg-white/5 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-100"
+                    title={mainLibraryToolbarLockReason ?? 'Add Movie'}
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      {isTrailerToolbarDisabled ? (
-                        <img
+                      {isLibraryToolbarLocked ? (
+                        <img draggable={false}
                           src="/icons/add-movie-disabled.svg"
                           alt=""
                           width={18}
@@ -2882,7 +3289,7 @@ export default function App() {
                         />
                       ) : (
                         <>
-                          <img
+                          <img draggable={false}
                             src="/icons/add-movie.svg"
                             alt=""
                             width={18}
@@ -2891,7 +3298,7 @@ export default function App() {
                             decoding="async"
                             aria-hidden
                           />
-                          <img
+                          <img draggable={false}
                             src="/icons/add-movie-hover.svg"
                             alt=""
                             width={18}
@@ -2937,6 +3344,7 @@ export default function App() {
           className="relative flex-1 min-h-0 overflow-hidden"
         >
           <div
+            ref={mainLibraryScrollRef}
             className={`h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`}
           >
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
@@ -2950,7 +3358,7 @@ export default function App() {
           {!isMoviesHydrated ? (
             <div className="flex min-h-[48vh] flex-col items-center justify-center gap-3 text-white/35">
               <div className="relative h-8 w-8 shrink-0" aria-hidden>
-                <img
+                <img draggable={false}
                   src={LIBRARY_LOADING_FILM_BASE_SRC}
                   alt=""
                   width={32}
@@ -2958,7 +3366,7 @@ export default function App() {
                   className="absolute inset-0 h-full w-full object-contain pointer-events-none"
                   decoding="async"
                 />
-                <img
+                <img draggable={false}
                   src={LIBRARY_LOADING_REEL_SRC}
                   alt=""
                   width={32}
@@ -3004,70 +3412,101 @@ export default function App() {
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute top-full left-0 mt-3 w-48 bg-zinc-900 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] py-2 z-50 backdrop-blur-xl overflow-hidden"
+                          className="absolute top-full left-0 z-50 mt-3 w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-[#1F1F1F] py-[10px] shadow-2xl"
                         >
-                          <div className="px-3 py-1.5 text-[11px] text-white/20 uppercase tracking-[0.2em] font-black">Title</div>
+                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
+                            Title
+                          </div>
                           {[
                             { id: 'title-asc', label: 'A-Z' },
-                            { id: 'title-desc', label: 'Z-A' }
-                          ].map(opt => (
+                            { id: 'title-desc', label: 'Z-A' },
+                          ].map((opt) => (
                             <button
                               key={opt.id}
+                              type="button"
                               onClick={() => {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                                sortMode === opt.id
+                                  ? 'text-white hover:text-white'
+                                  : 'text-white/65 hover:text-white/90'
+                              }`}
                             >
                               {opt.label}
-                              {sortMode === opt.id && <Check size={12} className="text-white" />}
+                              {sortMode === opt.id ? (
+                                <Check size={12} className="shrink-0 text-white opacity-90" aria-hidden />
+                              ) : null}
                             </button>
                           ))}
 
-                          <div className="h-px bg-white/5 my-1.5" />
-                          <div className="px-3 py-1.5 text-[11px] text-white/20 uppercase tracking-[0.2em] font-black">Duration</div>
+                          <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
+                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
+                            Duration
+                          </div>
                           {[
                             { id: 'duration-desc', label: 'Longest' },
-                            { id: 'duration-asc', label: 'Shortest' }
-                          ].map(opt => (
+                            { id: 'duration-asc', label: 'Shortest' },
+                          ].map((opt) => (
                             <button
                               key={opt.id}
+                              type="button"
                               onClick={() => {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                                sortMode === opt.id
+                                  ? 'text-white hover:text-white'
+                                  : 'text-white/65 hover:text-white/90'
+                              }`}
                             >
                               {opt.label}
-                              {sortMode === opt.id && <Check size={12} className="text-white" />}
+                              {sortMode === opt.id ? (
+                                <Check size={12} className="shrink-0 text-white opacity-90" aria-hidden />
+                              ) : null}
                             </button>
                           ))}
 
-                          <div className="h-px bg-white/5 my-1.5" />
-                          <div className="px-3 py-1.5 text-[11px] text-white/20 uppercase tracking-[0.2em] font-black">Genre Filter</div>
-                          {allUniqueGenres.map(genre => (
+                          <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
+                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
+                            Genre filter
+                          </div>
+                          {allUniqueGenres.map((genre) => (
                             <button
                               key={genre}
+                              type="button"
                               onClick={() => {
                                 setSelectedGenres([genre]);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                                selectedGenres.length === 1 && selectedGenres[0] === genre
+                                  ? 'text-white hover:text-white'
+                                  : 'text-white/65 hover:text-white/90'
+                              }`}
                             >
                               {genre}
-                              {selectedGenres.length === 1 && selectedGenres[0] === genre && <Check size={12} className="text-white" />}
+                              {selectedGenres.length === 1 && selectedGenres[0] === genre ? (
+                                <Check size={12} className="shrink-0 text-white opacity-90" aria-hidden />
+                              ) : null}
                             </button>
                           ))}
                           {selectedGenres.length > 0 && (
-                            <button
-                              onClick={() => {
-                                setSelectedGenres([]);
-                                setIsSortDropdownOpen(false);
-                              }}
-                              className="flex items-center justify-between w-full px-3 py-2 text-[13px] text-red-400/60 hover:text-red-400 hover:bg-white/5 transition-colors text-left border-t border-white/5 mt-1"
-                            >
-                              Clear Genre Filter
-                            </button>
+                            <>
+                              <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedGenres([]);
+                                  setIsSortDropdownOpen(false);
+                                }}
+                                className="flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium text-red-400/70 transition-colors hover:bg-white/[0.06] hover:text-red-400"
+                              >
+                                Clear genre filter
+                              </button>
+                            </>
                           )}
                         </motion.div>
                       </>
@@ -3085,7 +3524,7 @@ export default function App() {
                 >
                   {/** 与列表行 hover 同：18px 高、60×32 等比宽 */}
                   <span className="relative inline-block h-[18px] w-[calc(18px*60/32)] shrink-0">
-                    <img
+                    <img draggable={false}
                       src={sortMode.startsWith('imdb') ? LIST_HEADER_RATINGS_ICON.imdbNormal : LIST_HEADER_RATINGS_ICON.imdbInactive}
                       alt=""
                       width={60}
@@ -3093,7 +3532,7 @@ export default function App() {
                       decoding="async"
                       className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain group-hover:hidden"
                     />
-                    <img
+                    <img draggable={false}
                       src={LIST_HEADER_RATINGS_ICON.imdbHover}
                       alt=""
                       width={60}
@@ -3110,7 +3549,7 @@ export default function App() {
                   aria-label="Sort by Rotten Tomatoes"
                 >
                   <span className="relative inline-block h-[18px] w-[18px] shrink-0">
-                    <img
+                    <img draggable={false}
                       src={sortMode.startsWith('rt') ? LIST_HEADER_RATINGS_ICON.rtNormal : LIST_HEADER_RATINGS_ICON.rtInactive}
                       alt=""
                       width={32}
@@ -3118,7 +3557,7 @@ export default function App() {
                       decoding="async"
                       className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain group-hover:hidden"
                     />
-                    <img
+                    <img draggable={false}
                       src={LIST_HEADER_RATINGS_ICON.rtHover}
                       alt=""
                       width={32}
@@ -3138,7 +3577,7 @@ export default function App() {
               </div>
             </div>
           )}
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence mode="sync">
             <motion.div 
               className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
               style={viewMode === 'grid' ? { 
@@ -3153,7 +3592,8 @@ export default function App() {
                   size={posterSize} 
                   viewMode={viewMode} 
                   isEditing={isEditing}
-                  onDelete={() => handleDeleteMovie(movie)}
+                  registerLibraryItemEl={(el) => registerMovieLibraryItemEl(movie.id, el)}
+                  onRequestDelete={() => setDeleteMovieConfirm(movie)}
                   onRatingChange={(rating) => handleRatingChange(movie.id, rating)}
                   onPlayTrailer={() => {
                     setSelectedMovie(movie);
@@ -3164,6 +3604,7 @@ export default function App() {
                     setModalMode('poster');
                   }}
                   onOpenPosterPreview={(el) => openPosterPreviewFromElement(movie, el)}
+                  onRefreshPosterSignedUrl={refreshPosterSignedUrlOnce}
                 />
               ))}
             </motion.div>
@@ -3250,7 +3691,7 @@ export default function App() {
                 title="Edit Trailer URL"
               >
                 <span className="relative block h-4 w-4 shrink-0">
-                  <img
+                  <img draggable={false}
                     src="/icons/edit-trailer-url.svg"
                     alt=""
                     width={16}
@@ -3259,7 +3700,7 @@ export default function App() {
                     decoding="async"
                     aria-hidden
                   />
-                  <img
+                  <img draggable={false}
                     src="/icons/edit-trailer-url-hover.svg"
                     alt=""
                     width={16}
@@ -3330,7 +3771,7 @@ export default function App() {
                   });
                 }}
               >
-                  <img
+                  <img draggable={false}
                     src={
                       isScopedPosterUploadOpen && pendingPosterUrl
                         ? pendingPosterUrl
@@ -3338,7 +3779,6 @@ export default function App() {
                     }
                     alt={posterPreviewMovie.title}
                     referrerPolicy="no-referrer"
-                    draggable={false}
                     onPointerEnter={() => {
                       previewPointerOverImgRef.current = true;
                     }}
@@ -3590,14 +4030,26 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={MAIN_MODAL_OVERLAY_TRANSITION}
-            onClick={() => {
+            onPointerDown={(e) => {
+              if (!e.isPrimary) return;
               if (isAdding) return;
-              setIsAddModalOpen(false);
-              setNewMovieTitle('');
-              setNewMovieUrl('');
-              setIsImdbEntered(false);
-              setNewMovieTrailerUrl('');
-              setAddError('');
+              addMovieBackdropCloseArmedRef.current = e.target === e.currentTarget;
+            }}
+            onPointerUp={(e) => {
+              if (!e.isPrimary) return;
+              if (isAdding) {
+                addMovieBackdropCloseArmedRef.current = false;
+                return;
+              }
+              if (addMovieBackdropCloseArmedRef.current && e.target === e.currentTarget) {
+                setIsAddModalOpen(false);
+                setNewMovieTitle('');
+                setNewMovieUrl('');
+                setIsImdbEntered(false);
+                setNewMovieTrailerUrl('');
+                setAddError('');
+              }
+              addMovieBackdropCloseArmedRef.current = false;
             }}
             className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
@@ -3607,19 +4059,185 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md cursor-default bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
             >
-              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Add New Movie</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Add New Movie</h2>
 
               <div className="space-y-4">
                 {addError && (
-                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-3 py-2.5 rounded-[10px]">
                     {addError}
                   </div>
                 )}
+                <div className="relative">
+                  <label className="block text-xs font-medium text-white/50 mb-2">
+                    Search by title
+                  </label>
+                  <div className="relative w-full">
+                    <input
+                      ref={addMovieTitleSearchInputRef}
+                      type="text"
+                      placeholder="e.g. blood dia"
+                      value={newMovieTitle}
+                      onChange={(e) => {
+                        setNewMovieTitle(e.target.value);
+                        setAddMovieSuggestionsDismissed(false);
+                        if (addError) setAddError('');
+                      }}
+                      onKeyDown={(e) => {
+                        const addMovieDropdownOpen =
+                          !addMovieSuggestionsDismissed &&
+                          newMovieTitle.trim().length >= 2 &&
+                          (addMovieSearchLoading || addMovieSearchHits.length > 0);
+                        const suggestionsVisible =
+                          addMovieDropdownOpen && addMovieSearchHits.length > 0;
+
+                        if (e.key === 'Escape' && addMovieDropdownOpen) {
+                          e.preventDefault();
+                          setAddMovieSuggestionsDismissed(true);
+                          setAddMovieActiveSuggestionIndex(-1);
+                          return;
+                        }
+
+                        if (
+                          e.key === 'ArrowDown' &&
+                          newMovieTitle.trim().length >= 2 &&
+                          addMovieSearchHits.length > 0
+                        ) {
+                          e.preventDefault();
+                          setAddMovieSuggestionsDismissed(false);
+                          setAddMovieActiveSuggestionIndex((prev) => {
+                            const n = addMovieSearchHits.length;
+                            if (prev < 0) return 0;
+                            return Math.min(prev + 1, n - 1);
+                          });
+                          return;
+                        }
+                        if (
+                          e.key === 'ArrowUp' &&
+                          newMovieTitle.trim().length >= 2 &&
+                          addMovieSearchHits.length > 0
+                        ) {
+                          e.preventDefault();
+                          setAddMovieSuggestionsDismissed(false);
+                          setAddMovieActiveSuggestionIndex((prev) => (prev <= 0 ? -1 : prev - 1));
+                          return;
+                        }
+                        if (
+                          e.key === 'Enter' &&
+                          suggestionsVisible &&
+                          addMovieActiveSuggestionIndex >= 0
+                        ) {
+                          const hit = addMovieSearchHits[addMovieActiveSuggestionIndex];
+                          if (!hit?.imdbId) return;
+                          e.preventDefault();
+                          fastAddMovieFromSearchHit(hit);
+                        }
+                      }}
+                      disabled={isAdding}
+                      className={`w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] pl-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50 ${
+                        newMovieTitle ? 'pr-10' : 'pr-3'
+                      }`}
+                    />
+                    {newMovieTitle ? (
+                      <button
+                        type="button"
+                        disabled={isAdding}
+                        onClick={() => {
+                          addMovieSearchSeqRef.current += 1;
+                          setNewMovieTitle('');
+                          setAddMovieSearchHits([]);
+                          setAddMovieSearchLoading(false);
+                          setAddMovieSearchError('');
+                          setAddMovieSuggestionsDismissed(true);
+                          setAddMovieActiveSuggestionIndex(-1);
+                          if (addError) setAddError('');
+                          addMovieTitleSearchInputRef.current?.focus();
+                        }}
+                        className="absolute right-4 top-1/2 flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 transition-colors hover:bg-white/40 disabled:pointer-events-none disabled:opacity-40"
+                        title="Clear search"
+                      >
+                        <X size={10} strokeWidth={3} className="text-white" />
+                      </button>
+                    ) : null}
+                  </div>
+                  {addMovieSearchError ? (
+                    <p className="mt-1.5 ml-0.5 text-xs text-red-400/90">{addMovieSearchError}</p>
+                  ) : null}
+                  {!addMovieSuggestionsDismissed &&
+                    newMovieTitle.trim().length >= 2 &&
+                    (addMovieSearchLoading || addMovieSearchHits.length > 0) && (
+                      <div
+                        className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
+                        role="listbox"
+                        aria-label="Movie search suggestions"
+                      >
+                        {addMovieSearchLoading && addMovieSearchHits.length === 0 ? (
+                          <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-white/50">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-60" />
+                            Searching…
+                          </div>
+                        ) : null}
+                        {addMovieSearchHits.map((hit, idx) => {
+                          const yearLabel = hit.year != null ? String(hit.year) : '—';
+                          const active = idx === addMovieActiveSuggestionIndex;
+                          return (
+                            <button
+                              key={`${hit.tmdbId}-${hit.imdbId}`}
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              disabled={isAdding}
+                              onMouseDown={(ev) => {
+                                ev.preventDefault();
+                              }}
+                              onMouseEnter={() => setAddMovieActiveSuggestionIndex(idx)}
+                              onClick={() => fastAddMovieFromSearchHit(hit)}
+                              className={`group/addsug flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                active ? 'bg-white/10' : 'hover:bg-white/5'
+                              }`}
+                            >
+                              <div className="h-12 w-8 shrink-0 overflow-hidden rounded border border-white/10 bg-white/5">
+                                {hit.posterUrl ? (
+                                  <img draggable={false}
+                                    src={hit.posterUrl}
+                                    alt=""
+                                    className="h-full w-full object-cover select-none"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center" aria-hidden>
+                                    <Film className="h-4 w-4 text-white/25" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex w-full min-w-0 items-center gap-2">
+                                  <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-white">
+                                    {hit.title}
+                                  </div>
+                                  <img draggable={false}
+                                    src="/icons/arrow-up-left.svg"
+                                    alt=""
+                                    width={16}
+                                    height={16}
+                                    decoding="async"
+                                    aria-hidden
+                                    className="pointer-events-none h-4 w-4 shrink-0 object-contain opacity-0 transition-opacity duration-150 group-hover/addsug:opacity-100"
+                                  />
+                                </div>
+                                <div className="text-[11px] leading-5 text-white/40 tabular-nums">{yearLabel}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                </div>
+
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    IMDb URL
+                  <label className="block text-xs font-medium text-white/50 mb-2">
+                    Or paste IMDb URL
                   </label>
                   <input
                     type="text"
@@ -3643,23 +4261,22 @@ export default function App() {
                     }}
                     disabled={isAdding}
                     readOnly={isImdbEntered}
-                    className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    autoFocus
+                    className={`w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
-                    Trailer URL (optional — overrides enrich result)
+                  <label className="block text-xs font-medium text-white/50 mb-2">
+                    Trailer URL (optional)
                   </label>
                   <input
                     id="trailer-input"
                     type="text"
-                    placeholder="YouTube URL if you want a specific trailer"
+                    placeholder="YouTube URL, overrides auto-detected trailer"
                     value={newMovieTrailerUrl}
                     onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
                     disabled={isAdding}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
+                    className="w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -3675,14 +4292,14 @@ export default function App() {
                     setAddError('');
                   }}
                   disabled={isAdding}
-                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAddMovie}
                   disabled={isAdding || !newMovieUrl.trim()}
-                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                  className={`h-9 px-6 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
                     isAdding || !newMovieUrl.trim()
                       ? 'bg-white/10 text-white/40 cursor-not-allowed'
                       : 'bg-white/80 text-black hover:bg-white shadow-xl'
@@ -3703,6 +4320,67 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Delete movie confirmation：与 Add Movie / Edit Trailer 同遮罩与面板规范 */}
+      <AnimatePresence>
+        {deleteMovieConfirm && (
+          <motion.div
+            key={`delete-movie-overlay-${deleteMovieConfirm.id}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={MAIN_MODAL_OVERLAY_TRANSITION}
+            onPointerDown={(e) => {
+              if (!e.isPrimary) return;
+              deleteMovieBackdropCloseArmedRef.current = e.target === e.currentTarget;
+            }}
+            onPointerUp={(e) => {
+              if (!e.isPrimary) return;
+              if (deleteMovieBackdropCloseArmedRef.current && e.target === e.currentTarget) {
+                setDeleteMovieConfirm(null);
+              }
+              deleteMovieBackdropCloseArmedRef.current = false;
+            }}
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={MAIN_MODAL_PANEL_TRANSITION}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
+            >
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete movie</h2>
+              <p className="text-sm leading-relaxed text-white/70">
+                Remove{' '}
+                <span className="font-medium text-white/90">{deleteMovieConfirm.title}</span>
+                {' from FilmBase? This cannot be undone.'}
+              </p>
+              <div className="flex items-center justify-end gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setDeleteMovieConfirm(null)}
+                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const m = deleteMovieConfirm;
+                    setDeleteMovieConfirm(null);
+                    handleDeleteMovie(m);
+                  }}
+                  className="h-9 px-6 rounded-full text-sm font-medium bg-[#EA9794]/45 text-black hover:bg-[#EA9794] hover:text-black transition-colors shadow-xl"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Edit Trailer URL Modal：浮于预告片浮层之上（z=107 > trailer overlay z=104） */}
       <AnimatePresence>
         {isEditTrailerModalOpen && selectedMovie && (
@@ -3712,10 +4390,22 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={MAIN_MODAL_OVERLAY_TRANSITION}
-            onClick={() => {
+            onPointerDown={(e) => {
+              if (!e.isPrimary) return;
               if (isEditingTrailer) return;
-              setIsEditTrailerModalOpen(false);
-              setEditTrailerError('');
+              editTrailerBackdropCloseArmedRef.current = e.target === e.currentTarget;
+            }}
+            onPointerUp={(e) => {
+              if (!e.isPrimary) return;
+              if (isEditingTrailer) {
+                editTrailerBackdropCloseArmedRef.current = false;
+                return;
+              }
+              if (editTrailerBackdropCloseArmedRef.current && e.target === e.currentTarget) {
+                setIsEditTrailerModalOpen(false);
+                setEditTrailerError('');
+              }
+              editTrailerBackdropCloseArmedRef.current = false;
             }}
             className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
@@ -3725,27 +4415,30 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md cursor-default bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
             >
-              <h2 className="text-xl font-bold text-white mb-6 tracking-tight">Edit Trailer URL</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Edit Trailer URL</h2>
 
               <div className="space-y-4">
                 {editTrailerError && (
-                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl mb-4">
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-3 py-2.5 rounded-[10px]">
                     {editTrailerError}
                   </div>
                 )}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5 ml-1">
+                  <label className="block text-xs font-medium text-white/50 mb-2">
                     Trailer URL
                   </label>
                   <input
                     type="text"
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="Paste a trailer URL"
                     value={editTrailerUrlInput}
                     onChange={(e) => {
                       setEditTrailerUrlInput(e.target.value);
                       if (editTrailerError) setEditTrailerError('');
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.select();
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && editTrailerUrlInput.trim() && !isEditingTrailer) {
@@ -3754,7 +4447,7 @@ export default function App() {
                       }
                     }}
                     disabled={isEditingTrailer}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-white/10 transition-all placeholder:text-white/20 disabled:opacity-50"
+                    className="edit-trailer-url-input w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50"
                     autoFocus
                   />
                 </div>
@@ -3768,7 +4461,7 @@ export default function App() {
                     setEditTrailerError('');
                   }}
                   disabled={isEditingTrailer}
-                  className="px-6 py-2.5 rounded-full text-sm font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -3776,7 +4469,7 @@ export default function App() {
                   type="button"
                   onClick={() => void handleApplyEditTrailerUrl()}
                   disabled={isEditingTrailer || !editTrailerUrlInput.trim()}
-                  className={`px-8 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                  className={`h-9 px-6 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
                     isEditingTrailer || !editTrailerUrlInput.trim()
                       ? 'bg-white/10 text-white/40 cursor-not-allowed'
                       : 'bg-white/80 text-black hover:bg-white shadow-xl'
@@ -3826,13 +4519,12 @@ export default function App() {
               finishPosterHero();
             }}
           >
-            <img
+            <img draggable={false}
               src={posterPreviewMovie.posterUrl}
               alt=""
-              className="h-full w-full object-contain"
+              className="h-full w-full object-contain select-none"
               decoding="async"
               referrerPolicy="no-referrer"
-              draggable={false}
             />
           </div>
         )}
@@ -3872,10 +4564,10 @@ export default function App() {
                     void handlePosterFileChange(e.target.files?.[0]);
                   }}
                 />
-                <img
+                <img draggable={false}
                   src={pendingPosterUrl || selectedMovie.posterUrl}
                   alt={selectedMovie.title}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-contain select-none"
                   referrerPolicy="no-referrer"
                 />
                 <div className="pointer-events-none absolute left-0 right-0 bottom-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4">
@@ -3993,7 +4685,7 @@ function PosterGenreIconWithTooltip({
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
     >
-      <img
+      <img draggable={false}
         src={`/icons/${slug}-hover.svg`}
         alt=""
         width={iconSizePx}
@@ -4015,6 +4707,39 @@ function PosterGenreIconWithTooltip({
   );
 }
 
+/**
+ * 片库海报框内 loading：与全屏「Loading library…」同胶片 + 卷轴图，无声音。
+ */
+function LibraryPosterFrameLoadingGlyph() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[12] flex items-center justify-center bg-[#1F1F1F]"
+      aria-hidden
+    >
+      <div className="relative flex -translate-y-[12%] flex-col items-center justify-center">
+        <div className="relative h-8 w-8 shrink-0">
+          <img draggable={false}
+            src={LIBRARY_LOADING_FILM_BASE_SRC}
+            alt=""
+            width={32}
+            height={32}
+            className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+            decoding="async"
+          />
+          <img draggable={false}
+            src={LIBRARY_LOADING_REEL_SRC}
+            alt=""
+            width={32}
+            height={32}
+            className="pointer-events-none absolute inset-0 h-full w-full object-contain animate-spin"
+            decoding="async"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface MovieCardProps {
   movie: Movie;
   /** 在 `filteredMovies` 中的下标，用于海报 `loading` / `fetchPriority`。 */
@@ -4022,12 +4747,22 @@ interface MovieCardProps {
   size: number;
   viewMode: 'grid' | 'list';
   isEditing: boolean;
-  onDelete: () => void;
+  /** 编辑态点击删除图标：打开父级删除确认弹窗。 */
+  onRequestDelete: () => void;
   onRatingChange: (rating: number) => void;
   onPlayTrailer: () => void;
   onShowPoster: () => void;
   /** 全屏大图预览（列表点海报 / 网格 hover 预览热区）；传入海报外壳元素以启用 hero。 */
   onOpenPosterPreview: (posterSourceElement: HTMLElement | null) => void;
+  /**
+   * Storage 海报专用：当 signed URL 过期导致 `img` 加载失败时，尝试为该 `poster_storage_path`
+   * 重新签名一次并更新该片的 `posterUrl`。
+   *
+   * 返回新的 URL 表示可重试；返回 null 表示无法刷新或已重试过一次（避免无限循环）。
+   */
+  onRefreshPosterSignedUrl?: (movieId: string, storagePath: string) => Promise<string | null>;
+  /** 片库根节点注册（网格卡片 / 列表行），用于新增后滚动定位。 */
+  registerLibraryItemEl?: (el: HTMLElement | null) => void;
   key?: React.Key;
 }
 
@@ -4271,27 +5006,35 @@ function MovieCard({
   size,
   viewMode,
   isEditing,
-  onDelete,
+  onRequestDelete,
   onRatingChange,
   onPlayTrailer,
   onShowPoster,
   onOpenPosterPreview,
+  onRefreshPosterSignedUrl,
+  registerLibraryItemEl,
 }: MovieCardProps) {
   const posterFetch = libraryPosterFetchProps(posterListIndex);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [isSelectedForDeletion, setIsSelectedForDeletion] = useState(false);
   const titleRef = useRef<HTMLDivElement>(null);
   const castRef = useRef<HTMLDivElement>(null);
   const castMarqueeStripRef = useRef<HTMLDivElement>(null);
   const titleMarqueeStripRef = useRef<HTMLDivElement>(null);
   const directorRef = useRef<HTMLDivElement>(null);
   const directorMarqueeStripRef = useRef<HTMLDivElement>(null);
+  /** 网格 hover 叠层：年 · 分级 · 时长行溢出测量（与 cast / title 同 marquee 线速）。 */
+  const yearRuntimeMetadataRef = useRef<HTMLSpanElement>(null);
+  const yearRuntimeMarqueeStripRef = useRef<HTMLDivElement>(null);
   const [isTitleOverflowing, setIsTitleOverflowing] = useState(false);
   const [isCastOverflowing, setIsCastOverflowing] = useState(false);
   const [isDirectorOverflowing, setIsDirectorOverflowing] = useState(false);
+  const [isYearRuntimeOverflowing, setIsYearRuntimeOverflowing] = useState(false);
   const [castMarqueeDurationSec, setCastMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   const [titleMarqueeDurationSec, setTitleMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   const [directorMarqueeDurationSec, setDirectorMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
+  const [yearRuntimeMarqueeDurationSec, setYearRuntimeMarqueeDurationSec] = useState(
+    CAST_MARQUEE_REF_DURATION_SEC,
+  );
   /** 列表行 starring 纵移：`line` 为已上移行数（0…N）；`skipTx` 为滚满一圈回到 0 时本帧关闭 transform。 */
   const [listCastScroll, dispatchListCastScroll] = useReducer(listCastScrollReducer, { line: 0, skipTx: false });
   /** 列表行 hover（与 starring `group-hover` 同步），驱动纵移定时器。 */
@@ -4300,10 +5043,22 @@ function MovieCard({
   const gridPosterShellRef = useRef<HTMLDivElement>(null);
   /** 列表行海报壳（100×150），供 hero 起点。 */
   const listPosterShellRef = useRef<HTMLDivElement>(null);
+  /** 海报位图是否已 `onLoad`（与 `isMetadataPending` 共同决定 loading 叠层）。 */
+  const [posterNaturalLoaded, setPosterNaturalLoaded] = useState(true);
+  /** 海报加载失败：显示占位，避免原生 broken image 图标与 alt 文案。 */
+  const [posterFailed, setPosterFailed] = useState(false);
+  /** 同一张海报在单个卡片生命周期内仅触发一次重签请求，避免 onError 多次触发导致重复请求。 */
+  const posterResignRequestedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    setPosterNaturalLoaded(movie.posterUrl.trim().length === 0);
+  }, [movie.posterUrl, movie.id, movie.isMetadataPending]);
 
   useEffect(() => {
-    if (!isEditing) setIsSelectedForDeletion(false);
-  }, [isEditing]);
+    // posterUrl 刷新（重签成功）或切换到新电影时：清掉失败态并允许一次新的 onError→重签。
+    setPosterFailed(false);
+    posterResignRequestedRef.current = false;
+  }, [movie.id, movie.posterUrl]);
 
   React.useEffect(() => {
     const checkOverflow = () => {
@@ -4318,6 +5073,12 @@ function MovieCard({
       } else {
         setIsDirectorOverflowing(false);
       }
+      if (viewMode === 'grid' && yearRuntimeMetadataRef.current) {
+        const yr = yearRuntimeMetadataRef.current;
+        setIsYearRuntimeOverflowing(yr.scrollWidth > yr.clientWidth);
+      } else {
+        setIsYearRuntimeOverflowing(false);
+      }
     };
     
     // Small delay to ensure layout is stable
@@ -4328,7 +5089,16 @@ function MovieCard({
       window.removeEventListener('resize', checkOverflow);
       setHoverRating(null);
     };
-  }, [movie.title, movie.cast, movie.director, size, viewMode]);
+  }, [
+    movie.title,
+    movie.cast,
+    movie.director,
+    movie.year,
+    movie.runtime,
+    movie.contentRating,
+    size,
+    viewMode,
+  ]);
 
   /** 按内容宽度换算 cast 跑马灯时长，使线速度与 Matrix 基准一致。 */
   React.useEffect(() => {
@@ -4381,6 +5151,32 @@ function MovieCard({
       window.removeEventListener('resize', measure);
     };
   }, [viewMode, isDirectorOverflowing, movie.director, size]);
+
+  /** 网格 hover：年·分级·时长行溢出时与 cast / 导演同 `gridStripMarqueeDurationSec` 线速。 */
+  React.useEffect(() => {
+    if (viewMode !== 'grid' || !isYearRuntimeOverflowing) return;
+
+    const measure = () => {
+      const node = yearRuntimeMarqueeStripRef.current;
+      if (!node) return;
+      setYearRuntimeMarqueeDurationSec(gridStripMarqueeDurationSec(node.scrollWidth));
+    };
+
+    const ro = new ResizeObserver(measure);
+    const raf = requestAnimationFrame(() => {
+      measure();
+      const node = yearRuntimeMarqueeStripRef.current;
+      if (node) ro.observe(node);
+    });
+
+    window.addEventListener('resize', measure);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [viewMode, isYearRuntimeOverflowing, movie.year, movie.runtime, movie.contentRating, size]);
 
   /** 片名跑马灯：网格 hover 展示；列表溢出时始终展示。均用 `gridStripMarqueeDurationSec` 与 poster 网格同线速。 */
   React.useEffect(() => {
@@ -4560,13 +5356,45 @@ function MovieCard({
     );
   };
 
+  const showPosterSlotLoading =
+    movie.isMetadataPending === true ||
+    (movie.posterUrl.trim().length > 0 && !posterNaturalLoaded);
+
+  /**
+   * 海报加载失败：
+   * 1) 立即切到占位，避免浏览器原生破图 icon。
+   * 2) 若该片来自 Storage（`posterStoragePath` 存在），则重签一次并更新 `posterUrl` 触发重试。
+   */
+  const handlePosterImgError = useCallback(() => {
+    setPosterNaturalLoaded(true);
+    setPosterFailed(true);
+
+    const storagePath = movie.posterStoragePath?.trim();
+    if (!storagePath) return;
+    if (!onRefreshPosterSignedUrl) return;
+    if (posterResignRequestedRef.current) return;
+    posterResignRequestedRef.current = true;
+
+    void (async () => {
+      const nextUrl = await onRefreshPosterSignedUrl(movie.id, storagePath);
+      if (!nextUrl) return;
+      // 触发 <img key> 重建并重新发起请求；期间显示 loading 叠层而不是破图
+      setPosterFailed(false);
+      setPosterNaturalLoaded(false);
+    })();
+  }, [movie.id, movie.posterStoragePath, onRefreshPosterSignedUrl]);
+
+  /**
+   * 列表行入场/退场不用 `opacity`：与 `border-b` 同层时易与背景色 transition 合成出分割线「白闪」，仅用横向位移。
+   */
   if (viewMode === 'list') {
     return (
       <motion.div
-        initial={{ opacity: 0, x: -20 }}
+        ref={registerLibraryItemEl}
+        initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 20 }}
-        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none hover:bg-white/5 border-b border-[#292929] transition-[background-color] cursor-pointer w-full`}
+        exit={{ opacity: 1, x: 16 }}
+        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none border-b border-[#292929] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
           setIsListStarringMarqueeHover(false);
@@ -4576,19 +5404,16 @@ function MovieCard({
         {isEditing && (
           <div className="flex min-h-0 self-stretch items-center justify-center pl-8">
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                if (isSelectedForDeletion) {
-                  onDelete();
-                } else {
-                  setIsSelectedForDeletion(true);
-                }
+                onRequestDelete();
               }}
-              className={`flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90`}
-              title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
+              className="flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
+              title="Delete movie"
             >
-              <img
-                src={isSelectedForDeletion ? '/icons/poster-delete-confirm.svg' : '/icons/poster-delete.svg'}
+              <img draggable={false}
+                src="/icons/poster-delete.svg"
                 alt=""
                 width={16}
                 height={16}
@@ -4602,21 +5427,38 @@ function MovieCard({
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
             ref={listPosterShellRef}
-            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center cursor-zoom-in shadow-lg ${!isEditing ? 'group-hover:scale-115' : ''} ${isEditing ? 'group/posteredit' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenPosterPreview(listPosterShellRef.current);
-            }}
+            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit' : 'cursor-zoom-in group-hover:scale-115'}`}
+            onClick={
+              isEditing
+                ? undefined
+                : (e) => {
+                    e.stopPropagation();
+                    onOpenPosterPreview(listPosterShellRef.current);
+                  }
+            }
           >
-            <img 
-              src={movie.posterUrl} 
-              alt={movie.title} 
-              className="relative z-0 h-full w-full object-cover"
-              referrerPolicy="no-referrer"
-              loading={posterFetch.loading}
-              fetchPriority={posterFetch.fetchPriority}
-              decoding="async"
-            />
+            {showPosterSlotLoading ? <LibraryPosterFrameLoadingGlyph /> : null}
+            {movie.posterUrl.trim().length > 0 && !posterFailed ? (
+              <img draggable={false}
+                key={`poster-${movie.id}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
+                src={movie.posterUrl}
+                alt={movie.title}
+                className="relative z-0 h-full w-full object-cover select-none"
+                referrerPolicy="no-referrer"
+                loading={posterFetch.loading}
+                fetchPriority={posterFetch.fetchPriority}
+                decoding="async"
+                onLoad={() => setPosterNaturalLoaded(true)}
+                onError={handlePosterImgError}
+              />
+            ) : movie.posterUrl.trim().length > 0 && posterFailed ? (
+              <div
+                className="absolute inset-0 z-0 flex items-center justify-center bg-[#101010] text-white/15"
+                aria-hidden
+              >
+                <Film size={34} strokeWidth={1} />
+              </div>
+            ) : null}
             {isEditing ? (
               <div
                 className="pointer-events-none absolute inset-0 z-[15] bg-black/75 opacity-100 transition-opacity duration-300 ease-out group-hover/posteredit:opacity-0"
@@ -4766,7 +5608,7 @@ function MovieCard({
           <div className="mt-0.5 flex h-5 w-full shrink-0 items-center justify-center">
             {/** 图标 18px 高，宽按 IMDb 60×32 等比；外层仍 `h-5` 与 year/runtime 行盒对齐 */}
             <div className="relative h-[18px] w-[calc(18px*60/32)] shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <img
+              <img draggable={false}
                 src={RATINGS_ICON.imdbColor}
                 alt=""
                 width={60}
@@ -4783,7 +5625,7 @@ function MovieCard({
           <span className="block h-5 min-w-0 w-full shrink-0 truncate text-center font-semibold tabular-nums">{formatRottenTomatoesPercent(movie.rottenTomatoes)}</span>
           <div className="mt-0.5 flex h-5 w-full shrink-0 items-center justify-center">
             <div className="relative h-[18px] w-[18px] shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <img
+              <img draggable={false}
                 src={rottenTomatoesColorIconPath(movie.rottenTomatoes)}
                 alt=""
                 width={32}
@@ -4804,6 +5646,7 @@ function MovieCard({
 
   return (
     <motion.div
+      ref={registerLibraryItemEl}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
@@ -4812,6 +5655,8 @@ function MovieCard({
       <div
         ref={gridPosterShellRef}
         className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-transform duration-300 ease-out origin-bottom border-none ${
+          showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''
+        } ${
           isEditing
             ? 'group/posteredit rounded-xl group-hover/posteredit:rounded-none group-hover:rounded-none'
             : 'rounded-none group-hover:rounded-none'
@@ -4819,19 +5664,16 @@ function MovieCard({
       >
         {isEditing && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (isSelectedForDeletion) {
-                onDelete();
-              } else {
-                setIsSelectedForDeletion(true);
-              }
+              onRequestDelete();
             }}
             className="absolute left-2 top-2 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
-            title={isSelectedForDeletion ? "Confirm Delete" : "Delete Movie"}
+            title="Delete movie"
           >
-            <img
-              src={isSelectedForDeletion ? '/icons/poster-delete-confirm.svg' : '/icons/poster-delete.svg'}
+            <img draggable={false}
+              src="/icons/poster-delete.svg"
               alt=""
               width={16}
               height={16}
@@ -4841,35 +5683,45 @@ function MovieCard({
             />
           </button>
         )}
-        <button
-          type="button"
-          className="absolute inset-0 z-0 block h-full w-full cursor-pointer border-none bg-transparent p-0"
-          onClick={(e) => {
-            e.stopPropagation();
-            onShowPoster();
-          }}
-          aria-label={`Open poster options for ${movie.title}`}
-        />
-	        <img 
-	          src={movie.posterUrl} 
-	          alt={movie.title}
-	          className="pointer-events-none relative z-0 h-full w-full object-cover"
-	          referrerPolicy="no-referrer"
-	          loading={posterFetch.loading}
-	          fetchPriority={posterFetch.fetchPriority}
-	          decoding="async"
-	        />
+        {!isEditing ? (
+          <button
+            type="button"
+            className="absolute inset-0 z-0 block h-full w-full cursor-pointer border-none bg-transparent p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowPoster();
+            }}
+            aria-label={`Open poster options for ${movie.title}`}
+          />
+        ) : null}
+        {showPosterSlotLoading ? <LibraryPosterFrameLoadingGlyph /> : null}
+        {movie.posterUrl.trim().length > 0 && !posterFailed ? (
+          <img draggable={false}
+            key={`poster-${movie.id}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
+            src={movie.posterUrl}
+            alt={movie.title}
+            className="pointer-events-none relative z-0 h-full w-full object-cover select-none"
+            referrerPolicy="no-referrer"
+            loading={posterFetch.loading}
+            fetchPriority={posterFetch.fetchPriority}
+            decoding="async"
+            onLoad={() => setPosterNaturalLoaded(true)}
+            onError={handlePosterImgError}
+          />
+        ) : movie.posterUrl.trim().length > 0 && posterFailed ? (
+          <div
+            className="absolute inset-0 z-0 flex items-center justify-center bg-[#101010] text-white/15"
+            aria-hidden
+          >
+            <Film size={36} strokeWidth={1} />
+          </div>
+        ) : null}
         {isEditing ? (
           <div
             className="pointer-events-none absolute inset-0 z-[15] bg-black/75 opacity-100 transition-opacity duration-300 ease-out group-hover/posteredit:opacity-0"
             aria-hidden
           />
         ) : null}
-	        {/* Selection Overlay */}
-        <div 
-          className={`absolute inset-0 z-[16] bg-black/50 pointer-events-none transition-opacity duration-500 ease-in-out ${isSelectedForDeletion ? 'opacity-100' : 'opacity-0'}`}
-        />
-        
         {/* Hover Metadata Overlay */}
         <div
           className={`absolute inset-0 z-20 flex flex-col justify-end bg-black/75 p-4 opacity-0 transition-opacity space-y-2 ${
@@ -4878,8 +5730,8 @@ function MovieCard({
               : 'pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100'
           }`}
         >
-          <div className="space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
-            <div className="relative">
+          <div className="min-w-0 space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
+            <div className="relative min-w-0">
               {/** 导演叠在年/时长行上方；溢出时 hover 横向跑马灯，线速与 starring 同基准。 */}
               <div className="absolute bottom-full left-0 right-0 z-[2] mb-1 h-6 overflow-hidden">
                 <div
@@ -4905,9 +5757,30 @@ function MovieCard({
                   </div>
                 ) : null}
               </div>
-              <span className="block truncate text-[12px] font-normal leading-tight tracking-normal text-white/50 group-hover:text-white/75">
-                {formatYearRatingRuntime(movie)}
-              </span>
+              <div className="relative h-[17px] min-w-0 overflow-hidden">
+                <span
+                  ref={yearRuntimeMetadataRef}
+                  className={`block truncate text-[12px] font-normal leading-tight tracking-normal text-white/50 transition-colors group-hover:text-white/75 ${
+                    isYearRuntimeOverflowing ? 'group-hover:opacity-0' : ''
+                  }`}
+                >
+                  {formatYearRatingRuntime(movie)}
+                </span>
+                {isYearRuntimeOverflowing ? (
+                  <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                    <div
+                      ref={yearRuntimeMarqueeStripRef}
+                      className="flex h-full w-max items-center whitespace-nowrap text-[12px] font-normal leading-tight tracking-normal text-white/50 transform-gpu will-change-transform [backface-visibility:hidden] transition-colors group-hover:text-white/75"
+                      style={{
+                        animation: `marquee ${yearRuntimeMarqueeDurationSec}s linear infinite`,
+                      }}
+                    >
+                      <span className="pr-4">{formatYearRatingRuntime(movie)}</span>
+                      <span className="pr-4">{formatYearRatingRuntime(movie)}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="mt-[8px] flex min-h-0 flex-wrap items-center gap-2">
               {uniqueNormalizedGenreLabels(movie.genre).map((label) => (
@@ -4917,8 +5790,8 @@ function MovieCard({
               ))}
             </div>
             {/** `mt-[1lh]`：合并 year/runtime 少一行后，用一行高垫回 starring 的 Y 位置 */}
-            <div className="mt-[1lh] pt-2">
-              <div className="relative h-4 overflow-hidden">
+            <div className="mt-[1lh] min-w-0 pt-2">
+              <div className="relative h-4 min-w-0 overflow-hidden">
                 <div 
                   ref={castRef}
                   className={`text-white/60 transition-colors whitespace-nowrap ${isCastOverflowing ? 'group-hover:opacity-0' : 'truncate group-hover:text-white'}`}
@@ -4972,7 +5845,7 @@ function MovieCard({
             className="group/posterzoom pointer-events-auto absolute z-30 flex items-center justify-center rounded-[10px] bg-white/20 p-0 opacity-0 transition-opacity group-hover:opacity-100"
           >
             <span className="relative inline-flex h-6 w-6 shrink-0">
-              <img
+              <img draggable={false}
                 src="/icons/zoom-in.svg"
                 alt=""
                 width={24}
@@ -4981,7 +5854,7 @@ function MovieCard({
                 decoding="async"
                 aria-hidden
               />
-              <img
+              <img draggable={false}
                 src="/icons/zoom-in-hover.svg"
                 alt=""
                 width={24}
@@ -5025,7 +5898,7 @@ function MovieCard({
             <div className="flex items-center gap-1" aria-label={`IMDb ${formatImdbRating(movie.imdbRating)}`}>
               {/** 与列表行 hover 一致：18px 高、60×32 等比宽；`gap-1` 与行 `h-5` 不变 */}
               <div className="relative h-[18px] w-[calc(18px*60/32)] shrink-0">
-                <img
+                <img draggable={false}
                   src={RATINGS_ICON.imdbMuted}
                   alt=""
                   width={60}
@@ -5033,7 +5906,7 @@ function MovieCard({
                   className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain opacity-100 transition-opacity duration-200 group-hover:opacity-0"
                   decoding="async"
                 />
-                <img
+                <img draggable={false}
                   src={RATINGS_ICON.imdbColor}
                   alt=""
                   width={60}
@@ -5048,7 +5921,7 @@ function MovieCard({
             </div>
             <div className="flex items-center gap-1" aria-label={`Rotten Tomatoes ${formatRottenTomatoesPercent(movie.rottenTomatoes)}`}>
               <div className="relative h-[18px] w-[18px] shrink-0">
-                <img
+                <img draggable={false}
                   src={RATINGS_ICON.rtMuted}
                   alt=""
                   width={32}
@@ -5056,7 +5929,7 @@ function MovieCard({
                   className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain opacity-100 transition-opacity duration-200 group-hover:opacity-0"
                   decoding="async"
                 />
-                <img
+                <img draggable={false}
                   src={rottenTomatoesColorIconPath(movie.rottenTomatoes)}
                   alt=""
                   width={32}
