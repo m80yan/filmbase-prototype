@@ -49,6 +49,370 @@ type MovieSearchHit = {
  *
  * @param hit 已保证含非空 `imdbId` 的搜索命中
  */
+/** 海报预览 Info Mode：标签 / 演员名强调色（与工具栏 Edit 等 `#EA9794` 一致）。 */
+const POSTER_PREVIEW_INFO_ACCENT_CLASS = 'text-[#EA9794]';
+
+/**
+ * Info Mode 卡司全量行（无条数截断、无「……」占位），优先 `castDetails`，否则退回 `cast` 纯名。
+ *
+ * @param movie 当前预览影片
+ */
+function getPosterPreviewInfoCastRowsFull(movie: Movie): { name: string; character: string }[] {
+  const details = (movie.castDetails ?? []).filter((c) => (c.name ?? '').trim().length > 0);
+  if (details.length > 0) {
+    return details.map((c) => ({
+      name: (c.name ?? '').trim(),
+      character: (c.character ?? '').trim(),
+    }));
+  }
+  const names = (movie.cast ?? [])
+    .map((n) => (typeof n === 'string' ? n.trim() : ''))
+    .filter(Boolean);
+  return names.map((name) => ({ name, character: '' }));
+}
+
+/**
+ * 海报预览 Info Mode 卡司：解析用于 `getPosterPreviewInfoCastRowsFull` 的 `Movie`。
+ * `posterPreviewMovie` 在打开预览时快照，enrich 后 `castDetails` 可能在 `selectedMovie` / `movies` 中已更新；
+ * 若当前选中片与预览同 id，优先用 `selectedMovie`（满足「与选中行同源」）；否则用库中最新行，最后回退快照。
+ *
+ * @param posterPreview 预览状态中的影片
+ * @param selected 主区当前选中影片（可为 null）
+ * @param library 影片列表（与网格/列表同源）
+ */
+function resolvePosterPreviewInfoCastSourceMovie(
+  posterPreview: Movie,
+  selected: Movie | null,
+  library: Movie[],
+): Movie {
+  if (selected?.id === posterPreview.id) return selected;
+  return library.find((m) => m.id === posterPreview.id) ?? posterPreview;
+}
+
+/** Info Mode 正文字号与字重（14px、semibold）；行距默认 20px，仅 Plot 段使用 28px。 */
+const POSTER_PREVIEW_INFO_BODY_CLASS = 'text-[14px] font-semibold leading-5';
+
+/** Info Mode Plot 段落：与正文块相同字号字重，行距 28px。 */
+const POSTER_PREVIEW_INFO_PLOT_CLASS = 'text-[14px] font-semibold leading-[28px]';
+
+/**
+ * Crew / Cast / Details 共用双列模板：两列各 264px，`gap-x-4`（16px）为列间距；
+ * `max-w-[544px] mx-auto` 在 `max-w-[604px]` 的 section 内水平居中，等效总宽
+ * `30 + 264 + 16 + 264 + 30`（px）。
+ */
+const POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS =
+  'grid w-full max-w-[544px] mx-auto grid-cols-[264px_264px] gap-x-4';
+
+/**
+ * 双列栅格左侧标签列（及卡司演员名列）：定宽 264px、右对齐；`justify-self-end` 贴齐两列中线；
+ * `break-words` 使长标签 / 姓名在边界内换行。
+ */
+const POSTER_PREVIEW_INFO_LABEL_COL_CLASS = `min-w-0 w-[264px] max-w-[264px] justify-self-end break-words text-right ${POSTER_PREVIEW_INFO_ACCENT_CLASS}`;
+
+/**
+ * 双列栅格右侧数值列（及 Info Mode 卡司「角色」列）：定宽 264px；
+ * `justify-self-start` 避免 grid 子项 stretch；`break-words` 使长文案在边界内换行。
+ */
+const POSTER_PREVIEW_INFO_VALUE_COL_CLASS =
+  'min-w-0 w-[264px] max-w-[264px] justify-self-start break-words text-left text-white';
+
+/**
+ * 将 ISO 3166-1 alpha-2 转为区域指示符旗帜 emoji。
+ *
+ * @param code 两字母国家码，如 `US`
+ */
+function iso3166Alpha2ToFlagEmoji(code: string): string {
+  const c = code.trim().toUpperCase();
+  if (c.length !== 2 || !/^[A-Z]{2}$/.test(c)) return '';
+  const base = 0x1f1e6;
+  return String.fromCodePoint(
+    base + (c.charCodeAt(0) - 65),
+    base + (c.charCodeAt(1) - 65),
+  );
+}
+
+/** Info Mode「国家/地区」常见英文名 / 别名 → ISO3166-1 alpha-2（用于国旗前缀展示）。 */
+const POSTER_PREVIEW_COUNTRY_NAME_TO_ISO2: Record<string, string> = {
+  afghanistan: 'AF',
+  albania: 'AL',
+  algeria: 'DZ',
+  argentina: 'AR',
+  australia: 'AU',
+  austria: 'AT',
+  bangladesh: 'BD',
+  belgium: 'BE',
+  brazil: 'BR',
+  bulgaria: 'BG',
+  canada: 'CA',
+  chile: 'CL',
+  china: 'CN',
+  colombia: 'CO',
+  croatia: 'HR',
+  cuba: 'CU',
+  'czech republic': 'CZ',
+  czechia: 'CZ',
+  denmark: 'DK',
+  egypt: 'EG',
+  england: 'GB',
+  estonia: 'EE',
+  finland: 'FI',
+  france: 'FR',
+  georgia: 'GE',
+  germany: 'DE',
+  greece: 'GR',
+  'hong kong': 'HK',
+  hungary: 'HU',
+  iceland: 'IS',
+  india: 'IN',
+  indonesia: 'ID',
+  iran: 'IR',
+  iraq: 'IQ',
+  ireland: 'IE',
+  israel: 'IL',
+  italy: 'IT',
+  japan: 'JP',
+  korea: 'KR',
+  latvia: 'LV',
+  lebanon: 'LB',
+  lithuania: 'LT',
+  luxembourg: 'LU',
+  malaysia: 'MY',
+  mexico: 'MX',
+  morocco: 'MA',
+  netherlands: 'NL',
+  'new zealand': 'NZ',
+  nigeria: 'NG',
+  norway: 'NO',
+  pakistan: 'PK',
+  peru: 'PE',
+  philippines: 'PH',
+  poland: 'PL',
+  portugal: 'PT',
+  romania: 'RO',
+  russia: 'RU',
+  'saudi arabia': 'SA',
+  scotland: 'GB',
+  serbia: 'RS',
+  singapore: 'SG',
+  slovakia: 'SK',
+  slovenia: 'SI',
+  'south africa': 'ZA',
+  'south korea': 'KR',
+  spain: 'ES',
+  sweden: 'SE',
+  switzerland: 'CH',
+  taiwan: 'TW',
+  thailand: 'TH',
+  turkey: 'TR',
+  ukraine: 'UA',
+  'united arab emirates': 'AE',
+  'united kingdom': 'GB',
+  'united states': 'US',
+  'united states of america': 'US',
+  america: 'US',
+  usa: 'US',
+  'u.s.': 'US',
+  'u.s.a.': 'US',
+  vietnam: 'VN',
+  wales: 'GB',
+  uk: 'GB',
+  'great britain': 'GB',
+};
+
+/**
+ * 从「国家/地区」字段解析逗号分隔的多国名，生成去重后的国旗 emoji 前缀（空格分隔）。
+ *
+ * @param raw 原始字符串，如 `United States` 或 `Germany, United States, United Kingdom`
+ */
+function countryOfOriginToFlagPrefix(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '—') return '';
+  const parts = trimmed
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const flags: string[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    const key = part
+      .toLowerCase()
+      .replace(/\./g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const iso = POSTER_PREVIEW_COUNTRY_NAME_TO_ISO2[key];
+    if (!iso) continue;
+    const emoji = iso3166Alpha2ToFlagEmoji(iso);
+    if (!emoji || seen.has(emoji)) continue;
+    seen.add(emoji);
+    flags.push(emoji);
+  }
+  return flags.length ? `${flags.join(' ')} ` : '';
+}
+
+/**
+ * 将金额标量格式化为固定一位小数的字符串（用于 M/B/K 后缀），如 `461.0`、`131.1`、`1.2`。
+ *
+ * @param scaled 已除以单位（如 1e6）的数值
+ */
+function formatPosterPreviewMoneyScaled(scaled: number): string {
+  const rounded = Math.round(scaled * 10) / 10;
+  return rounded.toFixed(1);
+}
+
+/**
+ * Info Mode「Box Office (US & Canada)」展示用紧凑金额（不修改存储字段）。
+ * 无法解析或空 / `—` / `N/A` 时返回 `—`。
+ *
+ * @param raw 原始文案，如 `$460,998,507`
+ */
+function formatPosterPreviewInfoBoxOfficeDisplay(raw: string): string {
+  const s = raw.trim();
+  if (!s || s === '—' || /^n\/a$/i.test(s)) return '—';
+  const digits = s.replace(/,/g, '').replace(/[^\d]/g, '');
+  if (!digits) return '—';
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+
+  if (n >= 1_000_000_000) {
+    return `$${formatPosterPreviewMoneyScaled(n / 1_000_000_000)}B`;
+  }
+  if (n >= 1_000_000) {
+    return `$${formatPosterPreviewMoneyScaled(n / 1_000_000)}M`;
+  }
+  if (n >= 1_000) {
+    return `$${formatPosterPreviewMoneyScaled(n / 1_000)}K`;
+  }
+  return `$${n.toLocaleString('en-US')}`;
+}
+
+/**
+ * 海报预览 Info Mode：剧情块（最大宽 420px；外层 `flex justify-center` 避免 `flex-col` 子项
+ * `w-full` 被拉满整行导致「块」看起来贴左；正文仍左对齐便于长段阅读）。
+ *
+ * @param plot 剧情文案
+ */
+function PosterPreviewInfoPlotBlock({ plot }: { plot: string }) {
+  const body = plot.trim() || '—';
+  return (
+    <div className="flex w-full shrink-0 justify-center">
+      <section className="w-full min-w-0 max-w-[420px]" aria-label="Plot">
+        <p className={`text-left ${POSTER_PREVIEW_INFO_PLOT_CLASS} whitespace-pre-wrap`}>
+          <span className={POSTER_PREVIEW_INFO_ACCENT_CLASS}>PLOT:</span>
+          <span className="text-white"> {body}</span>
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * 海报预览 Info Mode：主创（独立双列栅格，标签列定宽右对齐）。
+ *
+ * @param director 导演
+ * @param writer 编剧
+ */
+function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; writer: string }) {
+  return (
+    <section
+      className="mx-auto mt-[40px] w-full max-w-[604px]"
+      aria-label="Director and writers"
+    >
+      <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-2 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
+        <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>Director</div>
+        <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(director ?? '').trim() || '—'}</div>
+        <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>Writers</div>
+        <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(writer ?? '').trim() || '—'}</div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 海报预览 Info Mode：卡司（独立双列栅格；约 15 行可视高度，超出区域内滚动）。
+ * 行数据必须由 `getPosterPreviewInfoCastRowsFull` 生成，禁止直接 `castDetails.map` / `cast.map`。
+ *
+ * @param movie 传入 `resolvePosterPreviewInfoCastSourceMovie(...)` 的结果或其它已解析的 `Movie`
+ */
+function PosterPreviewInfoCastBlock({ movie }: { movie: Movie }) {
+  const rows = getPosterPreviewInfoCastRowsFull(movie);
+
+  return (
+    <section className="mx-auto mt-6 w-full max-w-[604px] min-w-0" aria-label="Cast">
+      {rows.length === 0 ? (
+        <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-1.5 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
+          <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>—</div>
+          <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS} aria-hidden>
+            {'\u00A0'}
+          </div>
+        </div>
+      ) : (
+        <div
+          className="max-h-[calc(15*1.25rem+14*0.375rem)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain"
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-1.5 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
+            {rows.map((row, idx) => (
+              <React.Fragment key={`cast-${idx}-${row.name}`}>
+                <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>{row.name}</div>
+                <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>
+                  {(row.character ?? '').trim() || '\u00A0'}
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 海报预览 Info Mode：发行与制片等详情（独立双列栅格，数值列可换行）。
+ *
+ * @param movie 当前预览影片
+ */
+function PosterPreviewInfoDetailsBlock({ movie }: { movie: Movie }) {
+  const rows = [
+    {
+      label: 'Release date',
+      value: (movie.releaseDate ?? '').trim() || '—',
+    },
+    {
+      label: 'Country of origin',
+      value: (movie.countryOfOrigin ?? '').trim() || '—',
+    },
+    {
+      label: 'Box Office (US & Canada)',
+      value: formatPosterPreviewInfoBoxOfficeDisplay((movie.boxOffice ?? '').trim()),
+    },
+    {
+      label: 'Production companies',
+      value:
+        (movie.productionCompanies ?? []).filter(Boolean).join(', ').trim() || '—',
+    },
+  ] as const;
+
+  return (
+    <section className="mx-auto mt-6 w-full max-w-[604px]" aria-label="Release and production details">
+      <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-2 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
+        {rows.map((row) => {
+          const flagPrefix =
+            row.label === 'Country of origin' ? countryOfOriginToFlagPrefix(row.value) : '';
+          return (
+            <React.Fragment key={row.label}>
+              <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>{row.label}</div>
+              <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>
+                {flagPrefix}
+                {row.value}
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function buildPlaceholderMovieFromSearchHit(hit: MovieSearchHit & { imdbId: string }): Movie {
   const imdbId = hit.imdbId.trim().toLowerCase();
   const year =
@@ -594,6 +958,8 @@ export default function App() {
   const [isPosterPreviewOpen, setIsPosterPreviewOpen] = useState(false);
   /** 全屏海报预览：整片元数据（仅用于右侧面板与海报 URL）。 */
   const [posterPreviewMovie, setPosterPreviewMovie] = useState<Movie | null>(null);
+  /** 海报预览 Info Mode：叠层展示剧情/职员等，关闭预览时复位。 */
+  const [isInfoMode, setIsInfoMode] = useState(false);
   /** 网格放大镜 hero：起点/终点与动画相位（仅 Grid 传入 `DOMRect` 时启用）。 */
   const [posterHeroFromRect, setPosterHeroFromRect] = useState<PreviewHeroRect | null>(null);
   const [posterHeroTargetRect, setPosterHeroTargetRect] = useState<PreviewHeroRect | null>(null);
@@ -963,6 +1329,7 @@ export default function App() {
     setPosterUploadError('');
     setIsPosterPreviewOpen(false);
     setPosterPreviewMovie(null);
+    setIsInfoMode(false);
     setPreviewNaturalSize(null);
     setPreviewSliderPercent(100);
     setPreviewPan({ x: 0, y: 0 });
@@ -992,6 +1359,7 @@ export default function App() {
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       if (isPosterPreviewOpen) {
+        if (isInfoMode) return;
         const awaiting =
           isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying;
         if (awaiting) return;
@@ -1004,6 +1372,7 @@ export default function App() {
     },
     [
       isPosterPreviewOpen,
+      isInfoMode,
       isScopedPosterUploadOpen,
       pendingPosterUrl,
       isPosterApplying,
@@ -1013,11 +1382,16 @@ export default function App() {
     ],
   );
 
-  /** 预览打开时 ESC 关闭预览（仅挂载本监听）；选图待 Apply/Cancel 时不响应 ESC。 */
+  /** 预览打开时 ESC：Info Mode 下先退出信息层；否则关闭预览（选图待 Apply/Cancel 时不响应）。 */
   useEffect(() => {
     if (!isPosterPreviewOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (isInfoMode) {
+        e.preventDefault();
+        setIsInfoMode(false);
+        return;
+      }
       if (
         isScopedPosterUploadOpen &&
         Boolean(pendingPosterUrl) &&
@@ -1032,6 +1406,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isPosterPreviewOpen,
+    isInfoMode,
     isScopedPosterUploadOpen,
     pendingPosterUrl,
     isPosterApplying,
@@ -1072,6 +1447,7 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.key !== 'z' && e.key !== 'Z') return;
+      if (isInfoMode) return;
       const ae = document.activeElement;
       if (
         ae instanceof HTMLInputElement ||
@@ -1110,7 +1486,7 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown);
       previewPointerOverImgRef.current = false;
     };
-  }, [isPosterPreviewOpen]);
+  }, [isPosterPreviewOpen, isInfoMode]);
 
   /** 主区内预告片 overlay 打开时 ESC 关闭（Edit Trailer URL 弹窗占用 ESC 时跳过）。 */
   useEffect(() => {
@@ -1206,6 +1582,7 @@ export default function App() {
     setPosterPreviewMovie(movie);
     setPreviewNaturalSize(null);
     setPreviewPan({ x: 0, y: 0 });
+    setIsInfoMode(false);
     if (!hasHero) {
       setPreviewSliderPercent(100);
     }
@@ -1659,7 +2036,6 @@ export default function App() {
             return { name, character };
           })
           .filter((x): x is MovieCastDetail => x != null)
-          .slice(0, 15)
       : [];
 
     const newMovie: Movie = {
@@ -1668,7 +2044,9 @@ export default function App() {
       year: typeof payload.year === 'number' && Number.isFinite(payload.year) ? payload.year : 0,
       genre: Array.isArray(payload.genres) ? payload.genres : [],
       director: payload.director ?? '',
-      cast: Array.isArray(payload.cast) ? payload.cast.slice(0, 15) : [],
+      cast: Array.isArray(payload.cast)
+        ? payload.cast.filter((n): n is string => typeof n === 'string')
+        : [],
       imdbRating: typeof payload.imdbRating === 'number' ? payload.imdbRating : 0,
       rottenTomatoes: typeof payload.rottenTomatoes === 'number' ? payload.rottenTomatoes : 0,
       personalRating: 0,
@@ -2256,9 +2634,13 @@ export default function App() {
       !isPosterApplying,
   );
 
-  /** 锁定或 min=max 时禁用滑块与 ±；缩放交互在「待 Apply/Cancel」状态下保持可用。 */
+  /** Info Mode 或与待 Apply 一致：侧栏遮罩、顶栏 Back/缩放/上传、背景点按关闭等同锁态。 */
+  const isPosterPreviewChromeLocked = isAwaitingPosterApplyConfirm || isInfoMode;
+
+  /** 锁定或 min=max 时禁用滑块与 ±；Info Mode 下亦禁用。 */
   const isPreviewZoomSliderDisabled =
     isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
+  const isPosterPreviewZoomControlsDisabled = isPreviewZoomSliderDisabled || isInfoMode;
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
@@ -2356,7 +2738,7 @@ export default function App() {
       {/* Sidebar */}
 	      <aside
           className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
-            isAwaitingPosterApplyConfirm ? 'opacity-50 transition-opacity' : ''
+            isPosterPreviewChromeLocked ? 'opacity-50 transition-opacity' : ''
           }`}
           onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
         >
@@ -2609,13 +2991,17 @@ export default function App() {
         </div>
 
         {/**
-         * 等待 Apply / Cancel 时遮住整个 sidebar：阻断 hover/click，显示禁止光标和原生 tooltip。
+         * 等待 Apply / Cancel 或 Info Mode 时遮住整个 sidebar：阻断 hover/click，显示禁止光标和原生 tooltip。
          * 不影响左上角 `Toggle Sidebar`（在 aside 之外、`z-[200]`），用户仍可折叠以更好预览海报。
          */}
-        {isAwaitingPosterApplyConfirm ? (
+        {isPosterPreviewChromeLocked ? (
           <div
             className="absolute inset-0 z-30 cursor-not-allowed"
-            title="Use Apply or Cancel below to finish poster upload"
+            title={
+              isAwaitingPosterApplyConfirm
+                ? 'Use Apply or Cancel below to finish poster upload'
+                : 'Press ESC to exit info'
+            }
             aria-hidden
             onPointerDownCapture={(e) => {
               e.preventDefault();
@@ -2663,12 +3049,14 @@ export default function App() {
                 <div className="flex h-9 min-w-[5.5rem] shrink-0 items-center justify-start gap-2">
                   <button
                     type="button"
-                    disabled={isAwaitingPosterApplyConfirm}
+                    disabled={isPosterPreviewChromeLocked}
                     onClick={() => closePosterPreview()}
                     className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/80"
                     title={
-                      isAwaitingPosterApplyConfirm
-                        ? 'Use Apply or Cancel below'
+                      isPosterPreviewChromeLocked
+                        ? isAwaitingPosterApplyConfirm
+                          ? 'Use Apply or Cancel below'
+                          : 'Press ESC to exit info'
                         : 'Back'
                     }
                     aria-label="Close poster preview"
@@ -2694,6 +3082,77 @@ export default function App() {
                       />
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    disabled={isAwaitingPosterApplyConfirm}
+                    onClick={() => setIsInfoMode((v) => !v)}
+                    title={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    aria-pressed={isInfoMode}
+                    className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isAwaitingPosterApplyConfirm
+                        ? 'text-white/25'
+                        : isInfoMode
+                          ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                          : 'text-white/40 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                      {isAwaitingPosterApplyConfirm ? (
+                        <img draggable={false}
+                          src="/icons/info-disabled.svg"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : isInfoMode ? (
+                        <>
+                          <img draggable={false}
+                            src="/icons/info-active.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img draggable={false}
+                            src="/icons/info-active-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <img draggable={false}
+                            src="/icons/info.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                            decoding="async"
+                            aria-hidden
+                          />
+                          <img draggable={false}
+                            src="/icons/info-hover.svg"
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                            decoding="async"
+                            aria-hidden
+                          />
+                        </>
+                      )}
+                    </span>
+                  </button>
                 </div>
                 <div className="flex min-w-0 items-center gap-3">
                   <button
@@ -2708,12 +3167,14 @@ export default function App() {
                       setPreviewPan({ x: 0, y: 0 });
                     }}
                     disabled={
-                      previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderDisabled
+                      previewSliderPercent <= previewSliderMinPercent ||
+                      isPosterPreviewZoomControlsDisabled
                     }
                     className="group/prevfit relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward fit / fill"
                   >
-                    {previewSliderPercent <= previewSliderMinPercent || isPreviewZoomSliderDisabled ? (
+                    {previewSliderPercent <= previewSliderMinPercent ||
+                    isPosterPreviewZoomControlsDisabled ? (
                       <img draggable={false}
                         src="/icons/poster-preview-fit-disabled.svg"
                         alt=""
@@ -2747,7 +3208,7 @@ export default function App() {
                     )}
                   </button>
                   <div className="group relative flex h-8 w-32 shrink-0 items-center">
-                    {previewSliderHoverLabel ? (
+                    {previewSliderHoverLabel && !isInfoMode ? (
                       <span
                         className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white/90 opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
                         style={{
@@ -2761,14 +3222,14 @@ export default function App() {
                     <div
                       className="relative h-8 w-full"
                       onPointerDownCapture={(e) => {
-                        if (isPreviewZoomSliderDisabled) return;
+                        if (isPosterPreviewZoomControlsDisabled) return;
                         if (e.button !== 0) return;
                         setIsPreviewZoomSliderPressed(true);
                       }}
                     >
                       <div
                         className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                          isPreviewZoomSliderDisabled ? 'opacity-15' : 'opacity-100'
+                          isPosterPreviewZoomControlsDisabled ? 'opacity-15' : 'opacity-100'
                         }`}
                         style={{
                           height: POSTER_SIZE_SLIDER_TRACK_H_PX,
@@ -2778,7 +3239,7 @@ export default function App() {
                       />
                       <img draggable={false}
                         src={
-                          isPreviewZoomSliderDisabled
+                          isPosterPreviewZoomControlsDisabled
                             ? '/icons/poster-size-slider-thumb-disabled.svg'
                             : isPreviewZoomSliderPressed
                               ? '/icons/poster-size-slider-thumb-pressed.svg'
@@ -2800,7 +3261,7 @@ export default function App() {
                         max={100}
                         step="0.1"
                         value={previewSliderPercent}
-                        disabled={isPreviewZoomSliderDisabled}
+                        disabled={isPosterPreviewZoomControlsDisabled}
                         onChange={(e) => {
                           const v = Number(e.target.value);
                           const snapped =
@@ -2832,12 +3293,14 @@ export default function App() {
                       setPreviewPan({ x: 0, y: 0 });
                     }}
                     disabled={
-                      previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled
+                      previewSliderPercent >= previewSliderMaxPercent ||
+                      isPosterPreviewZoomControlsDisabled
                     }
                     className="group/prev100 relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward 100%"
                   >
-                    {previewSliderPercent >= previewSliderMaxPercent || isPreviewZoomSliderDisabled ? (
+                    {previewSliderPercent >= previewSliderMaxPercent ||
+                    isPosterPreviewZoomControlsDisabled ? (
                       <img draggable={false}
                         src="/icons/poster-preview-100-disabled.svg"
                         alt=""
@@ -3162,7 +3625,7 @@ export default function App() {
                 return (
                 <button
                   type="button"
-                  disabled={isAwaitingPosterApplyConfirm}
+                  disabled={isPosterPreviewChromeLocked}
                   /**
                    * 父级 toolbar 在 capture 阶段挂了 `onShellPointerDownCloseScopedOverlays`，
                    * 会在 trailer / blur 抖动场景下重渲该按钮所在子树，导致首次 click 丢失。
@@ -3185,14 +3648,16 @@ export default function App() {
                   title={
                     isAwaitingPosterApplyConfirm
                       ? 'Use Apply or Cancel below'
-                      : hasVisibleUploadPanel
-                        ? 'Close upload panel'
-                        : 'Upload Poster'
+                      : isInfoMode
+                        ? 'Press ESC to exit info'
+                        : hasVisibleUploadPanel
+                          ? 'Close upload panel'
+                          : 'Upload Poster'
                   }
                 >
                   {/* 禁用态：`upload-poster-disabled.svg` 已含 fill-opacity；按钮不再叠加 disabled:opacity-* */}
                   <span className="relative block h-[18px] w-[18px] shrink-0">
-                    {isAwaitingPosterApplyConfirm ? (
+                    {isPosterPreviewChromeLocked ? (
                       <img draggable={false}
                         src="/icons/upload-poster-disabled.svg"
                         alt=""
@@ -3362,6 +3827,8 @@ export default function App() {
                 </span>
               ) : isScopedPosterUploadOpen && pendingPosterUrl ? (
                 <span className="tabular-nums leading-5">Ready</span>
+              ) : isInfoMode ? (
+                <span className="leading-5">Press ESC to exit info</span>
               ) : (
                 <>
                   {previewNaturalSize.w} × {previewNaturalSize.h},{' '}
@@ -3665,10 +4132,27 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={MAIN_MODAL_OVERLAY_TRANSITION}
-            onClick={() => setSelectedMovie(null)}
-            className="absolute inset-0 z-[104] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[104] flex h-full min-h-0 items-center justify-center overflow-hidden p-4 md:p-8"
           >
-            <div className="flex w-full max-w-5xl flex-col items-center gap-4">
+            {/** 预告片叠层：纯视觉压暗与模糊，不命中指针。 */}
+            <div
+              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-md"
+              aria-hidden
+            />
+            {/** 预告片叠层：空白处点按关闭，并阻断穿透滚动。 */}
+            <div
+              className="absolute inset-0 z-[1] cursor-pointer"
+              onClick={(e) => {
+                if (e.target !== e.currentTarget) return;
+                setSelectedMovie(null);
+              }}
+              onWheel={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onTouchMove={(e) => e.preventDefault()}
+            />
+            <div className="pointer-events-none relative z-[2] flex w-full max-w-5xl flex-col items-center gap-4">
               <motion.div
                 key={`trailer-panel-${selectedMovie.id}`}
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -3676,7 +4160,7 @@ export default function App() {
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                 transition={MAIN_MODAL_PANEL_TRANSITION}
                 onClick={(e) => e.stopPropagation()}
-                className="relative aspect-video w-full cursor-default overflow-hidden bg-black shadow-[0_0_100px_rgba(255,255,255,0.1)]"
+                className="pointer-events-auto relative aspect-video w-full cursor-default overflow-hidden bg-black shadow-[0_0_100px_rgba(255,255,255,0.1)]"
               >
                 {(() => {
                   const embedUrl = getYouTubeEmbedUrl(selectedMovie.trailerUrl);
@@ -3722,7 +4206,7 @@ export default function App() {
                   e.stopPropagation();
                   openEditTrailerModal();
                 }}
-                className="group/edittrailer inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
+                className="pointer-events-auto group/edittrailer inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
                 title="Edit Trailer URL"
               >
                 <span className="relative block h-4 w-4 shrink-0">
@@ -3761,25 +4245,32 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden bg-black/35 backdrop-blur-md outline-none focus:outline-none focus-visible:outline-none"
-            onClick={() => {
-              if (isAwaitingPosterApplyConfirm) return;
-              closePosterPreview();
-            }}
-            onWheel={(e) => {
-              // 预览打开时阻止底层主内容滚动；缩放仅由滑块/快捷键控制。
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onTouchMove={(e) => e.preventDefault()}
+            className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden outline-none focus:outline-none focus-visible:outline-none"
           >
-            {!isPosterHeroAnimating && (
+            {/** 海报预览：纯视觉压暗与模糊，不命中指针。 */}
             <div
-              className="box-border flex h-full min-h-0 w-full max-w-full items-center justify-center px-4 sm:px-6"
-              onClick={(e) => e.stopPropagation()}
-            >
+              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-md"
+              aria-hidden
+            />
+            {/** 海报预览：空白处点按关闭；滚轮/触摸仅在此层拦截穿透滚动。 */}
+            <div
+              className="absolute inset-0 z-[1]"
+              onClick={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (isAwaitingPosterApplyConfirm || isInfoMode) return;
+                closePosterPreview();
+              }}
+              onWheel={(e) => {
+                // 预览打开时阻止底层主内容滚动；缩放仅由滑块/快捷键控制。
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onTouchMove={(e) => e.preventDefault()}
+            />
+            {!isPosterHeroAnimating && (
+            <div className="pointer-events-none relative z-[2] box-border flex h-full min-h-0 w-full max-w-full items-center justify-center px-4 sm:px-6">
               <div
-                className="relative shrink-0 overflow-hidden"
+                className="pointer-events-auto relative shrink-0 overflow-hidden"
                 style={
                   posterPreviewLayout
                     ? {
@@ -3794,6 +4285,7 @@ export default function App() {
                       : { width: 'min(100%, 560px)', height: 'min(85dvh, 920px)' }
                 }
                 onWheel={(e) => {
+                  if (isInfoMode) return;
                   const L = posterPreviewLayoutRef.current;
                   if (!L?.needsPan) return;
                   e.preventDefault();
@@ -3822,7 +4314,7 @@ export default function App() {
                     onPointerLeave={() => {
                       previewPointerOverImgRef.current = false;
                     }}
-                    className="max-h-none max-w-none select-none object-contain"
+                    className={`max-h-none max-w-none select-none object-contain${isInfoMode ? ' pointer-events-none' : ''}`}
                     style={
                       posterPreviewLayout
                         ? {
@@ -3834,11 +4326,13 @@ export default function App() {
                             maxWidth: 'none',
                             maxHeight: 'none',
                             transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
-                            cursor: isPreviewDragging && posterPreviewLayout.needsPan
-                              ? 'grabbing'
-                              : isPreviewZoomOutCursor
-                                ? 'zoom-out'
-                                : 'zoom-in',
+                            cursor: isInfoMode
+                              ? 'default'
+                              : isPreviewDragging && posterPreviewLayout.needsPan
+                                ? 'grabbing'
+                                : isPreviewZoomOutCursor
+                                  ? 'zoom-out'
+                                  : 'zoom-in',
                           }
                         : previewPosterFrameFallback
                           ? {
@@ -3850,12 +4344,13 @@ export default function App() {
                               maxWidth: 'none',
                               maxHeight: 'none',
                               transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
-                              cursor:
-                                isPreviewDragging &&
-                                (previewPosterFrameFallback.dispW >
-                                  previewPosterFrameFallback.maxW + 0.5 ||
-                                  previewPosterFrameFallback.dispH >
-                                    previewPosterFrameFallback.maxH + 0.5)
+                              cursor: isInfoMode
+                                ? 'default'
+                                : isPreviewDragging &&
+                                    (previewPosterFrameFallback.dispW >
+                                      previewPosterFrameFallback.maxW + 0.5 ||
+                                      previewPosterFrameFallback.dispH >
+                                        previewPosterFrameFallback.maxH + 0.5)
                                   ? 'grabbing'
                                   : previewPosterFrameFallback.dispW >
                                         previewPosterFrameFallback.maxW + 0.5 ||
@@ -3870,7 +4365,7 @@ export default function App() {
                               width: '100%',
                               height: '100%',
                               objectFit: 'contain',
-                              cursor: 'wait',
+                              cursor: isInfoMode ? 'default' : 'wait',
                             }
                     }
                     onLoad={(e) => {
@@ -3894,6 +4389,7 @@ export default function App() {
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (isInfoMode) return;
                       if (previewDragRef.current.moved) {
                         previewDragRef.current.moved = false;
                         return;
@@ -3937,6 +4433,7 @@ export default function App() {
                       setPreviewPan({ x: nextPanX, y: nextPanY });
                     }}
                     onPointerDown={(e) => {
+                      if (isInfoMode) return;
                       const L = posterPreviewLayoutRef.current;
                       if (!L?.needsPan) return;
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -3979,6 +4476,32 @@ export default function App() {
                       setIsPreviewDragging(false);
                     }}
                   />
+
+                  {isInfoMode ? (
+                    <div
+                      role="region"
+                      aria-label="Movie information"
+                      className="absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      onClick={(e) => e.stopPropagation()}
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex min-h-full w-full flex-col items-center justify-center px-4 py-5">
+                        <PosterPreviewInfoPlotBlock plot={posterPreviewMovie.plot ?? ''} />
+                        <PosterPreviewInfoCrewBlock
+                          director={posterPreviewMovie.director ?? ''}
+                          writer={posterPreviewMovie.writer ?? ''}
+                        />
+                        <PosterPreviewInfoCastBlock
+                          movie={resolvePosterPreviewInfoCastSourceMovie(
+                            posterPreviewMovie,
+                            selectedMovie,
+                            movies,
+                          )}
+                        />
+                        <PosterPreviewInfoDetailsBlock movie={posterPreviewMovie} />
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* Poster Preview 内 scoped Upload：仅底部 action bar，不重复渲染海报图层 */}
                   <AnimatePresence>

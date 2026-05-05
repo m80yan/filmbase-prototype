@@ -13,6 +13,14 @@
  *   即便它们为空，也由其他流程负责回填，避免与海报/预告片专用回填抢先。
  * - 每行处理之间留 ~150–300ms，避免 OMDb / TMDb 速率限制。
  *
+ * 定向模式（POST JSON，与全表回填共用 admin secret）：
+ * `{ "movieId": "tt0076759", "overwriteCastDetails": true }` — 仅更新该行的
+ * `cast_details` 与 `updated_at`，不进入全表扫描。
+ *
+ * 批量刷新「偏短」卡司（`cast_details` 非空数组且长度 ≤ 15 的 `tt…` 行）：
+ * `{ "overwriteCastDetails": true, "refreshTruncatedCastDetails": true, "limit": 50 }`
+ * — 仅当 enrich 后净卡司条数大于当前长度时更新 `cast_details` 与 `updated_at`。
+ *
  * Secrets（Supabase Dashboard → Edge Functions → Secrets）：
  * - `BACKFILL_PUBLIC_METADATA_ADMIN_SECRET`：请求头 `X-Backfill-Admin-Secret` 必须一致
  * - `SERVICE_ROLE_KEY`：绕过 RLS 写入公共表 + 调用 `enrich-movie-from-imdb`
@@ -87,6 +95,25 @@ type BackfillSummary = {
   skipped: number;
   failed: number;
   rows: PerRowResult[];
+};
+
+/** 批量刷新偏短 `cast_details` 时，单行结果摘要。 */
+type TruncatedCastBatchRowResult = {
+  movieId: string;
+  oldCount: number;
+  newCount: number;
+  status: RowStatus;
+  message?: string;
+};
+
+/** 批量刷新偏短 `cast_details` 的响应体。 */
+type TruncatedCastBatchSummary = {
+  mode: "refresh_truncated_cast_details";
+  scanned: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  rows: TruncatedCastBatchRowResult[];
 };
 
 /** 常量时间字符串比较，用于 admin secret。 */
@@ -282,6 +309,59 @@ function buildPartialUpdate(
   return { update, fields };
 }
 
+/**
+ * 解析 POST body；空或非 JSON 对象时返回空对象，以保留「无 body 全表回填」行为。
+ *
+ * @param raw `await req.text()` 结果
+ */
+function parsePostBody(raw: string): Record<string, unknown> {
+  const t = raw.trim();
+  if (!t) return {};
+  try {
+    const v = JSON.parse(t) as unknown;
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 解析批量刷新 `limit`：默认 50，合法数值限制在 [1, 100]。
+ *
+ * @param v POST body 中的 `limit` 字段
+ */
+function parseTruncatedCastRefreshLimit(v: unknown): number {
+  const fallback = 50;
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  const n = Math.floor(v);
+  if (n < 1) return fallback;
+  return Math.min(100, n);
+}
+
+/**
+ * 判定 `cast_details` 是否为非空且存在、且为长度不超过 15 的数组（批量刷新候选）。
+ *
+ * @param castDetails 表列原始值
+ */
+function isTruncatedCastDetailsCandidate(castDetails: unknown): boolean {
+  if (castDetails == null) return false;
+  if (!Array.isArray(castDetails)) return false;
+  return castDetails.length <= 15;
+}
+
+/**
+ * 统计 DB 中 `cast_details` 数组元素个数（非数组视为 0）。
+ *
+ * @param castDetails 表列原始值
+ */
+function rawCastDetailsArrayLength(castDetails: unknown): number {
+  if (!Array.isArray(castDetails)) return 0;
+  return castDetails.length;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -333,6 +413,259 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  const rawBody = await req.text().catch(() => "");
+  const postBody = parsePostBody(rawBody);
+
+  if (postBody.refreshTruncatedCastDetails === true) {
+    if (postBody.overwriteCastDetails !== true) {
+      return new Response(
+        JSON.stringify({
+          error: "Bad Request",
+          message:
+            "overwriteCastDetails must be true when refreshTruncatedCastDetails is true",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const batchLimit = parseTruncatedCastRefreshLimit(postBody.limit);
+
+    const { data: truncRows, error: truncSelErr } = await supabase
+      .from(PUBLIC_TABLE)
+      .select("movie_id, cast_details")
+      .not("cast_details", "is", null);
+
+    if (truncSelErr) {
+      return new Response(
+        JSON.stringify({
+          error: "Select failed",
+          message: truncSelErr.message,
+        }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const typed = (truncRows ?? []) as Array<{ movie_id: string; cast_details: unknown }>;
+    const batchCandidates = typed
+      .filter((r) => isTtMovieId(r.movie_id) && isTruncatedCastDetailsCandidate(r.cast_details))
+      .slice(0, batchLimit);
+
+    const batchSummary: TruncatedCastBatchSummary = {
+      mode: "refresh_truncated_cast_details",
+      scanned: batchCandidates.length,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      rows: [],
+    };
+
+    for (let i = 0; i < batchCandidates.length; i++) {
+      const row = batchCandidates[i];
+      const movieId = (row.movie_id ?? "").trim().toLowerCase();
+      const oldCount = rawCastDetailsArrayLength(row.cast_details);
+
+      try {
+        const enrichResult = await callEnrich(movieId, supabaseUrl, serviceKey);
+        if (enrichResult.ok === false) {
+          batchSummary.failed++;
+          batchSummary.rows.push({
+            movieId,
+            oldCount,
+            newCount: 0,
+            status: "failed",
+            message: enrichResult.error,
+          });
+          continue;
+        }
+
+        const cleaned = sanitizeCastDetails(enrichResult.data.castDetails);
+        if (cleaned.length === 0) {
+          batchSummary.skipped++;
+          batchSummary.rows.push({
+            movieId,
+            oldCount,
+            newCount: 0,
+            status: "skipped",
+            message: "enrich_returned_empty_cast_details",
+          });
+          continue;
+        }
+
+        if (cleaned.length <= oldCount) {
+          batchSummary.skipped++;
+          batchSummary.rows.push({
+            movieId,
+            oldCount,
+            newCount: cleaned.length,
+            status: "skipped",
+            message: "enrich_cast_not_longer_than_existing",
+          });
+          continue;
+        }
+
+        const updatedAt = new Date().toISOString();
+        const { error: upErr } = await supabase
+          .from(PUBLIC_TABLE)
+          .update({
+            cast_details: cleaned,
+            updated_at: updatedAt,
+          })
+          .eq("movie_id", movieId);
+
+        if (upErr) {
+          batchSummary.failed++;
+          batchSummary.rows.push({
+            movieId,
+            oldCount,
+            newCount: cleaned.length,
+            status: "failed",
+            message: upErr.message,
+          });
+          continue;
+        }
+
+        batchSummary.updated++;
+        batchSummary.rows.push({
+          movieId,
+          oldCount,
+          newCount: cleaned.length,
+          status: "updated",
+        });
+      } catch (e) {
+        batchSummary.failed++;
+        batchSummary.rows.push({
+          movieId,
+          oldCount,
+          newCount: 0,
+          status: "failed",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      if (i < batchCandidates.length - 1) {
+        const span = PER_ROW_DELAY_MAX_MS - PER_ROW_DELAY_MIN_MS;
+        const delay = PER_ROW_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+
+    return new Response(JSON.stringify(batchSummary), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (postBody.overwriteCastDetails === true) {
+    const movieIdRaw = postBody.movieId;
+    if (typeof movieIdRaw !== "string" || !movieIdRaw.trim()) {
+      return new Response(
+        JSON.stringify({
+          error: "Bad Request",
+          message: "movieId is required when overwriteCastDetails is true",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    const movieId = movieIdRaw.trim().toLowerCase();
+    if (!isTtMovieId(movieId)) {
+      return new Response(
+        JSON.stringify({
+          error: "Bad Request",
+          message: "movieId must match tt followed by digits (e.g. tt0076759)",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const { data: existingRow, error: findErr } = await supabase
+      .from(PUBLIC_TABLE)
+      .select("movie_id")
+      .eq("movie_id", movieId)
+      .maybeSingle();
+
+    if (findErr) {
+      return new Response(
+        JSON.stringify({
+          error: "Select failed",
+          message: findErr.message,
+          movieId,
+        }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+    if (!existingRow?.movie_id) {
+      return new Response(
+        JSON.stringify({
+          error: "Not Found",
+          message: `No row in ${PUBLIC_TABLE} for movie_id`,
+          movieId,
+        }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const enrichResult = await callEnrich(movieId, supabaseUrl, serviceKey);
+    if (enrichResult.ok === false) {
+      return new Response(
+        JSON.stringify({
+          status: "failed",
+          movieId,
+          message: enrichResult.error,
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const cleaned = sanitizeCastDetails(enrichResult.data.castDetails);
+    if (cleaned.length === 0) {
+      return new Response(
+        JSON.stringify({
+          status: "skipped",
+          movieId,
+          message: "enrich_returned_empty_cast_details",
+          castDetailsCount: 0,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const updatedAt = new Date().toISOString();
+    const { error: upErr } = await supabase
+      .from(PUBLIC_TABLE)
+      .update({
+        cast_details: cleaned,
+        updated_at: updatedAt,
+      })
+      .eq("movie_id", movieId);
+
+    if (upErr) {
+      return new Response(
+        JSON.stringify({
+          status: "failed",
+          movieId,
+          message: upErr.message,
+          castDetailsCount: cleaned.length,
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        status: "updated",
+        movieId,
+        castDetailsCount: cleaned.length,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
 
   const selectColumns = [
     "movie_id",

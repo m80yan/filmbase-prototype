@@ -10,6 +10,12 @@
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const POSTER_BASE = "https://image.tmdb.org/t/p/w500";
 
+/**
+ * TMDb `credits.cast` 在 enrich 响应与持久化前的条数上限（按 `order` 排序、姓名去重）。
+ * 客户端 Poster Info Mode 仍只展示前 15 条 + 溢出占位行；此处保留「完整」卡司供该逻辑判断。
+ */
+const TMDB_BILLING_CAST_LIMIT = 500;
+
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -186,11 +192,11 @@ function pickAlsoKnownAs(alt: TmdbAltTitlesResponse | null): string[] {
 }
 
 /**
- * 取前 `max` 位演员 `{ name, character }`（排序规则与 `extractCastTop` 一致）。
+ * 取至多 `max` 位演员 `{ name, character }`（排序规则与 `extractCastTop` 一致）。
  */
 function extractCastDetails(
   cast: TmdbCastMember[] | undefined,
-  max = 15
+  max = TMDB_BILLING_CAST_LIMIT
 ): CastDetailEntry[] {
   if (!cast?.length) return [];
   const fallbackOrder = 9999;
@@ -280,9 +286,9 @@ function extractDirectors(crew: TmdbCrewMember[] | undefined): string {
 }
 
 /**
- * 取前 10–15 位演员姓名（按 TMDb `order` 升序；缺省 `order` 视为较大值，排在后面）。
+ * 取至多 `max` 个演员姓名（按 TMDb `order` 升序；缺省 `order` 视为较大值，排在后面）。
  */
-function extractCastTop(cast: TmdbCastMember[] | undefined, max = 15): string[] {
+function extractCastTop(cast: TmdbCastMember[] | undefined, max = TMDB_BILLING_CAST_LIMIT): string[] {
   if (!cast?.length) return [];
   const fallbackOrder = 9999;
   const sorted = [...cast].sort((a, b) => {
@@ -697,7 +703,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       runtime: formatRuntimeMinutes(movie.runtime ?? undefined),
       genres: (movie.genres ?? []).map((g) => g.name).filter(Boolean),
       director: extractDirectors(credits.crew),
-      cast: extractCastTop(credits.cast, 15),
+      cast: extractCastTop(credits.cast),
       posterUrl: posterUrlFromPath(movie.poster_path),
       trailerUrl: pickYoutubeTrailerEmbed(videos),
       imdbRating: omdb.imdbRating,
@@ -713,7 +719,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
         .filter(Boolean),
       boxOffice: omdbBox || tmdbBoxOffice,
-      castDetails: extractCastDetails(credits.cast, 15),
+      castDetails: extractCastDetails(credits.cast),
     };
   } else {
     const tv = (await detailRes.json()) as TmdbTv;
@@ -741,7 +747,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       runtime: formatRuntimeMinutes(pickFirstEpisodeRunTimeMinutes(tv.episode_run_time)),
       genres: (tv.genres ?? []).map((g) => g.name).filter(Boolean),
       director: extractDirectors(credits.crew),
-      cast: extractCastTop(credits.cast, 15),
+      cast: extractCastTop(credits.cast),
       posterUrl: posterUrlFromPath(tv.poster_path),
       trailerUrl,
       imdbRating: omdb.imdbRating,
@@ -759,7 +765,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .map((c) => (typeof c.name === "string" ? c.name.trim() : ""))
         .filter(Boolean),
       boxOffice: omdbBox,
-      castDetails: extractCastDetails(credits.cast, 15),
+      castDetails: extractCastDetails(credits.cast),
     };
   }
 

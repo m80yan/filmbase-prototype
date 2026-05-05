@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 /**
- * Admin-only Edge Function：为 `filmbase_public_movies` 安全回填 `cast_members`（最多 15 人），并更新 `updated_at`。
+ * Admin-only Edge Function：为 `filmbase_public_movies` 安全回填 `cast_members`（与 enrich 一致的多人 billing 上限），并更新 `updated_at`。
  *
  * Secrets（Supabase Dashboard → Edge Functions → Secrets）：
  * - `TMDB_READ_ACCESS_TOKEN`：TMDb API Read Access Token（`Authorization: Bearer`）
@@ -16,6 +16,8 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
+/** 与 `enrich-movie-from-imdb` 中 `TMDB_BILLING_CAST_LIMIT` 语义对齐。 */
+const TMDB_BILLING_CAST_LIMIT = 500;
 const PUBLIC_TABLE = "filmbase_public_movies";
 
 const corsHeaders: Record<string, string> = {
@@ -99,9 +101,9 @@ async function tmdbFetch(pathWithQuery: string, token: string): Promise<Response
 }
 
 /**
- * 从 credits.cast 取前 `max` 位演员姓名（按 `order` 升序）。
+ * 从 credits.cast 取至多 `max` 个演员姓名（按 `order` 升序）。
  */
-function extractCastTop(cast: TmdbCastMember[] | undefined, max = 15): string[] {
+function extractCastTop(cast: TmdbCastMember[] | undefined, max = TMDB_BILLING_CAST_LIMIT): string[] {
   if (!cast?.length) return [];
   const fallbackOrder = 9999;
   const sorted = [...cast].sort((a, b) => {
@@ -193,7 +195,7 @@ function pickTmdbMovieIdFromSearch(
 }
 
 /**
- * 通过 IMDb `tt…` → TMDb find → credits，返回最多 15 个演员名；失败或无 cast 返回 `null`。
+ * 通过 IMDb `tt…` → TMDb find → credits，返回 billing 排序后的演员名列表；失败或无 cast 返回 `null`。
  */
 async function fetchCastFromImdbMovieId(
   imdbMovieId: string,
@@ -216,12 +218,12 @@ async function fetchCastFromImdbMovieId(
   const creditsRes = await tmdbFetch(`/movie/${tmdbId}/credits`, token);
   if (!creditsRes.ok) return null;
   const credits = (await creditsRes.json()) as TmdbCredits;
-  const cast = extractCastTop(credits.cast, 15);
+  const cast = extractCastTop(credits.cast);
   return cast.length ? cast : null;
 }
 
 /**
- * 通过标题 + 年份搜索 TMDb → credits，返回最多 15 个演员名；无把握匹配或无 cast 返回 `null`。
+ * 通过标题 + 年份搜索 TMDb → credits，返回 billing 排序后的演员名列表；无把握匹配或无 cast 返回 `null`。
  */
 async function fetchCastFromTitleYear(
   title: string,
@@ -244,7 +246,7 @@ async function fetchCastFromTitleYear(
   const creditsRes = await tmdbFetch(`/movie/${tmdbId}/credits`, token);
   if (!creditsRes.ok) return null;
   const credits = (await creditsRes.json()) as TmdbCredits;
-  const cast = extractCastTop(credits.cast, 15);
+  const cast = extractCastTop(credits.cast);
   return cast.length ? cast : null;
 }
 
