@@ -70,6 +70,21 @@
     background-color: #76777f;
     color: #ffffff;
   }
+
+  /**
+   * 主搜索类输入焦点：侧栏 FilmBase 搜索、Add Movie「按标题搜索」——强珊瑚描边 + 双层 ring。
+   */
+  .input-focus-primary {
+    @apply focus:outline-none focus:border-2 focus:border-[#EA9794] transition-[border-color,border-width] disabled:focus:border disabled:focus:border-white/10;
+  }
+
+  /**
+   * IMDb / 预告片 URL 等模态内文本框：统一默认与焦点边框（中性白边，无粉色 ring）。
+   */
+  .input-modal-url-field {
+    @apply w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/20 focus:placeholder-transparent disabled:opacity-50 disabled:focus:border-white/10;
+  }
+
 }
 
 @layer base {

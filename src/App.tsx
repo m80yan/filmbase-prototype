@@ -291,14 +291,31 @@ function formatPosterPreviewInfoBoxOfficeDisplay(raw: string): string {
  *
  * @param plot 剧情文案
  */
-function PosterPreviewInfoPlotBlock({ plot }: { plot: string }) {
+function PosterPreviewInfoPlotBlock({ plot, genres }: { plot: string; genres: string[] }) {
   const body = plot.trim() || '—';
+  const genreLabels = uniqueNormalizedGenreLabels(genres ?? []);
   return (
     <div className="flex w-full shrink-0 justify-center">
       <section className="w-full min-w-0 max-w-[420px]" aria-label="Plot">
         <p className={`text-left ${POSTER_PREVIEW_INFO_PLOT_CLASS} whitespace-pre-wrap`}>
           <span className={POSTER_PREVIEW_INFO_ACCENT_CLASS}>PLOT:</span>
-          <span className="text-white"> {body}</span>
+          <span className="text-white">
+            {' '}
+            {body}
+            {genreLabels.length > 0 ? (
+              <span
+                className="inline-flex items-center gap-2 align-middle"
+                style={{ marginLeft: 8, verticalAlign: 'middle' }}
+                aria-label="Genres"
+              >
+                {genreLabels.map((label) => (
+                  <span key={`plot-genre-${genreLabelToIconSlug(label)}-${label}`}>
+                    <PosterGenreIconWithTooltip label={label} iconSizePx={16} />
+                  </span>
+                ))}
+              </span>
+            ) : null}
+          </span>
         </p>
       </section>
     </div>
@@ -307,6 +324,8 @@ function PosterPreviewInfoPlotBlock({ plot }: { plot: string }) {
 
 /**
  * 海报预览 Info Mode：主创（独立双列栅格，标签列定宽右对齐）。
+ * 「Director」「Writers」标签左侧各附 16×16 图标，图标与标签间距 8px（`gap-2`）；
+ * 标签行 `items-start`，多行姓名时与右侧首行上对齐。
  *
  * @param director 导演
  * @param writer 编剧
@@ -318,9 +337,37 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
       aria-label="Director and writers"
     >
       <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-2 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
-        <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>Director</div>
+        <div
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+        >
+          <img
+            draggable={false}
+            src="/icons/director.svg"
+            alt=""
+            width={16}
+            height={16}
+            className="pointer-events-none h-4 w-4 shrink-0"
+            decoding="async"
+            aria-hidden
+          />
+          <span>Director</span>
+        </div>
         <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(director ?? '').trim() || '—'}</div>
-        <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>Writers</div>
+        <div
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+        >
+          <img
+            draggable={false}
+            src="/icons/writer.svg"
+            alt=""
+            width={16}
+            height={16}
+            className="pointer-events-none h-4 w-4 shrink-0"
+            decoding="async"
+            aria-hidden
+          />
+          <span>Writers</span>
+        </div>
         <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(writer ?? '').trim() || '—'}</div>
       </div>
     </section>
@@ -372,25 +419,25 @@ function PosterPreviewInfoCastBlock({ movie }: { movie: Movie }) {
  * @param movie 当前预览影片
  */
 function PosterPreviewInfoDetailsBlock({ movie }: { movie: Movie }) {
+  const releaseDate = (movie.releaseDate ?? '').trim();
+  const runtimeRaw = (movie.runtime ?? '').trim();
+  const runtimeValue =
+    runtimeRaw && /^\d+$/.test(runtimeRaw) ? `${runtimeRaw} min` : runtimeRaw;
+  const ratedValue = (movie.contentRating ?? '').trim();
+  const countryValue = (movie.countryOfOrigin ?? '').trim();
+  const boxOfficeValueRaw = (movie.boxOffice ?? '').trim();
+  const boxOfficeValue = formatPosterPreviewInfoBoxOfficeDisplay(boxOfficeValueRaw);
+  const productionCompaniesValue =
+    (movie.productionCompanies ?? []).filter(Boolean).join(', ').trim();
+
   const rows = [
-    {
-      label: 'Release date',
-      value: (movie.releaseDate ?? '').trim() || '—',
-    },
-    {
-      label: 'Country of origin',
-      value: (movie.countryOfOrigin ?? '').trim() || '—',
-    },
-    {
-      label: 'Box Office (US & Canada)',
-      value: formatPosterPreviewInfoBoxOfficeDisplay((movie.boxOffice ?? '').trim()),
-    },
-    {
-      label: 'Production companies',
-      value:
-        (movie.productionCompanies ?? []).filter(Boolean).join(', ').trim() || '—',
-    },
-  ] as const;
+    { label: 'Release date', value: releaseDate || '—' },
+    runtimeValue ? { label: 'Runtime', value: runtimeValue } : null,
+    ratedValue ? { label: 'Rated', value: ratedValue } : null,
+    { label: 'Country of origin', value: countryValue || '—' },
+    { label: 'Box office', value: boxOfficeValue || '—' },
+    { label: 'Production companies', value: productionCompaniesValue || '—' },
+  ].filter(Boolean) as { label: string; value: string }[];
 
   return (
     <section className="mx-auto mt-6 w-full max-w-[604px]" aria-label="Release and production details">
@@ -542,6 +589,7 @@ function genreLabelToIconSlug(label: string): string {
   if (!t) return 'fallback';
   const lower = t.toLowerCase();
   if (lower === 'sci fi' || lower === 'science fiction') return 'sci-fi';
+  if (lower === 'reality' || lower === 'reality tv' || lower === 'reality-tv') return 'reality-tv';
   if (lower === 'western') return 'lasso';
   const slug = lower.replace(/\s+/g, '-');
   if (SIDEBAR_GENRE_ICON_SLUGS.has(slug)) return slug;
@@ -874,6 +922,8 @@ export default function App() {
   const posterPreviewOverlayRef = useRef<HTMLDivElement>(null);
   const uiDisabledAudioRef = useRef<HTMLAudioElement | null>(null);
   const uiDisabledAudioLastPlayAtRef = useRef(0);
+  const [isSidebarClearSearchPressed, setIsSidebarClearSearchPressed] = useState(false);
+  const [isAddMovieClearSearchPressed, setIsAddMovieClearSearchPressed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [movies, setMovies] = useState<Movie[]>(() => {
     return MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
@@ -1020,6 +1070,8 @@ export default function App() {
   const [newMovieTitle, setNewMovieTitle] = useState('');
   const [newMovieUrl, setNewMovieUrl] = useState('');
   const [isImdbEntered, setIsImdbEntered] = useState(false);
+  /** Add Movie：IMDb URL 区默认折叠，点击「Use IMDb URL instead」后展开至 Trailer 输入之上。 */
+  const [isAddMovieImdbSectionExpanded, setIsAddMovieImdbSectionExpanded] = useState(false);
   const [newMovieTrailerUrl, setNewMovieTrailerUrl] = useState('');
   const [addError, setAddError] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -1034,6 +1086,8 @@ export default function App() {
   const addMovieSearchSeqRef = useRef(0);
   /** Add Movie modal「Search by title」输入框：打开 modal 时自动聚焦。 */
   const addMovieTitleSearchInputRef = useRef<HTMLInputElement>(null);
+  /** Add Movie：展开 IMDb URL 区后聚焦。 */
+  const addMovieImdbUrlInputRef = useRef<HTMLInputElement>(null);
   /** 主片库纵向滚动容器（网格/列表共用），用于 `scrollIntoView` 的滚动祖先与可见区判断。 */
   const mainLibraryScrollRef = useRef<HTMLDivElement>(null);
   /** 片库中每部影片根节点（网格卡片 / 列表行）`movie.id → HTMLElement`。 */
@@ -2125,6 +2179,7 @@ export default function App() {
     setNewMovieUrl('');
     setNewMovieTrailerUrl('');
     setIsImdbEntered(false);
+    setIsAddMovieImdbSectionExpanded(false);
     setAddError('');
     addMovieSearchSeqRef.current += 1;
     setAddMovieSearchHits([]);
@@ -2179,6 +2234,7 @@ export default function App() {
       setNewMovieUrl('');
       setNewMovieTrailerUrl('');
       setIsImdbEntered(false);
+      setIsAddMovieImdbSectionExpanded(false);
       return true;
     } catch (err) {
       console.error('Error invoking enrich-movie-from-imdb:', err);
@@ -2279,6 +2335,7 @@ export default function App() {
     setAddMovieSearchError('');
     setAddMovieSuggestionsDismissed(false);
     setAddMovieActiveSuggestionIndex(-1);
+    setIsAddMovieImdbSectionExpanded(false);
   }, [isAddModalOpen]);
 
   /** Add Movie modal 打开时聚焦「Search by title」输入框。 */
@@ -2437,7 +2494,7 @@ export default function App() {
       className={`group/sidebarrow flex h-9 w-full items-center pl-6 pr-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
-          : 'text-white/70 hover:bg-white/5 hover:text-white'
+          : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
       }`}
     >
       {iconSlug ? (
@@ -2656,6 +2713,8 @@ export default function App() {
         ? 'Finish Add Movie first'
         : null;
   const isLibraryToolbarLocked = mainLibraryToolbarLockReason != null;
+  /** 编辑库（含删除入口）期间禁用 Add Movie，避免与删片流程并行。 */
+  const isAddMovieToolbarDisabled = isLibraryToolbarLocked || isEditing;
   const isMainContentOverlayActive =
     isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen || Boolean(deleteMovieConfirm);
 
@@ -2754,15 +2813,7 @@ export default function App() {
               alt=""
               width={14}
               height={14}
-              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-100 transition-opacity group-focus-within:opacity-0"
-              aria-hidden
-            />
-            <img draggable={false}
-              src="/icons/search-focus.svg"
-              alt=""
-              width={14}
-              height={14}
-              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-0 transition-opacity group-focus-within:opacity-100"
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-100"
               aria-hidden
             />
             <input 
@@ -2771,18 +2822,40 @@ export default function App() {
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-black/20 border border-white/10 rounded-md py-1.5 pl-8 pr-8 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#EA9794] focus:border-[#EA9794] transition-all placeholder:text-white/40 text-white shadow-inner"
+              className="input-focus-primary w-full bg-black/20 border border-white/10 rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all placeholder:text-white/20 text-white shadow-inner"
             />
             {searchQuery && (
               <button
-                onClick={() => {
+                type="button"
+                onPointerDown={(e) => {
+                  if (!e.isPrimary) return;
+                  setIsSidebarClearSearchPressed(true);
+                }}
+                onPointerUp={(e) => {
+                  if (!e.isPrimary) return;
                   setSearchQuery('');
+                  setIsSidebarClearSearchPressed(false);
                   searchInputRef.current?.focus();
                 }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-colors"
+                onPointerCancel={() => setIsSidebarClearSearchPressed(false)}
+                onPointerLeave={() => setIsSidebarClearSearchPressed(false)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20"
                 title="Clear search"
               >
-                <X size={10} strokeWidth={3} className="text-white" />
+                <img
+                  draggable={false}
+                  src={
+                    isSidebarClearSearchPressed
+                      ? '/icons/clear-search-pressed.svg'
+                      : '/icons/clear-search.svg'
+                  }
+                  alt=""
+                  width={14}
+                  height={14}
+                  className="pointer-events-none h-3.5 w-3.5 select-none object-contain"
+                  decoding="async"
+                  aria-hidden
+                />
               </button>
             )}
           </div>
@@ -3237,6 +3310,17 @@ export default function App() {
                         }}
                         aria-hidden
                       />
+                      <div
+                        className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 bg-white/40 transition-opacity ${
+                          isPosterPreviewZoomControlsDisabled ? 'opacity-15' : 'opacity-100'
+                        }`}
+                        style={{
+                          width: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${previewZoomSliderNorm})`,
+                          height: POSTER_SIZE_SLIDER_TRACK_H_PX,
+                          borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
+                        }}
+                        aria-hidden
+                      />
                       <img draggable={false}
                         src={
                           isPosterPreviewZoomControlsDisabled
@@ -3523,6 +3607,24 @@ export default function App() {
                       }}
                       aria-hidden
                     />
+                    <div
+                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 bg-white/40 transition-opacity ${
+                        viewMode === 'list' || isLibraryToolbarLocked ? 'opacity-15' : 'opacity-100'
+                      }`}
+                      style={{
+                        width: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${Math.max(
+                          0,
+                          Math.min(
+                            1,
+                            (clampPosterSizePx(posterSize) - GRID_POSTER_SIZE_MIN_PX) /
+                              (GRID_POSTER_SIZE_MAX_PX - GRID_POSTER_SIZE_MIN_PX),
+                          ),
+                        )})`,
+                        height: POSTER_SIZE_SLIDER_TRACK_H_PX,
+                        borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
+                      }}
+                      aria-hidden
+                    />
                     <img draggable={false}
                       src={
                         viewMode === 'list' || isLibraryToolbarLocked
@@ -3772,12 +3874,18 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(true)}
-                    disabled={isLibraryToolbarLocked}
+                    disabled={isAddMovieToolbarDisabled}
                     className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors enabled:hover:bg-white/5 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-100"
-                    title={mainLibraryToolbarLockReason ?? 'Add Movie'}
+                    title={
+                      isLibraryToolbarLocked
+                        ? (mainLibraryToolbarLockReason ?? 'Add Movie')
+                        : isEditing
+                          ? 'Finish editing library first'
+                          : 'Add Movie'
+                    }
                   >
                     <span className="relative block h-[18px] w-[18px] shrink-0">
-                      {isLibraryToolbarLocked ? (
+                      {isAddMovieToolbarDisabled ? (
                         <img draggable={false}
                           src="/icons/add-movie-disabled.svg"
                           alt=""
@@ -4113,9 +4221,25 @@ export default function App() {
           </AnimatePresence>
           
           {filteredMovies.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-white/20 space-y-4">
-              <Film size={64} strokeWidth={1} />
-              <p className="text-xl font-medium">No films found matching your search</p>
+            <div
+              className="flex min-h-[48vh] flex-col items-center justify-center gap-3 text-white/35"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="relative h-8 w-8 shrink-0" aria-hidden>
+                <img
+                  draggable={false}
+                  src="/icons/no-films.svg"
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="absolute inset-0 h-full w-full object-contain pointer-events-none"
+                  decoding="async"
+                />
+              </div>
+              <p className="text-sm font-medium tracking-wide">
+                No films found matching your search
+              </p>
             </div>
           )}
             </>
@@ -4206,7 +4330,7 @@ export default function App() {
                   e.stopPropagation();
                   openEditTrailerModal();
                 }}
-                className="pointer-events-auto group/edittrailer inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
+                className="pointer-events-auto group/edittrailer inline-flex h-9 cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-0 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
                 title="Edit Trailer URL"
               >
                 <span className="relative block h-4 w-4 shrink-0">
@@ -4486,7 +4610,10 @@ export default function App() {
                       onWheel={(e) => e.stopPropagation()}
                     >
                       <div className="flex min-h-full w-full flex-col items-center justify-center px-4 py-5">
-                        <PosterPreviewInfoPlotBlock plot={posterPreviewMovie.plot ?? ''} />
+                        <PosterPreviewInfoPlotBlock
+                          plot={posterPreviewMovie.plot ?? ''}
+                          genres={posterPreviewMovie.genre ?? []}
+                        />
                         <PosterPreviewInfoCrewBlock
                           director={posterPreviewMovie.director ?? ''}
                           writer={posterPreviewMovie.writer ?? ''}
@@ -4533,7 +4660,7 @@ export default function App() {
                                     setPendingPosterUrl(null);
                                     setPosterUploadError('');
                                   }}
-                                  className="rounded-full bg-white/10 px-4 py-2 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-40"
+                                  className="inline-flex h-9 items-center justify-center rounded-full bg-white/10 px-4 py-0 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-40"
                                 >
                                   Cancel
                                 </button>
@@ -4544,7 +4671,7 @@ export default function App() {
                                     e.stopPropagation();
                                     handleUsePoster();
                                   }}
-                                  className="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-[12px] font-bold tracking-widest text-black shadow-xl transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+                                  className="inline-flex h-9 items-center gap-2 rounded-full bg-white/80 px-4 py-0 text-[12px] font-bold tracking-widest text-black shadow-xl transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   Apply
                                 </button>
@@ -4606,6 +4733,7 @@ export default function App() {
                 setNewMovieTitle('');
                 setNewMovieUrl('');
                 setIsImdbEntered(false);
+                setIsAddMovieImdbSectionExpanded(false);
                 setNewMovieTrailerUrl('');
                 setAddError('');
               }
@@ -4614,16 +4742,19 @@ export default function App() {
             className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
+              layout
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] p-6 shadow-2xl"
             >
-              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Add New Movie</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">
+                Add New Movie
+              </h2>
 
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {addError && (
                   <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-3 py-2.5 rounded-[10px]">
                     {addError}
@@ -4633,7 +4764,17 @@ export default function App() {
                   <label className="block text-xs font-medium text-white/50 mb-2">
                     Search movies by title
                   </label>
-                  <div className="relative w-full">
+                  <div className="group/searchtitle relative w-full">
+                    <img
+                      draggable={false}
+                      src="/icons/search.svg"
+                      alt=""
+                      width={16}
+                      height={16}
+                      className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none opacity-100"
+                      decoding="async"
+                      aria-hidden
+                    />
                     <input
                       ref={addMovieTitleSearchInputRef}
                       type="text"
@@ -4695,7 +4836,7 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className={`w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] pl-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50 ${
+                      className={`input-focus-primary w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors placeholder:text-white/20 disabled:opacity-50 ${
                         newMovieTitle ? 'pr-10' : 'pr-3'
                       }`}
                     />
@@ -4703,7 +4844,14 @@ export default function App() {
                       <button
                         type="button"
                         disabled={isAdding}
-                        onClick={() => {
+                        onPointerDown={(e) => {
+                          if (!e.isPrimary) return;
+                          if (isAdding) return;
+                          setIsAddMovieClearSearchPressed(true);
+                        }}
+                        onPointerUp={(e) => {
+                          if (!e.isPrimary) return;
+                          if (isAdding) return;
                           addMovieSearchSeqRef.current += 1;
                           setNewMovieTitle('');
                           setAddMovieSearchHits([]);
@@ -4712,12 +4860,28 @@ export default function App() {
                           setAddMovieSuggestionsDismissed(true);
                           setAddMovieActiveSuggestionIndex(-1);
                           if (addError) setAddError('');
+                          setIsAddMovieClearSearchPressed(false);
                           addMovieTitleSearchInputRef.current?.focus();
                         }}
-                        className="absolute right-4 top-1/2 flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 transition-colors hover:bg-white/40 disabled:pointer-events-none disabled:opacity-40"
+                        onPointerCancel={() => setIsAddMovieClearSearchPressed(false)}
+                        onPointerLeave={() => setIsAddMovieClearSearchPressed(false)}
+                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 disabled:pointer-events-none disabled:opacity-40"
                         title="Clear search"
                       >
-                        <X size={10} strokeWidth={3} className="text-white" />
+                        <img
+                          draggable={false}
+                          src={
+                            isAddMovieClearSearchPressed
+                              ? '/icons/clear-search-pressed.svg'
+                              : '/icons/clear-search.svg'
+                          }
+                          alt=""
+                          width={16}
+                          height={16}
+                          className="pointer-events-none h-4 w-4 select-none object-contain"
+                          decoding="async"
+                          aria-hidden
+                        />
                       </button>
                     ) : null}
                   </div>
@@ -4795,35 +4959,79 @@ export default function App() {
                     )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-white/50 mb-2">
-                    Or paste IMDb movie / TV URL
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="https://www.imdb.com/title/tt..."
-                    value={newMovieUrl}
-                    onChange={(e) => {
-                      setNewMovieUrl(e.target.value);
-                      if (addError) setAddError('');
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newMovieUrl.trim()) {
-                        e.preventDefault();
-                        setIsImdbEntered(true);
-                        document.getElementById('trailer-input')?.focus();
-                      }
-                    }}
-                    onBlur={() => {
-                      if (newMovieUrl.trim()) {
-                        setIsImdbEntered(true);
-                      }
-                    }}
+                {!isAddMovieImdbSectionExpanded ? (
+                  <button
+                    type="button"
                     disabled={isAdding}
-                    readOnly={isImdbEntered}
-                    className={`w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  />
-                </div>
+                    onClick={() => {
+                      setIsAddMovieImdbSectionExpanded(true);
+                      window.requestAnimationFrame(() => {
+                        addMovieImdbUrlInputRef.current?.focus();
+                      });
+                    }}
+                    className="group/addimdblink flex w-full items-center justify-end text-xs font-medium text-white/50 transition-[color,opacity] duration-150 ease-out hover:text-white/70 hover:underline hover:underline-offset-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="mr-[20px] flex items-center gap-2 text-right">
+                      <span className="relative inline-flex h-[14px] w-[14px] shrink-0" aria-hidden>
+                        <img
+                          draggable={false}
+                          src="/icons/link.svg"
+                          alt=""
+                          width={14}
+                          height={14}
+                          decoding="async"
+                          className="pointer-events-none absolute inset-0 h-[14px] w-[14px] object-contain opacity-100 transition-opacity duration-150 group-hover/addimdblink:opacity-0 group-disabled/addimdblink:opacity-100"
+                        />
+                        <img
+                          draggable={false}
+                          src="/icons/link-hover.svg"
+                          alt=""
+                          width={14}
+                          height={14}
+                          decoding="async"
+                          className="pointer-events-none absolute inset-0 h-[14px] w-[14px] object-contain opacity-0 transition-opacity duration-150 group-hover/addimdblink:opacity-100 group-disabled/addimdblink:opacity-0"
+                        />
+                      </span>
+                      <span>Use IMDb URL instead</span>
+                    </span>
+                  </button>
+                ) : (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.26, ease: [0.25, 0.1, 0.25, 1] }}
+                  >
+                    <label className="block text-xs font-medium text-white/50 mb-2">
+                      IMDb movie / TV URL
+                    </label>
+                    <input
+                      ref={addMovieImdbUrlInputRef}
+                      type="text"
+                      placeholder="https://www.imdb.com/title/tt..."
+                      value={newMovieUrl}
+                      onChange={(e) => {
+                        setNewMovieUrl(e.target.value);
+                        if (addError) setAddError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newMovieUrl.trim()) {
+                          e.preventDefault();
+                          setIsImdbEntered(true);
+                          document.getElementById('trailer-input')?.focus();
+                        }
+                      }}
+                      onBlur={() => {
+                        if (newMovieUrl.trim()) {
+                          setIsImdbEntered(true);
+                        }
+                      }}
+                      disabled={isAdding}
+                      readOnly={isImdbEntered}
+                      className={`input-modal-url-field ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    />
+                  </motion.div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-white/50 mb-2">
@@ -4836,7 +5044,7 @@ export default function App() {
                     value={newMovieTrailerUrl}
                     onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
                     disabled={isAdding}
-                    className="w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50"
+                    className="input-modal-url-field"
                   />
                 </div>
               </div>
@@ -4848,6 +5056,7 @@ export default function App() {
                     setNewMovieTitle('');
                     setNewMovieUrl('');
                     setIsImdbEntered(false);
+                    setIsAddMovieImdbSectionExpanded(false);
                     setNewMovieTrailerUrl('');
                     setAddError('');
                   }}
@@ -4908,7 +5117,7 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] p-6 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete movie</h2>
               <p className="text-sm leading-relaxed text-white/70">
@@ -4975,45 +5184,40 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-2xl p-6 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] px-6 pt-6 pb-5 shadow-2xl"
             >
-              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Edit Trailer URL</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-4 tracking-tight">Edit Trailer URL</h2>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {editTrailerError && (
                   <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-3 py-2.5 rounded-[10px]">
                     {editTrailerError}
                   </div>
                 )}
-                <div>
-                  <label className="block text-xs font-medium text-white/50 mb-2">
-                    Trailer URL
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Paste a trailer URL"
-                    value={editTrailerUrlInput}
-                    onChange={(e) => {
-                      setEditTrailerUrlInput(e.target.value);
-                      if (editTrailerError) setEditTrailerError('');
-                    }}
-                    onFocus={(e) => {
-                      e.currentTarget.select();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && editTrailerUrlInput.trim() && !isEditingTrailer) {
-                        e.preventDefault();
-                        void handleApplyEditTrailerUrl();
-                      }
-                    }}
-                    disabled={isEditingTrailer}
-                    className="edit-trailer-url-input w-full h-11 bg-[#1D1D1D] border border-white/10 rounded-[10px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/10 disabled:opacity-50"
-                    autoFocus
-                  />
-                </div>
+                <input
+                  type="text"
+                  placeholder="Paste a trailer URL"
+                  value={editTrailerUrlInput}
+                  onChange={(e) => {
+                    setEditTrailerUrlInput(e.target.value);
+                    if (editTrailerError) setEditTrailerError('');
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.select();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && editTrailerUrlInput.trim() && !isEditingTrailer) {
+                      e.preventDefault();
+                      void handleApplyEditTrailerUrl();
+                    }
+                  }}
+                  disabled={isEditingTrailer}
+                  className="edit-trailer-url-input input-modal-url-field"
+                  autoFocus
+                />
               </div>
 
-              <div className="flex items-center justify-end gap-3 mt-8">
+              <div className="flex items-center justify-end gap-3 mt-6">
                 <button
                   type="button"
                   onClick={() => {
@@ -5578,6 +5782,10 @@ function MovieCard({
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const castRef = useRef<HTMLDivElement>(null);
+  /**
+   * cast 跑马灯视口：写入 `--cast-marquee-viewport`（px）供段首 spacer；子项 `padding-left: var(--cast-marquee-viewport, 100cqw)`，后者需本节点 `[container-type:inline-size]`。
+   */
+  const castMarqueeViewportRef = useRef<HTMLDivElement>(null);
   const castMarqueeStripRef = useRef<HTMLDivElement>(null);
   const titleMarqueeStripRef = useRef<HTMLDivElement>(null);
   const directorRef = useRef<HTMLDivElement>(null);
@@ -5590,6 +5798,10 @@ function MovieCard({
   const [isDirectorOverflowing, setIsDirectorOverflowing] = useState(false);
   const [isYearRuntimeOverflowing, setIsYearRuntimeOverflowing] = useState(false);
   const [castMarqueeDurationSec, setCastMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
+  /**
+   * 指针进入网格卡片且 cast 溢出时递增；与 `movie.id` 拼成跑马灯 `key`，每次 hover 从 `translateX(0)` 重播。
+   */
+  const [castMarqueeRunKey, setCastMarqueeRunKey] = useState(0);
   const [titleMarqueeDurationSec, setTitleMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   const [directorMarqueeDurationSec, setDirectorMarqueeDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
   const [yearRuntimeMarqueeDurationSec, setYearRuntimeMarqueeDurationSec] = useState(
@@ -5660,6 +5872,24 @@ function MovieCard({
     viewMode,
   ]);
 
+  /** 将 cast 视口宽度写入 `--cast-marquee-viewport`（layout 阶段同步 + ResizeObserver），避免 React state 首帧为 0。 */
+  useLayoutEffect(() => {
+    if (viewMode !== 'grid' || !isCastOverflowing) return;
+    const el = castMarqueeViewportRef.current;
+    if (!el) return;
+    const sync = () => {
+      const w = el.clientWidth;
+      el.style.setProperty('--cast-marquee-viewport', w > 0 ? `${w}px` : '');
+    };
+    sync();
+    const ro = new ResizeObserver(() => sync());
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      el.style.removeProperty('--cast-marquee-viewport');
+    };
+  }, [viewMode, isCastOverflowing, size, movie.cast]);
+
   /** 按内容宽度换算 cast 跑马灯时长，使线速度与 Matrix 基准一致。 */
   React.useEffect(() => {
     if (viewMode !== 'grid' || !isCastOverflowing) return;
@@ -5684,7 +5914,7 @@ function MovieCard({
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [viewMode, isCastOverflowing, movie.cast, size]);
+  }, [viewMode, isCastOverflowing, movie.cast, size, castMarqueeRunKey]);
 
   /** 列表行与网格 hover：导演名溢出时与片名 / starring 同 `marquee` 线速（`gridStripMarqueeDurationSec`）。 */
   React.useEffect(() => {
@@ -5780,6 +6010,12 @@ function MovieCard({
     (LIST_VIEW_ROW_HEIGHT_PX - windowHeightPx) / 2 + (starringVisibleLines - 1) * lineHeightPx;
   const maxVisible = 6;
   const cast = movie.cast ?? [];
+  /**
+   * 网格 hover cast 横向跑马灯专用文案：在首位演员名前加与其字符数等长的空格，循环接缝处留白更易读。
+   * 不用于静态 `truncate` 行，仅用于 `isCastOverflowing` 时的双份 marquee。
+   */
+  const gridHoverCastMarqueeText =
+    cast.length === 0 ? '' : `${' '.repeat(cast[0]!.length)}${cast.join(' · ')}`;
   const isRowHovered = isListStarringMarqueeHover;
   const canCarousel =
     viewMode === 'list' &&
@@ -6211,6 +6447,11 @@ function MovieCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
       className="group min-w-0 w-full cursor-pointer"
+      onMouseEnter={() => {
+        if (viewMode === 'grid' && isCastOverflowing) {
+          setCastMarqueeRunKey((k) => k + 1);
+        }
+      }}
     >
       <div
         ref={gridPosterShellRef}
@@ -6351,7 +6592,10 @@ function MovieCard({
             </div>
             {/** `mt-[1lh]`：合并 year/runtime 少一行后，用一行高垫回 starring 的 Y 位置 */}
             <div className="mt-[1lh] min-w-0 pt-2">
-              <div className="relative h-4 min-w-0 overflow-hidden">
+              <div
+                ref={castMarqueeViewportRef}
+                className="relative h-4 min-w-0 overflow-hidden [container-type:inline-size]"
+              >
                 <div 
                   ref={castRef}
                   className={`text-white/60 transition-colors whitespace-nowrap ${isCastOverflowing ? 'group-hover:opacity-0' : 'truncate group-hover:text-white'}`}
@@ -6362,14 +6606,25 @@ function MovieCard({
                 {isCastOverflowing && (
                   <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                     <div
+                      key={`${movie.id}-${castMarqueeRunKey}`}
                       ref={castMarqueeStripRef}
                       className="flex w-max whitespace-nowrap text-white transform-gpu will-change-transform [backface-visibility:hidden]"
                       style={{
                         animation: `marquee ${castMarqueeDurationSec}s linear infinite`,
                       }}
                     >
-                      <span className="pr-4">{movie.cast.join(' · ')}</span>
-                      <span className="pr-4">{movie.cast.join(' · ')}</span>
+                      <div
+                        className="flex shrink-0"
+                        style={{ paddingLeft: 'var(--cast-marquee-viewport, 100cqw)' }}
+                      >
+                        <span className="pr-4">{gridHoverCastMarqueeText}</span>
+                      </div>
+                      <div
+                        className="flex shrink-0"
+                        style={{ paddingLeft: 'var(--cast-marquee-viewport, 100cqw)' }}
+                      >
+                        <span className="pr-4">{gridHoverCastMarqueeText}</span>
+                      </div>
                     </div>
                   </div>
                 )}
