@@ -310,7 +310,7 @@ function PosterPreviewInfoPlotBlock({ plot, genres }: { plot: string; genres: st
               >
                 {genreLabels.map((label) => (
                   <span key={`plot-genre-${genreLabelToIconSlug(label)}-${label}`}>
-                    <PosterGenreIconWithTooltip label={label} iconSizePx={16} />
+                    <PosterGenreIconWithTooltip label={label} />
                   </span>
                 ))}
               </span>
@@ -344,9 +344,9 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
             draggable={false}
             src="/icons/director.svg"
             alt=""
-            width={16}
-            height={16}
-            className="pointer-events-none h-4 w-4 shrink-0"
+            width={20}
+            height={20}
+            className="pointer-events-none h-5 w-5 shrink-0"
             decoding="async"
             aria-hidden
           />
@@ -360,9 +360,9 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
             draggable={false}
             src="/icons/writer.svg"
             alt=""
-            width={16}
-            height={16}
-            className="pointer-events-none h-4 w-4 shrink-0"
+            width={20}
+            height={20}
+            className="pointer-events-none h-5 w-5 shrink-0"
             decoding="async"
             aria-hidden
           />
@@ -2491,7 +2491,7 @@ export default function App() {
     <button
       type="button"
       onClick={onClick}
-      className={`group/sidebarrow flex h-9 w-full items-center pl-6 pr-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
+      className={`group/sidebarrow flex h-9 w-[200px] items-center pl-3 pr-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
@@ -2796,7 +2796,7 @@ export default function App() {
 
       {/* Sidebar */}
 	      <aside
-          className={`${isSidebarOpen ? 'w-64 border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
+          className={`${isSidebarOpen ? 'w-[232px] border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
             isPosterPreviewChromeLocked ? 'opacity-50 transition-opacity' : ''
           }`}
           onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
@@ -2805,7 +2805,7 @@ export default function App() {
         <div className="h-10 flex-shrink-0 w-full" />
         
         {/* Sidebar Header / Search (Axis B) */}
-        <div className="h-12 flex items-center px-4 min-w-[256px] flex-shrink-0">
+        <div className="h-12 flex items-center px-4 min-w-[232px] flex-shrink-0">
           <div className="relative group w-full">
             {/* 16×16 素材缩放到 14×14，与原先 lucide Search size={14} 一致。 */}
             <img draggable={false}
@@ -2860,19 +2860,19 @@ export default function App() {
             )}
           </div>
         </div>
-	        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-6 pr-4 mt-6 pb-2 min-w-[256px] [scrollbar-gutter:stable]">
-          <nav className="space-y-6">
+	        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]">
+          <nav className="space-y-2">
             <div>
               <button 
                 onClick={() => toggleSection('genre')}
-                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
                 <span>Genre</span>
                 <motion.div
                   animate={{ rotate: expandedSections.genre ? 90 : 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ChevronRight size={12} strokeWidth={2.5} />
+                  <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
               </button>
               <motion.div
@@ -2880,14 +2880,13 @@ export default function App() {
                 animate={{ 
                   height: expandedSections.genre ? 'auto' : 0,
                   opacity: expandedSections.genre ? 1 : 0,
-                  marginBottom: expandedSections.genre ? 12 : 0
                 }}
                 transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden"
+                className="overflow-hidden w-[200px]"
               >
-                <ul className="space-y-0.5">
+                <ul className="space-y-0.5 w-[200px]">
                   {genres.map(genre => (
-                    <li key={genre}>
+                    <li key={genre} className="w-[200px]">
                       <SidebarItem
                         label={genre}
                         active={selectedGenres.includes(genre)}
@@ -2903,14 +2902,14 @@ export default function App() {
             <div>
               <button 
                 onClick={() => toggleSection('year')}
-                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
                 <span>Year</span>
                 <motion.div
                   animate={{ rotate: expandedSections.year ? 90 : 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ChevronRight size={12} strokeWidth={2.5} />
+                  <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
               </button>
               <motion.div
@@ -2918,14 +2917,13 @@ export default function App() {
                 animate={{ 
                   height: expandedSections.year ? 'auto' : 0,
                   opacity: expandedSections.year ? 1 : 0,
-                  marginBottom: expandedSections.year ? 12 : 0
                 }}
                 transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden"
+                className="overflow-hidden w-[200px]"
               >
-                <ul className="space-y-0.5">
+                <ul className="space-y-0.5 w-[200px]">
                   {years.map(year => (
-                    <li key={year}>
+                    <li key={year} className="w-[200px]">
                       <SidebarItem 
                         label={year}
                         active={selectedYears.includes(year)}
@@ -2940,14 +2938,14 @@ export default function App() {
             <div>
               <button 
                 onClick={() => toggleSection('ratings')}
-                className="flex items-center justify-between w-full pl-2.5 text-[11px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
               >
                 <span>My Rating</span>
                 <motion.div
                   animate={{ rotate: expandedSections.ratings ? 90 : 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ChevronRight size={12} strokeWidth={2.5} />
+                  <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
               </button>
               <motion.div
@@ -2955,14 +2953,13 @@ export default function App() {
                 animate={{ 
                   height: expandedSections.ratings ? 'auto' : 0,
                   opacity: expandedSections.ratings ? 1 : 0,
-                  marginBottom: expandedSections.ratings ? 12 : 0
                 }}
                 transition={{ duration: 0.3, ease: "easeInOut" }}
-                className="overflow-hidden"
+                className="overflow-hidden w-[200px]"
               >
-                <ul className="space-y-0.5">
+                <ul className="space-y-0.5 w-[200px]">
                   {ratings.map((rating) => (
-                    <li key={rating}>
+                    <li key={rating} className="w-[200px]">
                       <SidebarMyRatingFilterRow
                         rating={rating}
                         active={selectedRatings.includes(rating)}
@@ -5738,7 +5735,7 @@ function SidebarMyRatingFilterRow({
       type="button"
       onClick={onClick}
       aria-label={aria}
-      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md pl-6 pr-2.5 py-0 text-left text-[13px] transition-colors ${
+      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
@@ -6191,6 +6188,7 @@ function MovieCard({
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
         className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none border-b border-[#292929] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
+        style={{ flexDirection: 'column' }}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
           setIsListStarringMarqueeHover(false);
