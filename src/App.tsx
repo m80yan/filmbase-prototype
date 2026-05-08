@@ -3112,7 +3112,7 @@ export default function App() {
           </header>
 
           {/* Toolbar：海报预览打开时切换为预览模式控件；左右槽固定宽度使 slider 水平位置不变 */}
-          <div className="relative flex h-12 shrink-0 items-center justify-between border-b border-[#292929] px-8">
+          <div className="relative flex h-12 shrink-0 items-center justify-between border-b border-[#292929] px-8 [box-shadow:0px_0px_0px_0px_rgba(41,41,41,1)]">
           <div className="relative z-10 flex shrink-0 items-center gap-8">
             {isPosterPreviewOpen ? (
               <>
@@ -3167,14 +3167,14 @@ export default function App() {
                           : 'text-white/40 hover:bg-white/5 hover:text-white'
                     }`}
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="relative block h-[20px] w-[20px] shrink-0">
                       {isAwaitingPosterApplyConfirm ? (
                         <img draggable={false}
                           src="/icons/info-disabled.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
                           decoding="async"
                           aria-hidden
                         />
@@ -3183,18 +3183,18 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/info-active.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
                             decoding="async"
                             aria-hidden
                           />
                           <img draggable={false}
                             src="/icons/info-active-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
                             decoding="async"
                             aria-hidden
                           />
@@ -3204,18 +3204,18 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/info.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
                             decoding="async"
                             aria-hidden
                           />
                           <img draggable={false}
                             src="/icons/info-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
                             decoding="async"
                             aria-hidden
                           />
@@ -3248,29 +3248,29 @@ export default function App() {
                       <img draggable={false}
                         src="/icons/poster-preview-fit-disabled.svg"
                         alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none h-[18px] w-[18px] shrink-0 opacity-100"
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-100"
                         decoding="async"
                         aria-hidden
                       />
                     ) : (
-                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <span className="relative block h-[20px] w-[20px] shrink-0">
                         <img draggable={false}
                           src="/icons/poster-preview-fit.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/prevfit:opacity-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/prevfit:opacity-0"
                           decoding="async"
                           aria-hidden
                         />
                         <img draggable={false}
                           src="/icons/poster-preview-fit-hover.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/prevfit:opacity-100"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/prevfit:opacity-100"
                           decoding="async"
                           aria-hidden
                         />
@@ -3385,29 +3385,29 @@ export default function App() {
                       <img draggable={false}
                         src="/icons/poster-preview-100-disabled.svg"
                         alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none h-[18px] w-[18px] shrink-0 opacity-100"
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-100"
                         decoding="async"
                         aria-hidden
                       />
                     ) : (
-                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <span className="relative block h-[20px] w-[20px] shrink-0">
                         <img draggable={false}
                           src="/icons/poster-preview-100.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/prev100:opacity-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/prev100:opacity-0"
                           decoding="async"
                           aria-hidden
                         />
                         <img draggable={false}
                           src="/icons/poster-preview-100-hover.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/prev100:opacity-100"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/prev100:opacity-100"
                           decoding="async"
                           aria-hidden
                         />
@@ -3434,14 +3434,14 @@ export default function App() {
                           : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="relative block h-5 w-5 shrink-0">
                       {isLibraryToolbarLocked ? (
                         <img draggable={false}
                           src="/icons/view-grid-hover-disabled.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-5 w-5 shrink-0"
                           decoding="async"
                           aria-hidden
                         />
@@ -3450,9 +3450,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/view-grid.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
                               viewMode === 'grid'
                                 ? 'opacity-0'
                                 : 'opacity-100 group-hover/viewgrid:opacity-0'
@@ -3463,9 +3463,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/view-grid-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
                               viewMode === 'grid'
                                 ? 'opacity-100'
                                 : 'opacity-0 group-hover/viewgrid:opacity-100'
@@ -3492,14 +3492,14 @@ export default function App() {
                           : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="relative block h-5 w-5 shrink-0">
                       {isLibraryToolbarLocked ? (
                         <img draggable={false}
                           src="/icons/view-list-hover-disabled.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-5 w-5 shrink-0"
                           decoding="async"
                           aria-hidden
                         />
@@ -3508,9 +3508,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/view-list.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
                               viewMode === 'list'
                                 ? 'opacity-0'
                                 : 'opacity-100 group-hover/viewlist:opacity-0'
@@ -3521,9 +3521,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/view-list-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
                               viewMode === 'list'
                                 ? 'opacity-100'
                                 : 'opacity-0 group-hover/viewlist:opacity-100'
@@ -3557,29 +3557,29 @@ export default function App() {
                       <img draggable={false}
                         src="/icons/poster-size-decrease-disabled.svg"
                         alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
                         decoding="async"
                         aria-hidden
                       />
                     ) : (
-                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <span className="relative block h-[20px] w-[20px] shrink-0">
                         <img draggable={false}
                           src="/icons/poster-size-decrease.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/postdec:opacity-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/postdec:opacity-0"
                           decoding="async"
                           aria-hidden
                         />
                         <img draggable={false}
                           src="/icons/poster-size-decrease-hover.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/postdec:opacity-100"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/postdec:opacity-100"
                           decoding="async"
                           aria-hidden
                         />
@@ -3677,29 +3677,29 @@ export default function App() {
                       <img draggable={false}
                         src="/icons/poster-size-increase-disabled.svg"
                         alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-5 w-5 shrink-0"
                         decoding="async"
                         aria-hidden
                       />
                     ) : (
-                      <span className="relative block h-[18px] w-[18px] shrink-0">
+                      <span className="relative block h-5 w-5 shrink-0">
                         <img draggable={false}
                           src="/icons/poster-size-increase.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/postinc:opacity-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-5 w-5 opacity-100 transition-opacity group-hover/postinc:opacity-0"
                           decoding="async"
                           aria-hidden
                         />
                         <img draggable={false}
                           src="/icons/poster-size-increase-hover.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/postinc:opacity-100"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-5 w-5 opacity-0 transition-opacity group-hover/postinc:opacity-100"
                           decoding="async"
                           aria-hidden
                         />
@@ -3755,14 +3755,14 @@ export default function App() {
                   }
                 >
                   {/* 禁用态：`upload-poster-disabled.svg` 已含 fill-opacity；按钮不再叠加 disabled:opacity-* */}
-                  <span className="relative block h-[18px] w-[18px] shrink-0">
+                  <span className="relative block h-[20px] w-[20px] shrink-0">
                     {isPosterPreviewChromeLocked ? (
                       <img draggable={false}
                         src="/icons/upload-poster-disabled.svg"
                         alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none block h-[18px] w-[18px]"
+                        width={20}
+                        height={20}
+                        className="pointer-events-none block h-[20px] w-[20px]"
                         decoding="async"
                         aria-hidden
                       />
@@ -3771,18 +3771,18 @@ export default function App() {
                         <img draggable={false}
                           src="/icons/upload-poster.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-0"
                           decoding="async"
                           aria-hidden
                         />
                         <img draggable={false}
                           src="/icons/upload-poster-hover.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-100"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity duration-150 ease-out group-hover/uploadprev:opacity-100"
                           decoding="async"
                           aria-hidden
                         />
@@ -3807,14 +3807,14 @@ export default function App() {
                     }`}
                     title={mainLibraryToolbarLockReason ?? 'Edit Library'}
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="relative block h-[20px] w-[20px] shrink-0">
                       {isLibraryToolbarLocked ? (
                         <img draggable={false}
                           src="/icons/edit-library-disabled.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
                           decoding="async"
                           aria-hidden
                         />
@@ -3823,9 +3823,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/edit-library.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                               isEditing ? 'opacity-0' : 'opacity-100 group-hover/editlib:opacity-0'
                             }`}
                             decoding="async"
@@ -3834,9 +3834,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/edit-library-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                               isEditing ? 'opacity-0' : 'opacity-0 group-hover/editlib:opacity-100'
                             }`}
                             decoding="async"
@@ -3845,9 +3845,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/edit-library-active.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                               isEditing ? 'opacity-100 group-hover/editlib:opacity-0' : 'opacity-0'
                             }`}
                             decoding="async"
@@ -3856,9 +3856,9 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/edit-library-active-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className={`pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] transition-opacity ${
+                            width={20}
+                            height={20}
+                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
                               isEditing ? 'opacity-0 group-hover/editlib:opacity-100' : 'opacity-0'
                             }`}
                             decoding="async"
@@ -3881,14 +3881,14 @@ export default function App() {
                           : 'Add Movie'
                     }
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="relative block h-[20px] w-[20px] shrink-0">
                       {isAddMovieToolbarDisabled ? (
                         <img draggable={false}
                           src="/icons/add-movie-disabled.svg"
                           alt=""
-                          width={18}
-                          height={18}
-                          className="pointer-events-none h-[18px] w-[18px] shrink-0"
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
                           decoding="async"
                           aria-hidden
                         />
@@ -3897,18 +3897,18 @@ export default function App() {
                           <img draggable={false}
                             src="/icons/add-movie.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
                             decoding="async"
                             aria-hidden
                           />
                           <img draggable={false}
                             src="/icons/add-movie-hover.svg"
                             alt=""
-                            width={18}
-                            height={18}
-                            className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
+                            width={20}
+                            height={20}
+                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
                             decoding="async"
                             aria-hidden
                           />
@@ -6187,7 +6187,7 @@ function MovieCard({
         initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
-        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none border-b border-[#292929] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
+        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
         style={{ flexDirection: 'column' }}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
