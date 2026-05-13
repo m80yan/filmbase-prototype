@@ -1,0 +1,62 @@
+[
+  {
+    "id": "a-travelers-needs-2024",
+    "image": "/loading-library/posters/a-travelers-needs-2024.jpg",
+    "title": "A Traveler's Needs",
+    "year": 2024
+  },
+  {
+    "id": "amelie-2001",
+    "image": "/loading-library/posters/amelie-2001.jpg",
+    "title": "Amélie",
+    "year": 2001
+  },
+  {
+    "id": "american-beauty-1999",
+    "image": "/loading-library/posters/american-beauty-1999.jpg",
+    "title": "American Beauty",
+    "year": 1999
+  },
+  {
+    "id": "american-history-x-1998",
+    "image": "/loading-library/posters/american-history-x-1998.jpg",
+    "title": "American History X",
+    "year": 1998
+  },
+  {
+    "id": "anatomy-of-a-murder-1959",
+    "image": "/loading-library/posters/anatomy-of-a-murder-1959.jpg",
+    "title": "Anatomy of a Murder",
+    "year": 1959
+  },
+  {
+    "id": "exit-8-2025",
+    "image": "/loading-library/posters/exit-8-2025.jpg",
+    "title": "Exit 8",
+    "year": 2025
+  },
+  {
+    "id": "her-2013",
+   "image": "/loading-library/posters/her-2013.jpg",
+    "title": "Her",
+    "year": 2013
+  },
+  {
+    "id": "metropolis-1927",
+    "image": "/loading-library/posters/metropolis-1927.jpg",
+    "title": "Metropolis",
+    "year": 1927
+  },
+  {
+    "id": "moonlight-2016",
+    "image": "/loading-library/posters/moonlight-2016.jpg",
+    "title": "Moonlight",
+    "year": 2016
+  },
+  {
+    "id": "nocturnes-2024",
+    "image": "/loading-library/posters/nocturnes-2024.jpg",
+    "title": "Nocturnes",
+    "year": 2024
+  }
+]

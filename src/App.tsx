@@ -27,6 +27,8 @@ import {
   uploadPublicPosterFileAndSign,
   upsertPublicMovie,
 } from './lib/filmbaseSupabase';
+import { LibraryLoadingStagedCopy } from './components/LibraryLoadingStagedCopy';
+import { LibraryLoadingShowcase } from './components/LibraryLoadingShowcase';
 
 /**
  * `search-movies` Edge Function 返回的单条命中（展示建议时仅保留 `imdbId` 非空的项）。
@@ -1287,7 +1289,7 @@ export default function App() {
   }, []);
 
   /**
-   * 与「Loading library…」及胶片 loader 同生命周期：`!isMoviesHydrated` 时单次播放加载音（不 loop）；就绪时 cleanup 立刻停声。
+   * 与片库旋转加载文案及胶片 loader 同生命周期：`!isMoviesHydrated` 时单次播放加载音（不 loop）；就绪时 cleanup 立刻停声。
    */
   useEffect(() => {
     if (isMoviesHydrated) return;
@@ -3959,30 +3961,37 @@ export default function App() {
           className={
             isMainContentOverlayActive
               ? `${viewMode === 'list' ? 'px-0 py-0' : 'px-8 py-0'}`
-              : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+              : !isMoviesHydrated
+                ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+                : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
           }
         >
           {!isMoviesHydrated ? (
-            <div className="flex min-h-[48vh] flex-col items-center justify-center gap-3 text-white/35">
-              <div className="relative h-8 w-8 shrink-0" aria-hidden>
-                <img draggable={false}
-                  src={LIBRARY_LOADING_FILM_BASE_SRC}
-                  alt=""
-                  width={32}
-                  height={32}
-                  className="absolute inset-0 h-full w-full object-contain pointer-events-none"
-                  decoding="async"
-                />
-                <img draggable={false}
-                  src={LIBRARY_LOADING_REEL_SRC}
-                  alt=""
-                  width={32}
-                  height={32}
-                  className="absolute inset-0 h-full w-full object-contain pointer-events-none animate-spin"
-                  decoding="async"
-                />
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-white/35">
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative h-8 w-8 shrink-0" aria-hidden>
+                  <img draggable={false}
+                    src={LIBRARY_LOADING_FILM_BASE_SRC}
+                    alt=""
+                    width={32}
+                    height={32}
+                    className="absolute inset-0 h-full w-full object-contain pointer-events-none"
+                    decoding="async"
+                  />
+                  <img draggable={false}
+                    src={LIBRARY_LOADING_REEL_SRC}
+                    alt=""
+                    width={32}
+                    height={32}
+                    className="absolute inset-0 h-full w-full object-contain pointer-events-none animate-spin"
+                    decoding="async"
+                  />
+                </div>
+                <LibraryLoadingStagedCopy />
               </div>
-              <p className="text-sm font-medium tracking-wide">Loading library…</p>
+              <div className="mt-[80px] w-full flex flex-col items-center">
+                <LibraryLoadingShowcase />
+              </div>
             </div>
           ) : (
             <>
@@ -5469,7 +5478,7 @@ function PosterGenreIconWithTooltip({
 }
 
 /**
- * 片库海报框内 loading：与全屏「Loading library…」同胶片 + 卷轴图，无声音。
+ * 片库海报框内 loading：与全屏片库加载区同胶片 + 卷轴图，无声音。
  */
 function LibraryPosterFrameLoadingGlyph() {
   return (
