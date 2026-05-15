@@ -560,6 +560,7 @@ const SIDEBAR_GENRE_ICON_SLUGS = new Set([
   'sport',
   'talk-show',
   'thriller',
+  'tv-movie',
   'war',
   /** `lasso.svg`：用于展示标签 `Western`（见 `genreLabelToIconSlug`）。 */
   'lasso',
@@ -584,7 +585,7 @@ function normalizeGenreDisplayLabel(g: string): string {
  * 将片库中的 genre 文案映射为侧栏图标 slug。
  * 无单独设计的类型统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
  *
- * @param label 如 `Sci-Fi`、`War`、`Western`（映射为 `lasso` 素材）
+ * @param label 如 `Sci-Fi`、`War`、`Western`（映射为 `lasso` 素材）、`TV Movie`（`tv-movie`）
  */
 function genreLabelToIconSlug(label: string): string {
   const t = label.trim();
@@ -592,6 +593,7 @@ function genreLabelToIconSlug(label: string): string {
   const lower = t.toLowerCase();
   if (lower === 'sci fi' || lower === 'science fiction') return 'sci-fi';
   if (lower === 'reality' || lower === 'reality tv' || lower === 'reality-tv') return 'reality-tv';
+  if (lower === 'tv movie' || lower === 'tv-movie') return 'tv-movie';
   if (lower === 'western') return 'lasso';
   const slug = lower.replace(/\s+/g, '-');
   if (SIDEBAR_GENRE_ICON_SLUGS.has(slug)) return slug;
@@ -3154,77 +3156,6 @@ export default function App() {
                       />
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    disabled={isAwaitingPosterApplyConfirm}
-                    onClick={() => setIsInfoMode((v) => !v)}
-                    title={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                    aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                    aria-pressed={isInfoMode}
-                    className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
-                      isAwaitingPosterApplyConfirm
-                        ? 'text-white/25'
-                        : isInfoMode
-                          ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
-                          : 'text-white/40 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <span className="relative block h-[20px] w-[20px] shrink-0">
-                      {isAwaitingPosterApplyConfirm ? (
-                        <img draggable={false}
-                          src="/icons/info-disabled.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      ) : isInfoMode ? (
-                        <>
-                          <img draggable={false}
-                            src="/icons/info-active.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/info-active-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
-                            decoding="async"
-                            aria-hidden
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <img draggable={false}
-                            src="/icons/info.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/info-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
-                            decoding="async"
-                            aria-hidden
-                          />
-                        </>
-                      )}
-                    </span>
-                  </button>
                 </div>
                 <div className="flex min-w-0 items-center gap-3">
                   <button
@@ -3724,6 +3655,78 @@ export default function App() {
                   isScopedPosterUploadOpen &&
                   (Boolean(pendingPosterUrl) || Boolean(posterUploadError) || isPosterApplying);
                 return (
+                <>
+                <button
+                  type="button"
+                  disabled={isAwaitingPosterApplyConfirm}
+                  onClick={() => setIsInfoMode((v) => !v)}
+                  title={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                  aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                  aria-pressed={isInfoMode}
+                  className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                    isAwaitingPosterApplyConfirm
+                      ? 'text-white/25'
+                      : isInfoMode
+                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                        : 'text-white/40 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <span className="relative block h-[20px] w-[20px] shrink-0">
+                    {isAwaitingPosterApplyConfirm ? (
+                      <img draggable={false}
+                        src="/icons/info-disabled.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : isInfoMode ? (
+                      <>
+                        <img draggable={false}
+                          src="/icons/info-active.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img draggable={false}
+                          src="/icons/info-active-hover.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <img draggable={false}
+                          src="/icons/info.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img draggable={false}
+                          src="/icons/info-hover.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </>
+                    )}
+                  </span>
+                </button>
                 <button
                   type="button"
                   disabled={isPosterPreviewChromeLocked}
@@ -3793,6 +3796,7 @@ export default function App() {
                   </span>
                   Upload Poster
                 </button>
+                </>
                 );
               })() : (
                 <>
