@@ -1366,6 +1366,8 @@ interface TrafficLightButtonProps {
   defaultSrc: string;
   hoverSrc: string;
   pressedSrc: string;
+  /** 禁用态专用 SVG（如全屏时 minimize）；提供时不叠加 opacity / 灰度。 */
+  disabledSrc?: string;
   onClick: () => void;
   disabled?: boolean;
 }
@@ -1378,12 +1380,20 @@ function TrafficLightButton({
   defaultSrc,
   hoverSrc,
   pressedSrc,
+  disabledSrc,
   onClick,
   disabled,
 }: TrafficLightButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
-  const src = pressed ? pressedSrc : hovered ? hoverSrc : defaultSrc;
+  const useDisabledAsset = Boolean(disabled && disabledSrc);
+  const src = useDisabledAsset
+    ? disabledSrc!
+    : pressed
+      ? pressedSrc
+      : hovered
+        ? hoverSrc
+        : defaultSrc;
 
   return (
     <button
@@ -1391,9 +1401,14 @@ function TrafficLightButton({
       aria-label={label}
       title={label}
       disabled={disabled}
-      className="relative flex h-3 w-3 shrink-0 cursor-default items-center justify-center rounded-full border-none bg-transparent p-0 disabled:cursor-default disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50"
+      className={`relative flex h-3 w-3 shrink-0 cursor-default items-center justify-center rounded-full border-none bg-transparent p-0 disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50 ${
+        useDisabledAsset ? 'disabled:opacity-100' : 'disabled:opacity-40'
+      }`}
       onClick={onClick}
-      onPointerEnter={() => setHovered(true)}
+      onPointerEnter={() => {
+        if (disabled) return;
+        setHovered(true);
+      }}
       onPointerLeave={(e) => {
         if (!e.buttons) setPressed(false);
         setHovered(false);
@@ -4114,6 +4129,9 @@ export default function App() {
             defaultSrc="/icons/traffic-minimize.svg"
             hoverSrc="/icons/traffic-minimize-hover.svg"
             pressedSrc="/icons/traffic-minimize-pressed.svg"
+            disabledSrc={
+              windowMode === 'fullscreen' ? '/icons/traffic-minimize-disabled.svg' : undefined
+            }
             onClick={handleTrafficMinimize}
             disabled={trafficLightsDisabled || windowMode === 'fullscreen'}
           />
