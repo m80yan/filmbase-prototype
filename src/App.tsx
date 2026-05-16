@@ -15,6 +15,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MOCK_MOVIES } from './constants';
 import { Movie, MovieCastDetail } from './types';
 import { getSupabaseClient, signInAnonymously } from './lib/supabaseClient';
+import { invokeGenerateFilmDna } from './lib/generateFilmDna';
+import FilmDnaPanel from './components/FilmDnaOverlay';
+import type { FilmDnaTree } from './types/filmDna';
 import {
   deletePublicMovie,
   loadPublicMovies,
@@ -1669,6 +1672,12 @@ export default function App() {
   const [posterPreviewMovie, setPosterPreviewMovie] = useState<Movie | null>(null);
   /** 海报预览 Info Mode：叠层展示剧情/职员等，关闭预览时复位。 */
   const [isInfoMode, setIsInfoMode] = useState(false);
+  /** Info Mode 内 Film DNA 全屏叠层（无缓存；每次点击重新请求 Edge Function）。 */
+  const [isFilmDnaOpen, setIsFilmDnaOpen] = useState(false);
+  const [filmDnaStatus, setFilmDnaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [filmDnaTree, setFilmDnaTree] = useState<FilmDnaTree | null>(null);
+  const [filmDnaError, setFilmDnaError] = useState('');
+  const filmDnaAbortRef = useRef<AbortController | null>(null);
   /** 从卡片打开预览时：容器内 fade+scale 入场（非共享元素飞线）。 */
   const [isPosterPreviewEnterAnimating, setIsPosterPreviewEnterAnimating] = useState(false);
   /** 入场 CSS transition 是否已启动（双 rAF 后置 true）。 */
@@ -2384,8 +2393,79 @@ export default function App() {
     setPosterUploadError('');
   }, []);
 
+  /** 退出 Film DNA 模式并中止进行中的 Edge 请求。 */
+  const exitFilmDnaMode = useCallback(() => {
+    filmDnaAbortRef.current?.abort();
+    filmDnaAbortRef.current = null;
+    setIsFilmDnaOpen(false);
+    setFilmDnaTree(null);
+    setFilmDnaError('');
+    setFilmDnaStatus('idle');
+  }, []);
+
+  /**
+   * 进入 Film DNA 模式并调用 `generate-film-dna`（与 Info 互斥，由调用方先 `setIsInfoMode(false)`）。
+   *
+   * @param movie 当前海报预览影片
+   */
+  const enterFilmDnaMode = useCallback((movie: Movie) => {
+    const supabase = supabaseRef.current ?? getSupabaseClient();
+    supabaseRef.current = supabase;
+    filmDnaAbortRef.current?.abort();
+    const ac = new AbortController();
+    filmDnaAbortRef.current = ac;
+    setIsFilmDnaOpen(true);
+    setFilmDnaStatus('loading');
+    setFilmDnaTree(null);
+    setFilmDnaError('');
+    void (async () => {
+      try {
+        const tree = await invokeGenerateFilmDna(
+          supabase,
+          {
+            title: movie.title,
+            year: movie.year,
+            director: movie.director,
+            writer: movie.writer,
+            genres: movie.genre,
+            plot: movie.plot,
+            tagline: movie.tagline,
+          },
+          ac.signal,
+        );
+        if (ac.signal.aborted) return;
+        setFilmDnaTree(tree);
+        setFilmDnaStatus('ready');
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        setFilmDnaStatus('error');
+        setFilmDnaError(
+          err instanceof Error ? err.message : 'Could not generate Film DNA.',
+        );
+      }
+    })();
+  }, []);
+
+  /**
+   * 切换 Film DNA 模式：再次点击图标或 ESC 退出；进入时关闭 Info 并拉取 DNA。
+   *
+   * @param movie 当前海报预览影片
+   */
+  const toggleFilmDnaMode = useCallback(
+    (movie: Movie) => {
+      if (isFilmDnaOpen) {
+        exitFilmDnaMode();
+        return;
+      }
+      setIsInfoMode(false);
+      enterFilmDnaMode(movie);
+    },
+    [isFilmDnaOpen, exitFilmDnaMode, enterFilmDnaMode],
+  );
+
   /** 关闭全屏海报预览并重置缩放/平移。 */
   const closePosterPreview = useCallback(() => {
+    exitFilmDnaMode();
     setIsScopedPosterUploadOpen(false);
     setPendingPosterUrl(null);
     setPosterUploadError('');
@@ -2407,7 +2487,7 @@ export default function App() {
       startPanY: 0,
       moved: false,
     };
-  }, []);
+  }, [exitFilmDnaMode]);
 
   /**
    * Scheme A：在 shell（侧栏 / 顶栏 / 窗口控件）捕获阶段先关闭主区内浮层（海报预览 / 预告片），不 `stopPropagation`，
@@ -2417,7 +2497,7 @@ export default function App() {
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       if (isPosterPreviewOpen) {
-        if (isInfoMode) return;
+        if (isInfoMode || isFilmDnaOpen) return;
         const awaiting =
           isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying;
         if (awaiting) return;
@@ -2431,6 +2511,7 @@ export default function App() {
     [
       isPosterPreviewOpen,
       isInfoMode,
+      isFilmDnaOpen,
       isScopedPosterUploadOpen,
       pendingPosterUrl,
       isPosterApplying,
@@ -2440,11 +2521,16 @@ export default function App() {
     ],
   );
 
-  /** 预览打开时 ESC：Info Mode 下先退出信息层；否则关闭预览（选图待 Apply/Cancel 时不响应）。 */
+  /** 预览打开时 ESC：先关 Film DNA → 再退出 Info Mode → 否则关闭预览（选图待 Apply/Cancel 时不响应）。 */
   useEffect(() => {
     if (!isPosterPreviewOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (isFilmDnaOpen) {
+        e.preventDefault();
+        exitFilmDnaMode();
+        return;
+      }
       if (isInfoMode) {
         e.preventDefault();
         setIsInfoMode(false);
@@ -2464,10 +2550,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isPosterPreviewOpen,
+    isFilmDnaOpen,
     isInfoMode,
     isScopedPosterUploadOpen,
     pendingPosterUrl,
     isPosterApplying,
+    exitFilmDnaMode,
     closePosterPreview,
   ]);
 
@@ -2505,7 +2593,7 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.key !== 'z' && e.key !== 'Z') return;
-      if (isInfoMode) return;
+      if (isInfoMode || isFilmDnaOpen) return;
       const ae = document.activeElement;
       if (
         ae instanceof HTMLInputElement ||
@@ -2544,7 +2632,7 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown);
       previewPointerOverImgRef.current = false;
     };
-  }, [isPosterPreviewOpen, isInfoMode]);
+  }, [isPosterPreviewOpen, isInfoMode, isFilmDnaOpen]);
 
   /** 主区内预告片 overlay 打开时 ESC 关闭（Edit Trailer URL 弹窗占用 ESC 时跳过）。 */
   useEffect(() => {
@@ -2639,6 +2727,7 @@ export default function App() {
       setPosterPreviewEnterRun(false);
     }
     setPosterPreviewMovie(movie);
+    exitFilmDnaMode();
     setIsInfoMode(false);
     if (!hasEnterAnim) {
       setPreviewNaturalSize(null);
@@ -3744,13 +3833,18 @@ export default function App() {
       !isPosterApplying,
   );
 
-  /** Info Mode 或与待 Apply 一致：侧栏遮罩、顶栏 Back/缩放/上传、背景点按关闭等同锁态。 */
-  const isPosterPreviewChromeLocked = isAwaitingPosterApplyConfirm || isInfoMode;
+  /** Info / Film DNA 模式：与待 Apply 一致，侧栏遮罩、顶栏 Back/缩放/上传等锁态。 */
+  const isPosterPreviewSubModeActive = isInfoMode || isFilmDnaOpen;
 
-  /** 锁定或 min=max 时禁用滑块与 ±；Info Mode 下亦禁用。 */
+  /** Info / Film DNA 或与待 Apply 一致：侧栏遮罩、顶栏 Back/缩放/上传、背景点按关闭等同锁态。 */
+  const isPosterPreviewChromeLocked =
+    isAwaitingPosterApplyConfirm || isPosterPreviewSubModeActive;
+
+  /** 锁定或 min=max 时禁用滑块与 ±；Info / Film DNA 模式下亦禁用。 */
   const isPreviewZoomSliderDisabled =
     isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
-  const isPosterPreviewZoomControlsDisabled = isPreviewZoomSliderDisabled || isInfoMode;
+  const isPosterPreviewZoomControlsDisabled =
+    isPreviewZoomSliderDisabled || isPosterPreviewSubModeActive;
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
@@ -4481,7 +4575,9 @@ export default function App() {
             title={
               isAwaitingPosterApplyConfirm
                 ? 'Use Apply or Cancel below to finish poster upload'
-                : 'Press ESC to exit info'
+                : isFilmDnaOpen
+                  ? 'Press ESC to exit Film DNA'
+                  : 'Press ESC to exit info'
             }
             aria-hidden
             onPointerDownCapture={(e) => {
@@ -4537,7 +4633,9 @@ export default function App() {
                       isPosterPreviewChromeLocked
                         ? isAwaitingPosterApplyConfirm
                           ? 'Use Apply or Cancel below'
-                          : 'Press ESC to exit info'
+                          : isFilmDnaOpen
+                            ? 'Press ESC to exit Film DNA'
+                            : 'Press ESC to exit info'
                         : 'Back'
                     }
                     aria-label="Close poster preview"
@@ -4618,7 +4716,7 @@ export default function App() {
                     )}
                   </button>
                   <div className="group relative flex h-8 w-32 shrink-0 items-center">
-                    {previewSliderHoverLabel && !isInfoMode ? (
+                    {previewSliderHoverLabel && !isPosterPreviewSubModeActive ? (
                       <span
                         className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white/90 opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
                         style={{
@@ -5065,13 +5163,18 @@ export default function App() {
                 <>
                 <button
                   type="button"
-                  disabled={isAwaitingPosterApplyConfirm}
-                  onClick={() => setIsInfoMode((v) => !v)}
+                  disabled={isAwaitingPosterApplyConfirm || isFilmDnaOpen}
+                  onPointerDownCapture={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isFilmDnaOpen) exitFilmDnaMode();
+                    setIsInfoMode((v) => !v);
+                  }}
                   title={isInfoMode ? 'Exit info mode' : 'Movie info'}
                   aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
                   aria-pressed={isInfoMode}
                   className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
-                    isAwaitingPosterApplyConfirm
+                    isAwaitingPosterApplyConfirm || isFilmDnaOpen
                       ? 'text-white/25'
                       : isInfoMode
                         ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
@@ -5079,7 +5182,7 @@ export default function App() {
                   }`}
                 >
                   <span className="relative block h-[20px] w-[20px] shrink-0">
-                    {isAwaitingPosterApplyConfirm ? (
+                    {isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
                       <img draggable={false}
                         src="/icons/info-disabled.svg"
                         alt=""
@@ -5136,6 +5239,96 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  disabled={
+                    isAwaitingPosterApplyConfirm ||
+                    !posterPreviewMovie.title?.trim() ||
+                    (isFilmDnaOpen && filmDnaStatus === 'loading')
+                  }
+                  onPointerDownCapture={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!posterPreviewMovie.title?.trim()) return;
+                    if (isFilmDnaOpen && filmDnaStatus === 'loading') return;
+                    toggleFilmDnaMode(posterPreviewMovie);
+                  }}
+                  title={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
+                  aria-label={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
+                  aria-pressed={isFilmDnaOpen}
+                  className={`group/filmdna relative rounded-md p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                    isAwaitingPosterApplyConfirm ||
+                    !posterPreviewMovie.title?.trim() ||
+                    (isFilmDnaOpen && filmDnaStatus === 'loading')
+                      ? 'text-white/25'
+                      : isFilmDnaOpen
+                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                        : 'text-white/40 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <span className="relative block h-[20px] w-[20px] shrink-0">
+                    {isAwaitingPosterApplyConfirm ||
+                    !posterPreviewMovie.title?.trim() ||
+                    (isFilmDnaOpen && filmDnaStatus === 'loading') ? (
+                      <img
+                        draggable={false}
+                        src="/icons/film-dna-disabled.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                        decoding="async"
+                        aria-hidden
+                      />
+                    ) : isFilmDnaOpen ? (
+                      <>
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna-active.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/filmdna:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna-active-hover.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/filmdna:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/filmdna:opacity-0"
+                          decoding="async"
+                          aria-hidden
+                        />
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna-hover.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/filmdna:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      </>
+                    )}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   disabled={isPosterPreviewChromeLocked}
                   /**
                    * 父级 toolbar 在 capture 阶段挂了 `onShellPointerDownCloseScopedOverlays`，
@@ -5159,11 +5352,13 @@ export default function App() {
                   title={
                     isAwaitingPosterApplyConfirm
                       ? 'Use Apply or Cancel below'
-                      : isInfoMode
-                        ? 'Press ESC to exit info'
-                        : hasVisibleUploadPanel
-                          ? 'Close upload panel'
-                          : 'Upload Poster'
+                      : isFilmDnaOpen
+                        ? 'Press ESC to exit Film DNA'
+                        : isInfoMode
+                          ? 'Press ESC to exit info'
+                          : hasVisibleUploadPanel
+                            ? 'Close upload panel'
+                            : 'Upload Poster'
                   }
                 >
                   {/* 禁用态：`upload-poster-disabled.svg` 已含 fill-opacity；按钮不再叠加 disabled:opacity-* */}
@@ -5345,6 +5540,8 @@ export default function App() {
                 </span>
               ) : isScopedPosterUploadOpen && pendingPosterUrl ? (
                 <span className="tabular-nums leading-5">Ready</span>
+              ) : isFilmDnaOpen ? (
+                <span className="leading-5">Press ESC to exit Film DNA</span>
               ) : isInfoMode ? (
                 <span className="leading-5">Press ESC to exit info</span>
               ) : (
@@ -5878,7 +6075,7 @@ export default function App() {
               className="absolute inset-0 z-[1]"
               onClick={(e) => {
                 if (e.target !== e.currentTarget) return;
-                if (isAwaitingPosterApplyConfirm || isInfoMode) return;
+                if (isAwaitingPosterApplyConfirm || isPosterPreviewSubModeActive) return;
                 closePosterPreview();
               }}
               onWheel={(e) => {
@@ -5905,7 +6102,7 @@ export default function App() {
                       : { width: 'min(100%, 560px)', height: 'min(85dvh, 920px)' }
                 }
                 onWheel={(e) => {
-                  if (isInfoMode) return;
+                  if (isPosterPreviewSubModeActive) return;
                   const L = posterPreviewLayoutRef.current;
                   if (!L?.needsPan) return;
                   e.preventDefault();
@@ -5934,7 +6131,7 @@ export default function App() {
                     onPointerLeave={() => {
                       previewPointerOverImgRef.current = false;
                     }}
-                    className={`max-h-none max-w-none select-none object-contain${isInfoMode ? ' pointer-events-none' : ''}`}
+                    className={`max-h-none max-w-none select-none object-contain${isPosterPreviewSubModeActive ? ' pointer-events-none' : ''}`}
                     style={(() => {
                       const enter = getPosterPreviewEnterVisual(
                         isPosterPreviewEnterAnimating,
@@ -5954,7 +6151,7 @@ export default function App() {
                           opacity: enter.opacity,
                           transform: panTransform(previewPan.x, previewPan.y),
                           transition: enter.transition,
-                          cursor: isInfoMode
+                          cursor: isPosterPreviewSubModeActive
                             ? 'default'
                             : isPreviewDragging && posterPreviewLayout.needsPan
                               ? 'grabbing'
@@ -5975,7 +6172,7 @@ export default function App() {
                           opacity: enter.opacity,
                           transform: panTransform(previewPan.x, previewPan.y),
                           transition: enter.transition,
-                          cursor: isInfoMode
+                          cursor: isPosterPreviewSubModeActive
                             ? 'default'
                             : isPreviewDragging &&
                                 (previewPosterFrameFallback.dispW >
@@ -6000,7 +6197,7 @@ export default function App() {
                         opacity: enter.opacity,
                         transform: `scale(${enter.scale})`,
                         transition: enter.transition,
-                        cursor: isInfoMode ? 'default' : 'wait',
+                        cursor: isPosterPreviewSubModeActive ? 'default' : 'wait',
                       };
                     })()}
                     onTransitionEnd={(e) => {
@@ -6031,7 +6228,7 @@ export default function App() {
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (isInfoMode) return;
+                      if (isPosterPreviewSubModeActive) return;
                       if (previewDragRef.current.moved) {
                         previewDragRef.current.moved = false;
                         return;
@@ -6075,7 +6272,7 @@ export default function App() {
                       setPreviewPan({ x: nextPanX, y: nextPanY });
                     }}
                     onPointerDown={(e) => {
-                      if (isInfoMode) return;
+                      if (isPosterPreviewSubModeActive) return;
                       const L = posterPreviewLayoutRef.current;
                       if (!L?.needsPan) return;
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -6119,7 +6316,23 @@ export default function App() {
                     }}
                   />
 
-                  {isInfoMode ? (
+                  {isFilmDnaOpen ? (
+                    <div
+                      role="region"
+                      aria-label="Film DNA"
+                      className="filmbase-scrollbar-subtle absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      onClick={(e) => e.stopPropagation()}
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      <FilmDnaPanel
+                        status={
+                          filmDnaStatus === 'idle' ? 'loading' : filmDnaStatus
+                        }
+                        tree={filmDnaTree}
+                        errorMessage={filmDnaError}
+                      />
+                    </div>
+                  ) : isInfoMode ? (
                     <div
                       role="region"
                       aria-label="Movie information"
