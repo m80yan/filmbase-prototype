@@ -113,61 +113,73 @@
   background: linear-gradient(180deg, rgba(45, 45, 45, 0.8) 0%, rgba(30, 30, 30, 0.9) 100%);
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/**
+ * 侧栏与主库滚动区共用细滚动条（WebKit / Firefox）；与 Tailwind `[scrollbar-gutter:stable]` 配合。
+ */
+.filmbase-scrollbar {
+  --filmbase-scrollbar-gutter: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 
-::-webkit-scrollbar-track {
+/**
+ * List View 分层表头：与同行滚动区 `scrollbar-gutter: stable` 预留的 8px 右槽对齐。
+ */
+.filmbase-list-view-layered {
+  --filmbase-scrollbar-gutter: 8px;
+}
+
+.filmbase-list-view-header-grid {
+  padding-right: var(--filmbase-scrollbar-gutter);
+  box-sizing: border-box;
+}
+
+.filmbase-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.filmbase-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
-main::-webkit-scrollbar {
-  width: 8px;
-}
-
-main::-webkit-scrollbar-track {
-  background: transparent;
-  margin-top: 88px;
-  margin-bottom: 8px;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
+.filmbase-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
   border: 2px solid transparent;
-  background-clip: padding-box;
+  background-clip: content-box;
 }
 
-main::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
-  border-radius: 8px;
+.filmbase-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: content-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.4);
+/**
+ * 浮层/弹窗内滚动：更低对比，融入深色 overlay / 弹窗背景（非侧栏/主库）。
+ */
+.filmbase-scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
-main::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.4);
-}
-
-aside .overflow-y-auto::-webkit-scrollbar {
+.filmbase-scrollbar-subtle::-webkit-scrollbar {
   width: 8px;
 }
 
-aside .overflow-y-auto::-webkit-scrollbar-track {
+.filmbase-scrollbar-subtle::-webkit-scrollbar-track {
   background: transparent;
 }
 
-aside .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
-  border-radius: 8px;
+.filmbase-scrollbar-subtle::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
-aside .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.4);
+.filmbase-scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+  background-clip: content-box;
 }
 
 .scrollbar-hide::-webkit-scrollbar {

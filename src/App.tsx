@@ -396,7 +396,7 @@ function PosterPreviewInfoCastBlock({ movie }: { movie: Movie }) {
         </div>
       ) : (
         <div
-          className="max-h-[calc(15*1.25rem+14*0.375rem)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain"
+          className="filmbase-scrollbar-subtle max-h-[calc(15*1.25rem+14*0.375rem)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain"
           onWheel={(e) => e.stopPropagation()}
         >
           <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-1.5 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
@@ -734,7 +734,53 @@ const POSTER_PREVIEW_LAYOUT_PAD_PX = 0;
 type PreviewHeroRect = { left: number; top: number; width: number; height: number };
 
 /**
- * 与 `posterPreviewLayout` 相同：`maxW`/`maxH` 与 contain 后的 `dispW`/`dispH`。
+ * @param rect `DOMRect` / `DOMRectReadOnly`
+ */
+function filmbaseScreenRectFromDOMRect(rect: DOMRectReadOnly): FilmbaseScreenRect {
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function intersectRectsReadonly(a: DOMRectReadOnly, b: DOMRectReadOnly): FilmbaseScreenRect | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.left + a.width, b.left + b.width);
+  const bottom = Math.min(a.top + a.height, b.top + b.height);
+  const width = right - left;
+  const height = bottom - top;
+  if (!(width >= 48 && height >= 48)) return null;
+  return { left, top, width, height };
+}
+
+function filmbaseFullscreenGeomTransitionCss(): Pick<
+  React.CSSProperties,
+  'transitionProperty' | 'transitionDuration' | 'transitionTimingFunction'
+> {
+  return {
+    transitionProperty: 'left, top, width, height, border-radius, box-shadow',
+    transitionDuration: `${FILMBASE_FULLSCREEN_TRANSITION_MS}ms`,
+    transitionTimingFunction: 'cubic-bezier(0.33, 1, 0.25, 1)',
+  };
+}
+
+/** 与非全屏 `FilmbaseWindowShellMount` 同一套居中算法对应的 viewport 矩形。 */
+function floatingShellViewportRectFromDragCentroid(
+  vw: number,
+  vh: number,
+  shellW: number,
+  shellH: number,
+  dragOffset: { x: number; y: number },
+): FilmbaseScreenRect {
+  const cx = vw / 2 + dragOffset.x;
+  const cy = vh / 2 + dragOffset.y;
+  return {
+    left: cx - shellW / 2,
+    top: cy - shellH / 2,
+    width: shellW,
+    height: shellH,
+  };
+}
+
+/** 与 `posterPreviewLayout` 相同：`maxW`/`maxH` 与 contain 后的 `dispW`/`dispH`。
  *
  * @param hostRect `mainPreviewHostRef` 的 `getBoundingClientRect()`
  * @param nw 海报自然宽
@@ -803,7 +849,33 @@ function computePreviewPosterDisplayRect(
   };
 }
 
-const POSTER_HERO_TRANSITION_MS = 300;
+/** 海报预览打开时容器内 fade+scale 时长（ms）。 */
+const POSTER_PREVIEW_ENTER_TRANSITION_MS = 300;
+
+const POSTER_PREVIEW_ENTER_EASING = 'cubic-bezier(0.33, 1, 0.25, 1)';
+
+/**
+ * 预览入场：在最终布局位上做 opacity + scale，避免共享元素飞线越界。
+ *
+ * @param isEnterAnimating 是否处于入场动画
+ * @param enterRun 双 rAF 后是否已启动 CSS transition
+ */
+function getPosterPreviewEnterVisual(isEnterAnimating: boolean, enterRun: boolean) {
+  const active = !isEnterAnimating || enterRun;
+  return {
+    opacity: active ? 1 : 0,
+    scale: active ? 1 : 0.92,
+    transition: isEnterAnimating
+      ? `opacity ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}, transform ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}`
+      : undefined,
+  };
+}
+
+/**
+ * 全屏且交通灯组视觉隐藏（透明不占交互）时，将「Toggle Sidebar」左移以供与侧栏搜索左缘对齐，
+ * ≈ `3 × 12px` 圆点宽度 + `gap-2 × 2` + 与 toggle 间距 `gap-3`。
+ */
+const FULLSCREEN_SIDEBAR_TOGGLE_ALIGN_SHIFT_PX = 64;
 
 /**
  * 规范化标题相同且年份相差不超过 1 时，视为同一部影片（用于 seed 1993 vs public 1994 等）。
@@ -933,6 +1005,355 @@ const DESKTOP_WALLPAPER_SRC = '/images/desktop-bg.jpg';
 const DESKTOP_FILMBASE_ICON_SRC = '/icons/desktop-filmbase-icon.svg';
 const DESKTOP_FILMBASE_ICON_PRESSED_SRC = '/icons/desktop-filmbase-icon-pressed.svg';
 
+/** 桌面模式（非嵌入或未处于 CSS 全屏）下模拟窗口优选宽度（px）。 */
+const FILMBASE_DESKTOP_LAUNCH_PREF_WIDTH_PX = 1280;
+/** 桌面模式下模拟窗口优选高度（px）。 */
+const FILMBASE_DESKTOP_LAUNCH_PREF_HEIGHT_PX = 960;
+/**
+ * 视口相对窗口的安全余量（px），与 `calc(100vw - 48px)` / `calc(100vh - 48px)` 一致。
+ */
+const FILMBASE_DESKTOP_LAUNCH_MARGIN_PX = 48;
+
+/** 拖拽时窗口在视口内至少保留的可见宽度（px），防止窗口完全拖出无法找回。 */
+const FILMBASE_FLOATING_DRAG_MIN_VISIBLE_X_PX = 80;
+/** 拖拽时窗口在视口内至少保留的可见高度（px）。 */
+const FILMBASE_FLOATING_DRAG_MIN_VISIBLE_Y_PX = 48;
+
+/** 可调整悬浮窗口的最小宽度/高度（px）。 */
+const FILMBASE_FLOATING_MIN_WIDTH_PX = 900;
+const FILMBASE_FLOATING_MIN_HEIGHT_PX = 500;
+
+/**
+ * 窗口宽度小于等于此值时自动折叠侧栏（复用 `isSidebarOpen`）。
+ */
+const FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX = 1024;
+
+/**
+ * List 表头叠层高度（`py-4` + `min-h-5` 列标题行，px），与行滚动区 `padding-top` 一致。
+ */
+const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 52;
+
+/**
+ * List View 表头与列表行共用的 grid 列布局（单一定义源，避免表头/行错位）。
+ *
+ * @param isEditing 是否编辑库模式（多一列删除控件）
+ */
+function listViewTableGridClassName(isEditing: boolean): string {
+  return isEditing
+    ? 'grid grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8'
+    : 'grid grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8';
+}
+
+/**
+ * 非全屏外层：投影 + 深色外边框。内白凹边由内层 `.filmbase-inner-window-stroke` 绘制，避免被子树 `#050505` 背景盖住。
+ */
+const FILMBASE_NONFULLSCREEN_OUTER_BOX_SHADOW =
+  '0 24px 80px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.45)';
+
+const FILMBASE_NONFULLSCREEN_SHELL_DECORATION: React.CSSProperties = {
+  borderRadius: 12,
+  boxShadow: FILMBASE_NONFULLSCREEN_OUTER_BOX_SHADOW,
+};
+
+/** 叠在内容之上的内凹白描边（`pointer-events:none` overlay）。 */
+const FILMBASE_INNER_WINDOW_STROKE_BOX_SHADOW = 'inset 0 0 0 1px rgba(255, 255, 255, 0.30)';
+
+/** 进出模拟全屏的布局动画（非 Fullscreen API）。 */
+const FILMBASE_FULLSCREEN_TRANSITION_MS = 400;
+
+/** viewport 快照矩形（FLIP / hero clip）。 */
+type FilmbaseScreenRect = { left: number; top: number; width: number; height: number };
+
+/** 模拟全屏进/出的几何动画状态（与 minimize 量级相近）。 */
+type FilmbaseFullscreenShellAnim =
+  | { phase: 'enter-snap'; rect: FilmbaseScreenRect }
+  | { phase: 'enter-expand' }
+  | { phase: 'exit-from-full'; to: FilmbaseScreenRect }
+  | { phase: 'exit-shrink'; to: FilmbaseScreenRect };
+/**
+ * 判断是否运行在 iframe 内（如 Notion embed）。
+ * 交叉源下访问 `window.top` 可能抛错，此时按 iframe 处理。
+ *
+ * @returns 嵌入为 true
+ */
+function detectEmbeddedInIframe(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 将悬浮窗口尺寸限制在 `[min, vw-m]` × `[min, vh-m]`。
+ *
+ * @param w 目标宽度
+ * @param h 目标高度
+ */
+function clampShellSizeToViewport(w: number, h: number, vw: number, vh: number): { w: number; h: number } {
+  const m = FILMBASE_DESKTOP_LAUNCH_MARGIN_PX;
+  const maxW = vw - m;
+  const maxH = vh - m;
+  return {
+    w: Math.min(maxW, Math.max(FILMBASE_FLOATING_MIN_WIDTH_PX, w)),
+    h: Math.min(maxH, Math.max(FILMBASE_FLOATING_MIN_HEIGHT_PX, h)),
+  };
+}
+
+/**
+ * 视口内默认悬浮窗口尺寸（与历史 1280×960 夹紧逻辑一致）。
+ */
+function getDefaultFloatingShellSize(vw: number, vh: number): { w: number; h: number } {
+  const m = FILMBASE_DESKTOP_LAUNCH_MARGIN_PX;
+  const prefW = Math.min(FILMBASE_DESKTOP_LAUNCH_PREF_WIDTH_PX, vw - m);
+  const prefH = Math.min(FILMBASE_DESKTOP_LAUNCH_PREF_HEIGHT_PX, vh - m);
+  return clampShellSizeToViewport(prefW, prefH, vw, vh);
+}
+
+/**
+ * 钳制悬浮窗口中心点：允许部分拖出视口，但至少保留 {@link FILMBASE_FLOATING_DRAG_MIN_VISIBLE_X_PX}×{@link FILMBASE_FLOATING_DRAG_MIN_VISIBLE_Y_PX} 可见区域以便拖回。
+ *
+ * @param dx 相对视口水平中心的偏移 px
+ * @param dy 相对视口垂直中心的偏移 px
+ * @param shellW 当前窗口宽
+ * @param shellH 当前窗口高
+ */
+function clampFilmbaseFloatingDragOffset(
+  dx: number,
+  dy: number,
+  vw: number,
+  vh: number,
+  shellW: number,
+  shellH: number,
+): { x: number; y: number } {
+  const halfW = shellW / 2;
+  const halfH = shellH / 2;
+  let cx = vw / 2 + dx;
+  let cy = vh / 2 + dy;
+
+  const cxMin = FILMBASE_FLOATING_DRAG_MIN_VISIBLE_X_PX - halfW;
+  const cxMax = vw - FILMBASE_FLOATING_DRAG_MIN_VISIBLE_X_PX + halfW;
+  const cyMin = FILMBASE_FLOATING_DRAG_MIN_VISIBLE_Y_PX - halfH;
+  const cyMax = vh - FILMBASE_FLOATING_DRAG_MIN_VISIBLE_Y_PX + halfH;
+
+  const cxLo = Math.min(cxMin, cxMax);
+  const cxHi = Math.max(cxMin, cxMax);
+  const cyLo = Math.min(cyMin, cyMax);
+  const cyHi = Math.max(cyMin, cyMax);
+
+  cx = Math.min(Math.max(cx, cxLo), cxHi);
+  cy = Math.min(Math.max(cy, cyLo), cyHi);
+
+  return { x: cx - vw / 2, y: cy - vh / 2 };
+}
+
+/** 外壳八向缩放手柄（四边 + 四角）。 */
+type FilmbaseShellResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+/**
+ * 根据指针位移与固定锚点边计算缩放后的尺寸与拖拽偏移（非全屏悬浮窗）。
+ *
+ * @param edge 拖拽的手柄方向
+ */
+function applyFilmbaseShellResizeFromPointer(
+  edge: FilmbaseShellResizeEdge,
+  start: {
+    startClientX: number;
+    startClientY: number;
+    startW: number;
+    startH: number;
+    originDragX: number;
+    originDragY: number;
+  },
+  clientX: number,
+  clientY: number,
+  vw: number,
+  vh: number,
+): { w: number; h: number; dragX: number; dragY: number } {
+  const dx = clientX - start.startClientX;
+  const dy = clientY - start.startClientY;
+  const startCx = vw / 2 + start.originDragX;
+  const startCy = vh / 2 + start.originDragY;
+  const startLeft = startCx - start.startW / 2;
+  const startTop = startCy - start.startH / 2;
+  const startRight = startCx + start.startW / 2;
+  const startBottom = startCy + start.startH / 2;
+
+  let rawW = start.startW;
+  let rawH = start.startH;
+
+  switch (edge) {
+    case 'e':
+      rawW = start.startW + dx;
+      break;
+    case 'w':
+      rawW = start.startW - dx;
+      break;
+    case 's':
+      rawH = start.startH + dy;
+      break;
+    case 'n':
+      rawH = start.startH - dy;
+      break;
+    case 'se':
+      rawW = start.startW + dx;
+      rawH = start.startH + dy;
+      break;
+    case 'sw':
+      rawW = start.startW - dx;
+      rawH = start.startH + dy;
+      break;
+    case 'ne':
+      rawW = start.startW + dx;
+      rawH = start.startH - dy;
+      break;
+    case 'nw':
+      rawW = start.startW - dx;
+      rawH = start.startH - dy;
+      break;
+  }
+
+  const { w: nextW, h: nextH } = clampShellSizeToViewport(rawW, rawH, vw, vh);
+
+  let nextLeft = startLeft;
+  let nextTop = startTop;
+
+  switch (edge) {
+    case 'e':
+      nextLeft = startLeft;
+      nextTop = startTop;
+      break;
+    case 'w':
+      nextLeft = startRight - nextW;
+      nextTop = startTop;
+      break;
+    case 's':
+      nextLeft = startLeft;
+      nextTop = startTop;
+      break;
+    case 'n':
+      nextLeft = startLeft;
+      nextTop = startBottom - nextH;
+      break;
+    case 'se':
+      nextLeft = startLeft;
+      nextTop = startTop;
+      break;
+    case 'sw':
+      nextLeft = startRight - nextW;
+      nextTop = startTop;
+      break;
+    case 'ne':
+      nextLeft = startLeft;
+      nextTop = startBottom - nextH;
+      break;
+    case 'nw':
+      nextLeft = startRight - nextW;
+      nextTop = startBottom - nextH;
+      break;
+  }
+
+  const nextCx = nextLeft + nextW / 2;
+  const nextCy = nextTop + nextH / 2;
+
+  return {
+    w: nextW,
+    h: nextH,
+    dragX: nextCx - vw / 2,
+    dragY: nextCy - vh / 2,
+  };
+}
+
+/** 非全屏外壳缩放手柄布局（边避开角区，角置于更高 z-index）。 */
+const FILMBASE_SHELL_RESIZE_HANDLES: readonly {
+  edge: FilmbaseShellResizeEdge;
+  className: string;
+  title: string;
+}[] = [
+  {
+    edge: 'n',
+    className:
+      'filmbase-shell-resize-edge-n pointer-events-auto absolute inset-x-3 top-0 z-[194] h-2 cursor-ns-resize touch-none select-none',
+    title: 'Resize height',
+  },
+  {
+    edge: 's',
+    className:
+      'filmbase-shell-resize-edge-s pointer-events-auto absolute inset-x-3 bottom-0 z-[194] h-2 cursor-ns-resize touch-none select-none',
+    title: 'Resize height',
+  },
+  {
+    edge: 'e',
+    className:
+      'filmbase-shell-resize-edge-e pointer-events-auto absolute inset-y-3 right-0 z-[194] w-2 cursor-ew-resize touch-none select-none',
+    title: 'Resize width',
+  },
+  {
+    edge: 'w',
+    className:
+      'filmbase-shell-resize-edge-w pointer-events-auto absolute inset-y-3 left-0 z-[194] w-2 cursor-ew-resize touch-none select-none',
+    title: 'Resize width',
+  },
+  {
+    edge: 'nw',
+    className:
+      'filmbase-shell-resize-corner-nw pointer-events-auto absolute left-0 top-0 z-[195] h-3 w-3 cursor-nwse-resize touch-none select-none',
+    title: 'Resize window',
+  },
+  {
+    edge: 'ne',
+    className:
+      'filmbase-shell-resize-corner-ne pointer-events-auto absolute right-0 top-0 z-[195] h-3 w-3 cursor-nesw-resize touch-none select-none',
+    title: 'Resize window',
+  },
+  {
+    edge: 'sw',
+    className:
+      'filmbase-shell-resize-corner-sw pointer-events-auto absolute bottom-0 left-0 z-[195] h-3 w-3 cursor-nesw-resize touch-none select-none',
+    title: 'Resize window',
+  },
+  {
+    edge: 'se',
+    className:
+      'filmbase-shell-resize-corner-se pointer-events-auto absolute bottom-0 right-0 z-[195] h-3 w-3 cursor-nwse-resize touch-none select-none opacity-70 hover:opacity-100',
+    title: 'Resize window',
+  },
+];
+
+/**
+ * 非 CSS 全屏时居中挂载 Filmbase 窗口；全屏时不包裹，由 `filmbase-window-shell` 自身 `fixed` 铺满 iframe/浏览器视口。
+ *
+ * @param props.fullscreen 是否处于 `windowMode === 'fullscreen'`
+ * @param props.shellSizePx 窗口像素尺寸（非全屏可调）
+ */
+function FilmbaseWindowShellMount({
+  fullscreen,
+  dragOffset,
+  shellSizePx,
+  children,
+}: {
+  fullscreen: boolean;
+  dragOffset: { x: number; y: number };
+  shellSizePx: { w: number; h: number };
+  children: React.ReactNode;
+}) {
+  if (fullscreen) return <>{children}</>;
+  return (
+    <div
+      className="filmbase-window-floating-mount pointer-events-none absolute left-1/2 top-1/2 z-[45] min-h-0 min-w-0 max-h-none max-w-none shrink-0"
+      style={{
+        width: shellSizePx.w,
+        height: shellSizePx.h,
+        maxWidth: shellSizePx.w,
+        maxHeight: shellSizePx.h,
+        transform: `translate(calc(-50% + ${dragOffset.x}px), calc(-50% + ${dragOffset.y}px))`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 type RestorePaintPhase = 'idle' | 'restore-pre' | 'restore-animate';
 
 interface TrafficLightButtonProps {
@@ -966,7 +1387,7 @@ function TrafficLightButton({
       aria-label={label}
       title={label}
       disabled={disabled}
-      className="relative flex h-3 w-3 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50"
+      className="relative flex h-3 w-3 shrink-0 cursor-default items-center justify-center rounded-full border-none bg-transparent p-0 disabled:cursor-default disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50"
       onClick={onClick}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={(e) => {
@@ -1081,7 +1502,12 @@ export default function App() {
   const [isSidebarClearSearchPressed, setIsSidebarClearSearchPressed] = useState(false);
   const [isAddMovieClearSearchPressed, setIsAddMovieClearSearchPressed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [windowMode, setWindowMode] = useState<WindowMode>('open');
+  const [windowMode, setWindowMode] = useState<WindowMode>(() => {
+    if (typeof window === 'undefined') return 'open';
+    return detectEmbeddedInIframe() ? 'fullscreen' : 'open';
+  });
+  const windowModeRef = useRef(windowMode);
+  windowModeRef.current = windowMode;
   const [lastWindowAction, setLastWindowAction] = useState<LastWindowAction>(null);
   const [minimizeAnimating, setMinimizeAnimating] = useState(false);
   const [restorePaintPhase, setRestorePaintPhase] = useState<RestorePaintPhase>('idle');
@@ -1089,6 +1515,56 @@ export default function App() {
   const restorePaintPhaseRef = useRef<RestorePaintPhase>('idle');
   /** 防止在双 `rAF` 尚未把 `minimizeAnimating` 置为 true 前重复触发缩小。 */
   const minimizeScheduleGuardRef = useRef(false);
+  /** 非全屏居中窗口相对视口中心的拖拽偏移（px）。 */
+  const [floatingWindowDragOffset, setFloatingWindowDragOffset] = useState({ x: 0, y: 0 });
+  const floatingWindowDragOffsetRef = useRef(floatingWindowDragOffset);
+  floatingWindowDragOffsetRef.current = floatingWindowDragOffset;
+
+  /** 非全屏时悬浮外壳像素尺寸（可调，受视口与最小宽高约束）。 */
+  const [floatingShellSizePx, setFloatingShellSizePx] = useState(() => {
+    if (typeof window === 'undefined') {
+      return { w: FILMBASE_DESKTOP_LAUNCH_PREF_WIDTH_PX, h: FILMBASE_DESKTOP_LAUNCH_PREF_HEIGHT_PX };
+    }
+    return getDefaultFloatingShellSize(window.innerWidth, window.innerHeight);
+  });
+  const floatingShellSizeRef = useRef(floatingShellSizePx);
+  floatingShellSizeRef.current = floatingShellSizePx;
+
+  /** CSS 全屏下悬停顶部 chrome 是否显示交通灯。 */
+  const [fullscreenTrafficReveal, setFullscreenTrafficReveal] = useState(false);
+
+  /** 外壳 `filmbase-window-shell`：全屏切换 FLIP、`getBoundingClientRect` 快照 */
+  const filmbaseWindowShellRef = useRef<HTMLDivElement | null>(null);
+
+  /** 模拟全屏进/出的几何动画（独立于 `windowMode`，退出阶段末尾再置回 `open`）。 */
+  const [filmbaseFullscreenShellAnim, setFilmbaseFullscreenShellAnim] =
+    useState<FilmbaseFullscreenShellAnim | null>(null);
+  const filmbaseFullscreenShellAnimRef = useRef<FilmbaseFullscreenShellAnim | null>(null);
+  useEffect(() => {
+    filmbaseFullscreenShellAnimRef.current = filmbaseFullscreenShellAnim;
+  }, [filmbaseFullscreenShellAnim]);
+
+  /** 外壳八向缩放指针会话（固定锚点边 + 更新 `floatingShellSizePx` / `floatingWindowDragOffset`）。 */
+  const shellResizeSessionRef = useRef<{
+    edge: FilmbaseShellResizeEdge;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startW: number;
+    startH: number;
+    originDragX: number;
+    originDragY: number;
+    captureEl: HTMLDivElement;
+  } | null>(null);
+
+  /** 顶部 chrome 拖拽会话（指针 ID + 起始坐标与原点偏移）。 */
+  const floatingChromeDragSessionRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
   const [movies, setMovies] = useState<Movie[]>(() => {
     return MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
   });
@@ -1174,15 +1650,11 @@ export default function App() {
   const [posterPreviewMovie, setPosterPreviewMovie] = useState<Movie | null>(null);
   /** 海报预览 Info Mode：叠层展示剧情/职员等，关闭预览时复位。 */
   const [isInfoMode, setIsInfoMode] = useState(false);
-  /** 网格放大镜 hero：起点/终点与动画相位（仅 Grid 传入 `DOMRect` 时启用）。 */
-  const [posterHeroFromRect, setPosterHeroFromRect] = useState<PreviewHeroRect | null>(null);
-  const [posterHeroTargetRect, setPosterHeroTargetRect] = useState<PreviewHeroRect | null>(null);
-  const [isPosterHeroAnimating, setIsPosterHeroAnimating] = useState(false);
-  const [posterHeroRun, setPosterHeroRun] = useState(false);
-  const posterHeroFinishOnceRef = useRef(false);
-  /** Hero 期间用于目标框与收尾预填；与点击处 `img.naturalWidth/Height` 同源。 */
-  const [posterHeroNaturalSize, setPosterHeroNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const posterHeroNaturalRef = useRef<{ w: number; h: number } | null>(null);
+  /** 从卡片打开预览时：容器内 fade+scale 入场（非共享元素飞线）。 */
+  const [isPosterPreviewEnterAnimating, setIsPosterPreviewEnterAnimating] = useState(false);
+  /** 入场 CSS transition 是否已启动（双 rAF 后置 true）。 */
+  const [posterPreviewEnterRun, setPosterPreviewEnterRun] = useState(false);
+  const posterPreviewEnterFinishOnceRef = useRef(false);
   const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [previewPan, setPreviewPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPreviewDragging, setIsPreviewDragging] = useState(false);
@@ -1296,21 +1768,42 @@ export default function App() {
     setLastWindowAction('close');
     setMinimizeAnimating(false);
     setRestorePaintPhase('idle');
+    setFilmbaseFullscreenShellAnim(null);
     setWindowMode('closed');
   }, [windowMode, minimizeAnimating, restorePaintPhase]);
 
   const handleTrafficMinimize = useCallback(() => {
-    if (windowMode !== 'open' && windowMode !== 'fullscreen') return;
+    if (windowMode !== 'open') return;
     if (minimizeAnimating || restorePaintPhase !== 'idle') return;
     setLastWindowAction('minimize');
     scheduleFilmbaseMinimizeAnimation();
   }, [windowMode, minimizeAnimating, restorePaintPhase, scheduleFilmbaseMinimizeAnimation]);
 
   const handleTrafficFullscreen = useCallback(() => {
-    if (windowMode === 'closed' || windowMode === 'minimized') return;
+    if (filmbaseFullscreenShellAnimRef.current !== null) return;
+    if (windowModeRef.current === 'closed' || windowModeRef.current === 'minimized') return;
     if (minimizeAnimating || restorePaintPhase !== 'idle') return;
-    setWindowMode((m) => (m === 'fullscreen' ? 'open' : 'fullscreen'));
-  }, [windowMode, minimizeAnimating, restorePaintPhase]);
+
+    if (windowModeRef.current === 'fullscreen') {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const sz = floatingShellSizeRef.current;
+      const dx = floatingWindowDragOffsetRef.current;
+      const to = floatingShellViewportRectFromDragCentroid(vw, vh, sz.w, sz.h, dx);
+      setFilmbaseFullscreenShellAnim({ phase: 'exit-from-full', to });
+      return;
+    }
+
+    const el = filmbaseWindowShellRef.current;
+    const r = el?.getBoundingClientRect();
+    if (r && r.width > 56 && r.height > 56) {
+      setFilmbaseFullscreenShellAnim({
+        phase: 'enter-snap',
+        rect: filmbaseScreenRectFromDOMRect(r),
+      });
+    }
+    setWindowMode('fullscreen');
+  }, [minimizeAnimating, restorePaintPhase]);
 
   /**
    * 从模拟桌面恢复主窗口：`close` 为瞬时显示；`minimize` 走 Dock 反向缩放动画。
@@ -1332,13 +1825,29 @@ export default function App() {
   }, [windowMode]);
 
   /**
-   * Filmbase 外壳 transform 过渡结束：收口缩小动画 → `minimized`；收口展开动画 → `open`。
+   * Filmbase 外壳过渡结束：`transform` 收口缩小 → `minimized`；收口展开 → `open`；
+   * 几何属性收口模拟全屏进/出 FLIP。
    *
-   * @param e `transitionend` 事件（仅处理 `transform`）
+   * @param e `transitionend`
    */
   const handleFilmbaseShellTransitionEnd = useCallback((e: React.TransitionEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
-    if (e.propertyName !== 'transform') return;
+    const pn = e.propertyName;
+
+    const fs = filmbaseFullscreenShellAnimRef.current;
+    if (fs?.phase === 'enter-expand') {
+      if (pn !== 'width' && pn !== 'border-radius') return;
+      setFilmbaseFullscreenShellAnim(null);
+      return;
+    }
+    if (fs?.phase === 'exit-shrink') {
+      if (pn !== 'width' && pn !== 'border-radius') return;
+      setFilmbaseFullscreenShellAnim(null);
+      setWindowMode('open');
+      return;
+    }
+
+    if (pn !== 'transform') return;
 
     if (minimizeAnimatingRef.current) {
       setMinimizeAnimating(false);
@@ -1352,6 +1861,229 @@ export default function App() {
       setLastWindowAction(null);
     }
   }, []);
+
+  /** 模拟全屏 FLIP：`enter-snap` / `exit-from-full` → 下一帧切换到带 `transition` 的几何相位。 */
+  useLayoutEffect(() => {
+    const anim = filmbaseFullscreenShellAnim;
+    if (!anim || anim.phase !== 'enter-snap' && anim.phase !== 'exit-from-full') return;
+
+    let cancelled = false;
+    let innerId = 0;
+    const outerId = window.requestAnimationFrame(() => {
+      innerId = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        if (anim.phase === 'enter-snap') {
+          setFilmbaseFullscreenShellAnim({ phase: 'enter-expand' });
+          return;
+        }
+        setFilmbaseFullscreenShellAnim({ phase: 'exit-shrink', to: anim.to });
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(outerId);
+      if (innerId) window.cancelAnimationFrame(innerId);
+    };
+  }, [filmbaseFullscreenShellAnim]);
+
+  /**
+   * 从顶部 chrome 拖拽浮动窗口（仅 `open` 且非 CSS 全屏）。
+   *
+   * @param e `pointerdown`
+   */
+  const handleFilmbaseChromeDragPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary) return;
+    if (windowModeRef.current !== 'open') return;
+    if (minimizeAnimatingRef.current || restorePaintPhaseRef.current !== 'idle') return;
+    e.preventDefault();
+    e.stopPropagation();
+    floatingChromeDragSessionRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      originX: floatingWindowDragOffsetRef.current.x,
+      originY: floatingWindowDragOffsetRef.current.y,
+    };
+
+    const move = (ev: PointerEvent) => {
+      const s = floatingChromeDragSessionRef.current;
+      if (!s || ev.pointerId !== s.pointerId) return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const nx = s.originX + (ev.clientX - s.startClientX);
+      const ny = s.originY + (ev.clientY - s.startClientY);
+      setFloatingWindowDragOffset(
+        clampFilmbaseFloatingDragOffset(
+          nx,
+          ny,
+          vw,
+          vh,
+          floatingShellSizeRef.current.w,
+          floatingShellSizeRef.current.h,
+        ),
+      );
+    };
+
+    const end = (ev: PointerEvent) => {
+      const s = floatingChromeDragSessionRef.current;
+      if (!s || ev.pointerId !== s.pointerId) return;
+      floatingChromeDragSessionRef.current = null;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setFloatingWindowDragOffset((prev) =>
+        clampFilmbaseFloatingDragOffset(
+          prev.x,
+          prev.y,
+          vw,
+          vh,
+          floatingShellSizeRef.current.w,
+          floatingShellSizeRef.current.h,
+        ),
+      );
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  }, []);
+
+  /**
+   * 开始外壳缩放指针会话（四边或四角）。
+   *
+   * @param e `pointerdown`
+   * @param edge 拖拽的手柄方向
+   */
+  const beginFloatingShellResizeSession = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, edge: FilmbaseShellResizeEdge) => {
+      if (!e.isPrimary) return;
+      if (windowModeRef.current !== 'open') return;
+      if (detectEmbeddedInIframe()) return;
+      if (minimizeAnimatingRef.current || restorePaintPhaseRef.current !== 'idle') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startW = floatingShellSizeRef.current.w;
+      const startH = floatingShellSizeRef.current.h;
+      shellResizeSessionRef.current = {
+        edge,
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startW,
+        startH,
+        originDragX: floatingWindowDragOffsetRef.current.x,
+        originDragY: floatingWindowDragOffsetRef.current.y,
+        captureEl: e.currentTarget as HTMLDivElement,
+      };
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+
+      const move = (ev: PointerEvent) => {
+        const s = shellResizeSessionRef.current;
+        if (!s || ev.pointerId !== s.pointerId) return;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const resized = applyFilmbaseShellResizeFromPointer(
+          s.edge,
+          s,
+          ev.clientX,
+          ev.clientY,
+          vw,
+          vh,
+        );
+        setFloatingShellSizePx({ w: resized.w, h: resized.h });
+        setFloatingWindowDragOffset(
+          clampFilmbaseFloatingDragOffset(resized.dragX, resized.dragY, vw, vh, resized.w, resized.h),
+        );
+        setPreviewLayoutTick((t) => t + 1);
+      };
+
+      const end = (ev: PointerEvent) => {
+        const s = shellResizeSessionRef.current;
+        if (!s || ev.pointerId !== s.pointerId) return;
+        shellResizeSessionRef.current = null;
+        try {
+          s.captureEl.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* Pointer 可能已释放 */
+        }
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        setFloatingWindowDragOffset((prev) =>
+          clampFilmbaseFloatingDragOffset(
+            prev.x,
+            prev.y,
+            vw,
+            vh,
+            floatingShellSizeRef.current.w,
+            floatingShellSizeRef.current.h,
+          ),
+        );
+        setPreviewLayoutTick((t) => t + 1);
+      };
+
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    },
+    [],
+  );
+
+  /** 浏览器视口尺寸（用于在仅视口变化、外壳宽高不变时重新钳制拖拽偏移）。 */
+  const [desktopViewportPx, setDesktopViewportPx] = useState(() => {
+    if (typeof window === 'undefined') return { w: 1920, h: 1080 };
+    return { w: window.innerWidth, h: window.innerHeight };
+  });
+
+  useEffect(() => {
+    if (windowMode !== 'fullscreen') setFullscreenTrafficReveal(false);
+  }, [windowMode]);
+
+  /** 浏览器视口变化：夹紧外壳尺寸，避免超出桌面可用区域。 */
+  useEffect(() => {
+    const onResize = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setDesktopViewportPx({ w: vw, h: vh });
+      setFloatingShellSizePx((prev) => clampShellSizeToViewport(prev.w, prev.h, vw, vh));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  /** 外壳尺寸或视口变化后，用当前宽高重新钳制拖拽偏移。 */
+  useEffect(() => {
+    const vw = desktopViewportPx.w;
+    const vh = desktopViewportPx.h;
+    setFloatingWindowDragOffset((prev) =>
+      clampFilmbaseFloatingDragOffset(
+        prev.x,
+        prev.y,
+        vw,
+        vh,
+        floatingShellSizePx.w,
+        floatingShellSizePx.h,
+      ),
+    );
+  }, [desktopViewportPx.w, desktopViewportPx.h, floatingShellSizePx.w, floatingShellSizePx.h]);
+
+  /** 悬浮外壳宽高变化时同步失效预览 host 测量，避免仅依赖 `window` `resize`。 */
+  useLayoutEffect(() => {
+    setPreviewLayoutTick((t) => t + 1);
+  }, [floatingShellSizePx.w, floatingShellSizePx.h]);
+
+  /** 非全屏且窗口宽度接近下限时自动折叠侧栏（复用 `isSidebarOpen`）。 */
+  useEffect(() => {
+    if (windowMode !== 'open') return;
+    if (floatingShellSizePx.w <= FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX) {
+      setIsSidebarOpen(false);
+    }
+  }, [windowMode, floatingShellSizePx.w]);
 
   useLayoutEffect(() => {
     if (restorePaintPhase !== 'restore-pre') return;
@@ -1645,13 +2377,9 @@ export default function App() {
     setPreviewSliderPercent(100);
     setPreviewPan({ x: 0, y: 0 });
     setIsPreviewDragging(false);
-    setPosterHeroFromRect(null);
-    setPosterHeroTargetRect(null);
-    setIsPosterHeroAnimating(false);
-    setPosterHeroRun(false);
-    setPosterHeroNaturalSize(null);
-    posterHeroNaturalRef.current = null;
-    posterHeroFinishOnceRef.current = false;
+    setIsPosterPreviewEnterAnimating(false);
+    setPosterPreviewEnterRun(false);
+    posterPreviewEnterFinishOnceRef.current = false;
     previewDragRef.current = {
       pointerId: null,
       startX: 0,
@@ -1856,106 +2584,95 @@ export default function App() {
     heroFromRect?: DOMRect | null,
     naturalHint?: { w: number; h: number } | null,
   ) => {
-    posterHeroFinishOnceRef.current = false;
-    const hasHero =
+    posterPreviewEnterFinishOnceRef.current = false;
+    const hasHeroVp =
       heroFromRect != null &&
       heroFromRect.width > 1 &&
       heroFromRect.height > 1 &&
       Number.isFinite(heroFromRect.left) &&
       Number.isFinite(heroFromRect.top);
-    if (hasHero && heroFromRect) {
-      const resolvedNatural =
-        naturalHint && naturalHint.w > 0 && naturalHint.h > 0
-          ? naturalHint
-          : {
+    const resolvedNatural =
+      naturalHint && naturalHint.w > 0 && naturalHint.h > 0
+        ? naturalHint
+        : heroFromRect && heroFromRect.width > 1 && heroFromRect.height > 1
+          ? {
               w: Math.max(2, Math.round(heroFromRect.width * 1000)),
               h: Math.max(2, Math.round(heroFromRect.height * 1000)),
-            };
-      posterHeroNaturalRef.current = resolvedNatural;
-      setPosterHeroNaturalSize(resolvedNatural);
-      setPosterHeroFromRect({
-        left: heroFromRect.left,
-        top: heroFromRect.top,
-        width: heroFromRect.width,
-        height: heroFromRect.height,
-      });
-      setPosterHeroTargetRect(null);
-      setPosterHeroRun(false);
-      setIsPosterHeroAnimating(true);
+            }
+          : null;
+    const hasEnterAnim = Boolean(hasHeroVp && resolvedNatural);
+
+    if (hasEnterAnim && resolvedNatural) {
+      setPosterPreviewEnterRun(false);
+      setIsPosterPreviewEnterAnimating(true);
+      setPreviewNaturalSize(resolvedNatural);
+      setPreviewPan({ x: 0, y: 0 });
+      const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
+      const hostRect = mainPreviewHostRef.current?.getBoundingClientRect();
+      if (hostRect && hostRect.width >= 40 && hostRect.height >= 40) {
+        const maxW = Math.max(80, hostRect.width - pad * 2);
+        const maxH = Math.max(80, hostRect.height - pad * 2);
+        const sFill = getPreviewFillScale(resolvedNatural.w, resolvedNatural.h, maxW, maxH);
+        setPreviewSliderPercent(getPreviewSliderMinPercent(sFill));
+      }
     } else {
-      setIsPosterHeroAnimating(false);
-      setPosterHeroFromRect(null);
-      setPosterHeroTargetRect(null);
-      setPosterHeroRun(false);
-      setPosterHeroNaturalSize(null);
-      posterHeroNaturalRef.current = null;
+      setIsPosterPreviewEnterAnimating(false);
+      setPosterPreviewEnterRun(false);
     }
     setPosterPreviewMovie(movie);
-    setPreviewNaturalSize(null);
-    setPreviewPan({ x: 0, y: 0 });
     setIsInfoMode(false);
-    if (!hasHero) {
+    if (!hasEnterAnim) {
+      setPreviewNaturalSize(null);
       setPreviewSliderPercent(100);
+      setPreviewPan({ x: 0, y: 0 });
     }
     setIsPosterPreviewOpen(true);
   };
 
-  const finishPosterHero = useCallback(() => {
-    if (posterHeroFinishOnceRef.current) return;
-    posterHeroFinishOnceRef.current = true;
-    const hint = posterHeroNaturalRef.current;
-    if (hint && hint.w > 0 && hint.h > 0) {
-      setPreviewNaturalSize((prev) => (prev ?? { w: hint.w, h: hint.h }));
-    }
-    posterHeroNaturalRef.current = null;
-    setPosterHeroNaturalSize(null);
-    setIsPosterHeroAnimating(false);
-    setPosterHeroFromRect(null);
-    setPosterHeroTargetRect(null);
-    setPosterHeroRun(false);
+  const finishPosterPreviewEnter = useCallback(() => {
+    if (posterPreviewEnterFinishOnceRef.current) return;
+    posterPreviewEnterFinishOnceRef.current = true;
+    setIsPosterPreviewEnterAnimating(false);
+    setPosterPreviewEnterRun(false);
   }, []);
 
-  /** 下一帧启动 transform；目标为与真实预览一致的 disp 外接矩形，并同步初始 slider。 */
+  /**
+   * 预览布局就绪后在容器内启动 fade+scale（双 rAF），避免与首帧 layout 竞态。
+   */
   useLayoutEffect(() => {
-    if (!isPosterHeroAnimating || !posterHeroFromRect || !posterHeroNaturalSize) return;
-    const host = mainPreviewHostRef.current?.getBoundingClientRect();
-    if (!host || host.width < 40) {
-      setIsPosterHeroAnimating(false);
-      setPosterHeroFromRect(null);
-      setPosterHeroTargetRect(null);
-      return;
-    }
-    const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
-    const maxW = Math.max(80, host.width - pad * 2);
-    const maxH = Math.max(80, host.height - pad * 2);
-    const sFill = getPreviewFillScale(posterHeroNaturalSize.w, posterHeroNaturalSize.h, maxW, maxH);
-    const minPct = getPreviewSliderMinPercent(sFill);
-    setPreviewSliderPercent(minPct);
-    const target = computePreviewPosterDisplayRect(
-      host,
-      posterHeroNaturalSize.w,
-      posterHeroNaturalSize.h,
-      minPct,
-      pad,
-      { x: 0, y: 0 },
-    );
-    setPosterHeroTargetRect(target);
+    if (!isPosterPreviewEnterAnimating || !previewNaturalSize) return;
+    if (posterPreviewEnterRun) return;
+    if (!posterPreviewLayoutRef.current) return;
+
     let cancelled = false;
-    const id = window.requestAnimationFrame(() => {
-      if (!cancelled) setPosterHeroRun(true);
+    let innerId = 0;
+    const outerId = window.requestAnimationFrame(() => {
+      innerId = window.requestAnimationFrame(() => {
+        if (!cancelled) setPosterPreviewEnterRun(true);
+      });
     });
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(id);
+      window.cancelAnimationFrame(outerId);
+      if (innerId) window.cancelAnimationFrame(innerId);
     };
-  }, [isPosterHeroAnimating, posterHeroFromRect, posterHeroNaturalSize]);
+  }, [
+    isPosterPreviewEnterAnimating,
+    previewNaturalSize,
+    previewLayoutTick,
+    floatingShellSizePx.w,
+    floatingShellSizePx.h,
+  ]);
 
-  /** `transitionend` 未触发时兜底结束 hero。 */
+  /** `transitionend` 未触发时兜底结束入场动画。 */
   useEffect(() => {
-    if (!posterHeroRun || !isPosterHeroAnimating) return;
-    const tid = window.setTimeout(finishPosterHero, POSTER_HERO_TRANSITION_MS + 120);
+    if (!posterPreviewEnterRun || !isPosterPreviewEnterAnimating) return;
+    const tid = window.setTimeout(
+      finishPosterPreviewEnter,
+      POSTER_PREVIEW_ENTER_TRANSITION_MS + 120,
+    );
     return () => window.clearTimeout(tid);
-  }, [posterHeroRun, isPosterHeroAnimating, finishPosterHero]);
+  }, [posterPreviewEnterRun, isPosterPreviewEnterAnimating, finishPosterPreviewEnter]);
 
   useEffect(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return;
@@ -2840,7 +3557,7 @@ export default function App() {
       computePreviewPosterFrameDims(host, nw, nh, previewSliderPercent, pad);
     const needsPan = dispW > maxW + 0.5 || dispH > maxH + 0.5;
     return { maxW, maxH, nw, nh, sFill, effectiveFitScale, s, sCap, dispW, dispH, needsPan };
-  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick]);
+  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick, floatingShellSizePx.w, floatingShellSizePx.h]);
 
   /** `posterPreviewLayout` 尚不可算时（首帧 host 未就绪），与 hero 后首帧同一套 maxW/maxH/disp。 */
   const previewPosterFrameFallback = useMemo(() => {
@@ -2854,7 +3571,7 @@ export default function App() {
       previewSliderPercent,
       POSTER_PREVIEW_LAYOUT_PAD_PX,
     );
-  }, [posterPreviewLayout, isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick]);
+  }, [posterPreviewLayout, isPosterPreviewOpen, previewNaturalSize, previewSliderPercent, previewLayoutTick, floatingShellSizePx.w, floatingShellSizePx.h]);
 
   /** 与 range `min` 一致：有效 Fit `round(min(1,sFill)×100)`。 */
   const previewSliderMinPercent = useMemo(() => {
@@ -2866,7 +3583,7 @@ export default function App() {
     const maxH = Math.max(80, host.height - pad * 2);
     const sFill = getPreviewFillScale(previewNaturalSize.w, previewNaturalSize.h, maxW, maxH);
     return getPreviewSliderMinPercent(sFill);
-  }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
+  }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick, floatingShellSizePx.w, floatingShellSizePx.h]);
 
   /** Fit Width：`min(1, maxW/nw)×100`%，与 Z / 点击第二档一致。 */
   const previewFitWidthPercent = useMemo(() => {
@@ -2877,7 +3594,7 @@ export default function App() {
     const maxW = Math.max(80, host.width - pad * 2);
     const nw = previewNaturalSize.w;
     return Math.min(100, getPreviewScaleCapByViewportWidth(maxW, nw) * 100);
-  }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick]);
+  }, [isPosterPreviewOpen, previewNaturalSize, previewLayoutTick, floatingShellSizePx.w, floatingShellSizePx.h]);
 
   /** 与 range `max` 一致：Photos 式真实百分比右端固定为 100%，不超过 1:1 原图。 */
   const previewSliderMaxPercent = useMemo(() => {
@@ -2918,10 +3635,17 @@ export default function App() {
   /** 视口变化导致 fit/max 变化时，保持 slider 值落在 `[min, max]`。 */
   useEffect(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return;
+    if (isPosterPreviewEnterAnimating) return;
     setPreviewSliderPercent((p) =>
       Math.min(previewSliderMaxPercent, Math.max(previewSliderMinPercent, p)),
     );
-  }, [isPosterPreviewOpen, previewNaturalSize, previewSliderMinPercent, previewSliderMaxPercent]);
+  }, [
+    isPosterPreviewOpen,
+    previewNaturalSize,
+    previewSliderMinPercent,
+    previewSliderMaxPercent,
+    isPosterPreviewEnterAnimating,
+  ]);
 
   /**
    * 选好新本地海报（`pendingPosterUrl` 改变）后，把 thumb 复位到最左侧 fit 位置并清平移：
@@ -3020,6 +3744,18 @@ export default function App() {
   const isMainContentOverlayActive =
     isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen || Boolean(deleteMovieConfirm);
 
+  /**
+   * 仅预告片 / 删除确认等需「吃满」主滚动区时收紧库区内边距并让列表头脱离 sticky；
+   * 海报预览与 Add Movie 叠层不改变 padding / sticky，避免因 scrollbar、布局重排产生上下抖动。
+   */
+  const suppressLibraryChromeForOverlays =
+    isTrailerOverlayInMain || Boolean(deleteMovieConfirm);
+
+  /**
+   * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
+   */
+  const isListViewRowsScrollSplit = viewMode === 'list' && isMoviesHydrated;
+
   /** 桌面恢复图标：常驻挂载；仅在关闭/最小化且非缩小、非恢复过渡时可点击（见下方 `interactive`）。 */
   const isDesktopRestoreInteractive =
     (windowMode === 'closed' || windowMode === 'minimized') &&
@@ -3027,6 +3763,13 @@ export default function App() {
     !minimizeAnimating;
 
   const isFullscreenLayout = windowMode === 'fullscreen';
+
+  /**
+   * 稳定全屏无内描边；进出全屏 FLIP 四相位与 `open` 态保持 `.filmbase-inner-window-stroke` 挂载，
+   * 随 `border-radius` 继承圆角，动画结束进入稳定全屏后再移除。
+   */
+  const showFilmbaseInnerWindowStroke =
+    windowMode !== 'fullscreen' || filmbaseFullscreenShellAnim !== null;
 
   const filmbaseShellZ =
     restorePaintPhase !== 'idle'
@@ -3083,12 +3826,15 @@ export default function App() {
     shellTransform = undefined;
   }
 
-  const shellWillChange =
-    isFullscreenLayout || minimizeAnimating || restorePaintPhase !== 'idle'
-      ? isFullscreenLayout
-        ? undefined
-        : ('transform' as const)
-      : undefined;
+  const shellWillChange: React.CSSProperties['willChange'] =
+    filmbaseFullscreenShellAnim?.phase === 'enter-expand' ||
+    filmbaseFullscreenShellAnim?.phase === 'exit-shrink'
+      ? 'left, top, width, height, border-radius'
+      : isFullscreenLayout || minimizeAnimating || restorePaintPhase !== 'idle'
+        ? isFullscreenLayout
+          ? undefined
+          : ('transform' as const)
+        : undefined;
 
   const trafficChromeBusy = minimizeAnimating || restorePaintPhase !== 'idle';
 
@@ -3097,7 +3843,14 @@ export default function App() {
     windowMode === 'closed' ||
     windowMode === 'minimized';
 
-  /** 模拟全屏布局：相对于 iframe/viewport 铺满（非浏览器 Fullscreen API）。 */
+  /** 顶部 chrome 区域拖拽窗口（非全屏 `open`）。 */
+  const canDragFilmbaseChrome =
+    windowMode === 'open' && !isFullscreenLayout && !trafficChromeBusy;
+
+  /** 右下角调整外壳尺寸（非全屏、非嵌入 iframe；与拖拽可用性一致）。 */
+  const canResizeFilmbaseShell = canDragFilmbaseChrome && !detectEmbeddedInIframe();
+
+  /** 模拟全屏布局：相对当前视口/ifame 铺满（非浏览器 Fullscreen API）。 */
   const filmbaseFullscreenShellStyle: React.CSSProperties = {
     position: 'fixed',
     inset: 0,
@@ -3107,23 +3860,121 @@ export default function App() {
     maxHeight: 'none',
     transform: 'none',
     borderRadius: 0,
+    boxSizing: 'border-box',
+    boxShadow: 'none',
+    outline: 'none',
+    border: 'none',
     zIndex: 90,
   };
 
-  const filmbaseShellStyle: React.CSSProperties = isFullscreenLayout
-    ? {
-        ...filmbaseFullscreenShellStyle,
-        opacity: shellOpacity,
-        visibility: shellVisibility,
-      }
-    : {
-        transformOrigin: '50% 100%',
-        ...(shellTransform ? { transform: shellTransform } : {}),
-        opacity: shellOpacity,
-        visibility: shellVisibility,
-        transition: shellTransition,
+  const fullscreenGeom = filmbaseFullscreenShellAnim;
+
+  /** 外壳最终 `style`：非全屏 / 模拟全屏 / FLIP 进出场时的几何与投影。 */
+  const filmbaseShellStyle: React.CSSProperties = (() => {
+    const baseOpacity = shellOpacity;
+    const baseVisibility = shellVisibility;
+
+    const exitShrinkShared: React.CSSProperties = {
+      position: 'fixed',
+      transform: 'none',
+      outline: 'none',
+      border: 'none',
+      boxSizing: 'border-box',
+      maxWidth: 'none',
+      maxHeight: 'none',
+      overflow: 'hidden',
+      zIndex: 90,
+      boxShadow: FILMBASE_NONFULLSCREEN_OUTER_BOX_SHADOW,
+    };
+
+    if (fullscreenGeom?.phase === 'exit-shrink') {
+      return {
+        ...exitShrinkShared,
+        left: fullscreenGeom.to.left,
+        top: fullscreenGeom.to.top,
+        width: fullscreenGeom.to.width,
+        height: fullscreenGeom.to.height,
+        borderRadius: 12,
+        ...filmbaseFullscreenGeomTransitionCss(),
+        opacity: baseOpacity,
+        visibility: baseVisibility,
         willChange: shellWillChange,
       };
+    }
+
+    if (fullscreenGeom?.phase === 'exit-from-full') {
+      return {
+        ...filmbaseFullscreenShellStyle,
+        transition: 'none',
+        opacity: baseOpacity,
+        visibility: baseVisibility,
+        willChange: shellWillChange,
+      };
+    }
+
+    if (fullscreenGeom?.phase === 'enter-snap') {
+      return {
+        ...exitShrinkShared,
+        left: fullscreenGeom.rect.left,
+        top: fullscreenGeom.rect.top,
+        width: fullscreenGeom.rect.width,
+        height: fullscreenGeom.rect.height,
+        borderRadius: 12,
+        transition: 'none',
+        opacity: baseOpacity,
+        visibility: baseVisibility,
+        willChange: undefined,
+      };
+    }
+
+    if (fullscreenGeom?.phase === 'enter-expand') {
+      return {
+        position: 'fixed',
+        left: 0,
+        top: 0,
+        width: '100vw',
+        height: '100vh',
+        borderRadius: 0,
+        transform: 'none',
+        outline: 'none',
+        border: 'none',
+        boxSizing: 'border-box',
+        boxShadow: 'none',
+        maxWidth: 'none',
+        maxHeight: 'none',
+        overflow: 'hidden',
+        zIndex: 90,
+        ...filmbaseFullscreenGeomTransitionCss(),
+        opacity: baseOpacity,
+        visibility: baseVisibility,
+        willChange: shellWillChange,
+      };
+    }
+
+    if (isFullscreenLayout) {
+      return {
+        ...filmbaseFullscreenShellStyle,
+        opacity: baseOpacity,
+        visibility: baseVisibility,
+        willChange: shellWillChange,
+      };
+    }
+
+    return {
+      ...FILMBASE_NONFULLSCREEN_SHELL_DECORATION,
+      boxSizing: 'border-box',
+      width: '100%',
+      height: '100%',
+      minHeight: 0,
+      minWidth: 0,
+      transformOrigin: '50% 100%',
+      ...(shellTransform ? { transform: shellTransform } : {}),
+      opacity: shellOpacity,
+      visibility: shellVisibility,
+      transition: shellTransition,
+      willChange: shellWillChange,
+    };
+  })();
 
   return (
     <div className="relative h-screen w-screen max-h-none max-w-none bg-[#000] antialiased font-sans overflow-hidden">
@@ -3152,9 +4003,15 @@ export default function App() {
         />
       </div>
 
+      <FilmbaseWindowShellMount
+        fullscreen={isFullscreenLayout}
+        dragOffset={floatingWindowDragOffset}
+        shellSizePx={floatingShellSizePx}
+      >
       <div
-        className={`filmbase-window-shell flex flex-col rounded-none max-h-none max-w-none ${
-          isFullscreenLayout ? '' : `absolute inset-0 ${filmbaseShellZ}`
+        ref={filmbaseWindowShellRef}
+        className={`filmbase-window-shell relative flex flex-col overflow-hidden ${
+          isFullscreenLayout ? 'rounded-none max-h-none max-w-none' : `h-full w-full max-h-none max-w-none min-h-0 ${filmbaseShellZ}`
         } ${filmbaseShellPointerEvents}`}
         style={filmbaseShellStyle}
         onTransitionEnd={handleFilmbaseShellTransitionEnd}
@@ -3162,9 +4019,25 @@ export default function App() {
       {/* Viewport: Acts as the desktop background */}
       {/* The macOS Window Container */}
       <div className="macos-window w-full h-full bg-[#050505] text-[#E0E0E0] flex flex-col relative selection:bg-[#FFD700] selection:text-[#050505]">
-        
-        {/* Window Top Edge Highlighter (1px shine) */}
-        <div className="absolute top-0 left-0 right-0 h-px bg-white/10 z-50 pointer-events-none"></div>
+        {canDragFilmbaseChrome ? (
+          <div
+            className="filmbase-window-drag-handle absolute inset-x-0 top-0 z-[190] h-11 cursor-default touch-none select-none bg-transparent"
+            aria-hidden
+            onPointerDown={handleFilmbaseChromeDragPointerDown}
+          />
+        ) : null}
+
+        {canResizeFilmbaseShell
+          ? FILMBASE_SHELL_RESIZE_HANDLES.map(({ edge, className, title }) => (
+              <div
+                key={edge}
+                className={className}
+                aria-label={title}
+                title={title}
+                onPointerDown={(e) => beginFloatingShellResizeSession(e, edge)}
+              />
+            ))
+          : null}
 
         {/* 共享公共片单写操作错误：固定在顶部居中、自动消失，不影响列表/详情布局 */}
         <AnimatePresence>
@@ -3197,10 +4070,22 @@ export default function App() {
         <div className="flex h-full w-full overflow-hidden relative">
           {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
       <div
-        className="absolute top-0 left-0 h-10 flex items-center pl-4 gap-3 z-[200]"
+        className={`absolute left-0 top-0 z-[200] flex cursor-default items-center gap-3 pl-4 pr-2 ${
+          isFullscreenLayout ? 'h-14 min-h-[52px] pb-2 pt-2' : 'h-10'
+        }`}
+        onMouseEnter={() => {
+          if (isFullscreenLayout) setFullscreenTrafficReveal(true);
+        }}
+        onMouseLeave={() => {
+          if (isFullscreenLayout) setFullscreenTrafficReveal(false);
+        }}
         onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
       >
-        <div className="flex items-center gap-2">
+        <div
+          className={`flex items-center gap-2 transition-opacity duration-150 ease-out ${
+            isFullscreenLayout && !fullscreenTrafficReveal ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+        >
           <TrafficLightButton
             label="Close window"
             defaultSrc="/icons/traffic-close.svg"
@@ -3215,23 +4100,36 @@ export default function App() {
             hoverSrc="/icons/traffic-minimize-hover.svg"
             pressedSrc="/icons/traffic-minimize-pressed.svg"
             onClick={handleTrafficMinimize}
-            disabled={trafficLightsDisabled}
+            disabled={trafficLightsDisabled || windowMode === 'fullscreen'}
           />
           <TrafficLightButton
-            label="Fullscreen window"
+            label={isFullscreenLayout ? 'Exit fullscreen' : 'Fullscreen window'}
             defaultSrc="/icons/traffic-fullscreen.svg"
             hoverSrc="/icons/traffic-fullscreen-hover.svg"
             pressedSrc="/icons/traffic-fullscreen-pressed.svg"
             onClick={handleTrafficFullscreen}
-            disabled={trafficLightsDisabled}
+            disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null}
           />
         </div>
         <button
           type="button"
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="group/togglesidebar relative p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+          className={`group/togglesidebar relative cursor-default p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 ${
+            isFullscreenLayout ? '' : 'transition-colors'
+          }`}
           title="Toggle Sidebar"
           aria-label="Toggle sidebar"
+          style={
+            isFullscreenLayout
+              ? {
+                  transform: fullscreenTrafficReveal
+                    ? 'translateX(0)'
+                    : `translateX(-${FULLSCREEN_SIDEBAR_TOGGLE_ALIGN_SHIFT_PX}px)`,
+                  transition:
+                    'transform 300ms cubic-bezier(0.33, 1, 0.25, 1), color 150ms ease-out, background-color 150ms ease-out',
+                }
+              : undefined
+          }
         >
           <img draggable={false}
             src="/icons/toggle-sidebar.svg"
@@ -3320,7 +4218,7 @@ export default function App() {
             )}
           </div>
         </div>
-	        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]">
+	        <div className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]">
           <nav className="space-y-2">
             <div>
               <button 
@@ -3546,7 +4444,7 @@ export default function App() {
       </aside>
 
       {/* Main Content：顶栏与主列表分区滚动，海报预览 overlay 仅盖住列表区 */}
-      <main className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden h-full">
+      <main className="relative flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden h-full">
         {/* Unified Header & Toolbar */}
         <div
           className="relative z-[60] flex-shrink-0 bg-[#121212]/70 backdrop-blur-xl"
@@ -3572,7 +4470,7 @@ export default function App() {
           </header>
 
           {/* Toolbar：海报预览打开时切换为预览模式控件；左右槽固定宽度使 slider 水平位置不变 */}
-          <div className="relative flex h-12 shrink-0 items-center justify-between border-b border-[#292929] px-8 [box-shadow:0px_0px_0px_0px_rgba(41,41,41,1)]">
+          <div className="relative flex h-12 shrink-0 items-center justify-between px-8 [box-shadow:0px_2px_0px_0px_rgba(23,23,23,1)]">
           <div className="relative z-10 flex shrink-0 items-center gap-8">
             {isPosterPreviewOpen ? (
               <>
@@ -4413,17 +5311,23 @@ export default function App() {
           className="relative flex-1 min-h-0 overflow-hidden"
         >
           <div
-            ref={mainLibraryScrollRef}
-            className={`h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`}
+            ref={!isListViewRowsScrollSplit ? mainLibraryScrollRef : undefined}
+            className={
+              isListViewRowsScrollSplit
+                ? 'flex h-full min-h-0 flex-col overflow-hidden overflow-x-hidden'
+                : `filmbase-scrollbar h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`
+            }
           >
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
         <div
           className={
-            isMainContentOverlayActive
+            suppressLibraryChromeForOverlays
               ? `${viewMode === 'list' ? 'px-0 py-0' : 'px-8 py-0'}`
               : !isMoviesHydrated
                 ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
-                : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+                : isListViewRowsScrollSplit
+                  ? 'flex h-full min-h-0 flex-col px-0 pt-0 pb-0'
+                  : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
           }
         >
           {!isMoviesHydrated ? (
@@ -4455,13 +5359,18 @@ export default function App() {
             </div>
           ) : (
             <>
-          {viewMode === 'list' && filteredMovies.length > 0 && (
-            <div
-              className={`z-[70] bg-[#121212]/70 backdrop-blur-xl py-4 border-b border-[#292929] ${
-                isMainContentOverlayActive ? 'static' : 'sticky top-0'
-              }`}
-            >
-              <div className={`grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 px-0 text-[12px] leading-5 font-bold uppercase tracking-widest text-white/40 items-center`}>
+          {isListViewRowsScrollSplit ? (
+            <div className="filmbase-list-view-layered relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {filteredMovies.length > 0 ? (
+                <div
+                  className="pointer-events-none absolute inset-x-0 top-0 z-[70]"
+                  style={{ height: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }}
+                  aria-hidden={false}
+                >
+                  <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 py-4 backdrop-blur-md">
+              <div
+                className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold uppercase tracking-widest text-white/40 items-center`}
+              >
                 {isEditing && <div className="flex min-h-5 w-[60px] shrink-0 items-center justify-center pl-8 leading-5" aria-hidden />}
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
                   <span className="block w-[100px] max-w-full text-center">Poster</span>
@@ -4651,8 +5560,18 @@ export default function App() {
                   <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
               </div>
-            </div>
-          )}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                ref={mainLibraryScrollRef}
+                className={`filmbase-scrollbar min-h-0 flex-1 overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`}
+                style={
+                  filteredMovies.length > 0
+                    ? { paddingTop: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }
+                    : undefined
+                }
+              >
           <AnimatePresence mode="sync">
             <motion.div 
               className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
@@ -4707,6 +5626,66 @@ export default function App() {
                 No films found matching your search
               </p>
             </div>
+          )}
+              </div>
+            </div>
+          ) : (
+            <>
+          <AnimatePresence mode="sync">
+            <motion.div 
+              className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
+              style={viewMode === 'grid' ? { 
+                gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
+              } : {}}
+            >
+              {filteredMovies.map((movie, posterListIndex) => (
+                <MovieCard 
+                  key={movie.id} 
+                  movie={movie} 
+                  posterListIndex={posterListIndex}
+                  size={posterSize} 
+                  viewMode={viewMode} 
+                  isEditing={isEditing}
+                  registerLibraryItemEl={(el) => registerMovieLibraryItemEl(movie.id, el)}
+                  onRequestDelete={() => setDeleteMovieConfirm(movie)}
+                  onRatingChange={(rating) => handleRatingChange(movie.id, rating)}
+                  onPlayTrailer={() => {
+                    setSelectedMovie(movie);
+                    setModalMode('trailer');
+                  }}
+                  onShowPoster={() => {
+                    setSelectedMovie(movie);
+                    setModalMode('poster');
+                  }}
+                  onOpenPosterPreview={(el) => openPosterPreviewFromElement(movie, el)}
+                  onRefreshPosterSignedUrl={refreshPosterSignedUrlOnce}
+                />
+              ))}
+            </motion.div>
+          </AnimatePresence>
+          {filteredMovies.length === 0 && (
+            <div
+              className="flex min-h-[48vh] flex-col items-center justify-center gap-3 text-white/35"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="relative h-8 w-8 shrink-0" aria-hidden>
+                <img
+                  draggable={false}
+                  src="/icons/no-films.svg"
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="absolute inset-0 h-full w-full object-contain pointer-events-none"
+                  decoding="async"
+                />
+              </div>
+              <p className="text-sm font-medium tracking-wide">
+                No films found matching your search
+              </p>
+            </div>
+          )}
+            </>
           )}
             </>
           )}
@@ -4857,10 +5836,9 @@ export default function App() {
               }}
               onTouchMove={(e) => e.preventDefault()}
             />
-            {!isPosterHeroAnimating && (
             <div className="pointer-events-none relative z-[2] box-border flex h-full min-h-0 w-full max-w-full items-center justify-center px-4 sm:px-6">
               <div
-                className="pointer-events-auto relative shrink-0 overflow-hidden"
+                className={`relative shrink-0 overflow-hidden${isPosterPreviewEnterAnimating ? ' pointer-events-none' : ' pointer-events-auto'}`}
                 style={
                   posterPreviewLayout
                     ? {
@@ -4905,60 +5883,82 @@ export default function App() {
                       previewPointerOverImgRef.current = false;
                     }}
                     className={`max-h-none max-w-none select-none object-contain${isInfoMode ? ' pointer-events-none' : ''}`}
-                    style={
-                      posterPreviewLayout
-                        ? {
-                            position: 'absolute',
-                            left: '50%',
-                            top: '50%',
-                            width: posterPreviewLayout.dispW,
-                            height: posterPreviewLayout.dispH,
-                            maxWidth: 'none',
-                            maxHeight: 'none',
-                            transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
-                            cursor: isInfoMode
-                              ? 'default'
-                              : isPreviewDragging && posterPreviewLayout.needsPan
-                                ? 'grabbing'
-                                : isPreviewZoomOutCursor
+                    style={(() => {
+                      const enter = getPosterPreviewEnterVisual(
+                        isPosterPreviewEnterAnimating,
+                        posterPreviewEnterRun,
+                      );
+                      const panTransform = (px: number, py: number) =>
+                        `translate(calc(-50% + ${px}px), calc(-50% + ${py}px)) scale(${enter.scale})`;
+                      if (posterPreviewLayout) {
+                        return {
+                          position: 'absolute' as const,
+                          left: '50%',
+                          top: '50%',
+                          width: posterPreviewLayout.dispW,
+                          height: posterPreviewLayout.dispH,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          opacity: enter.opacity,
+                          transform: panTransform(previewPan.x, previewPan.y),
+                          transition: enter.transition,
+                          cursor: isInfoMode
+                            ? 'default'
+                            : isPreviewDragging && posterPreviewLayout.needsPan
+                              ? 'grabbing'
+                              : isPreviewZoomOutCursor
+                                ? 'zoom-out'
+                                : 'zoom-in',
+                        };
+                      }
+                      if (previewPosterFrameFallback) {
+                        return {
+                          position: 'absolute' as const,
+                          left: '50%',
+                          top: '50%',
+                          width: previewPosterFrameFallback.dispW,
+                          height: previewPosterFrameFallback.dispH,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          opacity: enter.opacity,
+                          transform: panTransform(previewPan.x, previewPan.y),
+                          transition: enter.transition,
+                          cursor: isInfoMode
+                            ? 'default'
+                            : isPreviewDragging &&
+                                (previewPosterFrameFallback.dispW >
+                                  previewPosterFrameFallback.maxW + 0.5 ||
+                                  previewPosterFrameFallback.dispH >
+                                    previewPosterFrameFallback.maxH + 0.5)
+                              ? 'grabbing'
+                              : previewPosterFrameFallback.dispW >
+                                    previewPosterFrameFallback.maxW + 0.5 ||
+                                  previewPosterFrameFallback.dispH >
+                                    previewPosterFrameFallback.maxH + 0.5
+                                ? previewPosterFrameFallback.s >= 1 - 1e-6
                                   ? 'zoom-out'
-                                  : 'zoom-in',
-                          }
-                        : previewPosterFrameFallback
-                          ? {
-                              position: 'absolute',
-                              left: '50%',
-                              top: '50%',
-                              width: previewPosterFrameFallback.dispW,
-                              height: previewPosterFrameFallback.dispH,
-                              maxWidth: 'none',
-                              maxHeight: 'none',
-                              transform: `translate(calc(-50% + ${previewPan.x}px), calc(-50% + ${previewPan.y}px))`,
-                              cursor: isInfoMode
-                                ? 'default'
-                                : isPreviewDragging &&
-                                    (previewPosterFrameFallback.dispW >
-                                      previewPosterFrameFallback.maxW + 0.5 ||
-                                      previewPosterFrameFallback.dispH >
-                                        previewPosterFrameFallback.maxH + 0.5)
-                                  ? 'grabbing'
-                                  : previewPosterFrameFallback.dispW >
-                                        previewPosterFrameFallback.maxW + 0.5 ||
-                                      previewPosterFrameFallback.dispH >
-                                        previewPosterFrameFallback.maxH + 0.5
-                                    ? previewPosterFrameFallback.s >= 1 - 1e-6
-                                      ? 'zoom-out'
-                                      : 'zoom-in'
-                                    : 'zoom-in',
-                            }
-                          : {
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'contain',
-                              cursor: isInfoMode ? 'default' : 'wait',
-                            }
-                    }
+                                  : 'zoom-in'
+                                : 'zoom-in',
+                        };
+                      }
+                      return {
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain' as const,
+                        opacity: enter.opacity,
+                        transform: `scale(${enter.scale})`,
+                        transition: enter.transition,
+                        cursor: isInfoMode ? 'default' : 'wait',
+                      };
+                    })()}
+                    onTransitionEnd={(e) => {
+                      if (!isPosterPreviewEnterAnimating) return;
+                      if (e.target !== e.currentTarget) return;
+                      if (e.propertyName !== 'opacity' && e.propertyName !== 'transform') return;
+                      finishPosterPreviewEnter();
+                    }}
                     onLoad={(e) => {
+                      if (isPosterPreviewEnterAnimating) return;
                       const el = e.currentTarget;
                       const nw = el.naturalWidth;
                       const nh = el.naturalHeight;
@@ -5071,7 +6071,7 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Movie information"
-                      className="absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      className="filmbase-scrollbar-subtle absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >
@@ -5170,7 +6170,6 @@ export default function App() {
                   />
               </div>
             </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -5202,7 +6201,6 @@ export default function App() {
             className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
-              layout
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -5352,7 +6350,7 @@ export default function App() {
                     newMovieTitle.trim().length >= 2 &&
                     (addMovieSearchLoading || addMovieSearchHits.length > 0) && (
                       <div
-                        className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
+                        className="filmbase-scrollbar-subtle absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
                         role="listbox"
                         aria-label="Movie search suggestions"
                       >
@@ -5704,44 +6702,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {isPosterHeroAnimating &&
-        posterPreviewMovie &&
-        posterHeroFromRect &&
-        posterHeroTargetRect && (
-          <div
-            className="pointer-events-none fixed z-[120] overflow-hidden rounded-none shadow-2xl"
-            style={{
-              left: posterHeroFromRect.left,
-              top: posterHeroFromRect.top,
-              width: posterHeroFromRect.width,
-              height: posterHeroFromRect.height,
-              transformOrigin: 'top left',
-              transform: posterHeroRun
-                ? `translate(${posterHeroTargetRect.left - posterHeroFromRect.left}px, ${
-                    posterHeroTargetRect.top - posterHeroFromRect.top
-                  }px) scale(${
-                    posterHeroTargetRect.width / posterHeroFromRect.width
-                  }, ${posterHeroTargetRect.height / posterHeroFromRect.height})`
-                : 'translate(0px, 0px) scale(1, 1)',
-              transition: posterHeroRun
-                ? `transform ${POSTER_HERO_TRANSITION_MS}ms cubic-bezier(0.33, 1, 0.25, 1)`
-                : undefined,
-              willChange: posterHeroRun ? 'transform' : undefined,
-            }}
-            onTransitionEnd={(e) => {
-              if (e.propertyName !== 'transform') return;
-              finishPosterHero();
-            }}
-          >
-            <img draggable={false}
-              src={posterPreviewMovie.posterUrl}
-              alt=""
-              className="h-full w-full object-contain select-none"
-              decoding="async"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-        )}
         </div>
       </main>
 
@@ -5849,7 +6809,16 @@ export default function App() {
       </AnimatePresence>
         </div>
       </div>
+      {/* 内凹半透明白描边：叠在内容上，不参与命中 */}
+      {showFilmbaseInnerWindowStroke ? (
+        <div
+          aria-hidden
+          className="filmbase-inner-window-stroke pointer-events-none absolute inset-0 rounded-[inherit] z-[500]"
+          style={{ boxShadow: FILMBASE_INNER_WINDOW_STROKE_BOX_SHADOW }}
+        />
+      ) : null}
       </div>
+      </FilmbaseWindowShellMount>
     </div>
   );
 }
@@ -6641,7 +7610,7 @@ function MovieCard({
         initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
-        className={`group relative hover:z-10 overflow-visible grid ${isEditing ? 'grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]' : 'grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px]'} gap-x-8 items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
+        className={`group relative hover:z-10 overflow-visible ${listViewTableGridClassName(isEditing)} items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
         style={{ flexDirection: 'column' }}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
