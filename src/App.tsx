@@ -1044,8 +1044,8 @@ const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 52;
  */
 function listViewTableGridClassName(isEditing: boolean): string {
   return isEditing
-    ? 'grid grid-cols-[60px_132px_4.75fr_2fr_2.5fr_70px_70px_120px] gap-x-8'
-    : 'grid grid-cols-[132px_4.75fr_2fr_2.5fr_70px_70px_120px] gap-x-8';
+    ? 'grid grid-cols-[60px_132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
+    : 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8';
 }
 
 /**
@@ -7077,6 +7077,17 @@ function gridStripMarqueeDurationSec(stripScrollWidth: number): number {
   return Math.min(180, Math.max(4, distancePx / refVelocityPxPerSec));
 }
 
+/** 横向溢出判定容差（px），避免亚像素取整导致 `truncate` 可见却不触发跑马灯。 */
+const OVERFLOW_MEASURE_TOLERANCE_PX = 1;
+
+/**
+ * @param el 带 `truncate` 的测量节点
+ * @returns 文本是否超出可见宽度
+ */
+function isHorizontallyOverflowing(el: HTMLElement): boolean {
+  return el.scrollWidth > el.clientWidth + OVERFLOW_MEASURE_TOLERANCE_PX;
+}
+
 /**
  * 按筛后列表顺序生成海报 `loading` / `fetchPriority`（网格与列表共用）。
  *
@@ -7308,6 +7319,15 @@ function MovieCard({
   const [posterFailed, setPosterFailed] = useState(false);
   /** 同一张海报在单个卡片生命周期内仅触发一次重签请求，避免 onError 多次触发导致重复请求。 */
   const posterResignRequestedRef = useRef(false);
+  /** 列表行 / 网格卡片根节点，供片库滚动注册与溢出 ResizeObserver。 */
+  const libraryItemRootElRef = useRef<HTMLElement | null>(null);
+  const setLibraryItemRootRef = useCallback(
+    (el: HTMLElement | null) => {
+      libraryItemRootElRef.current = el;
+      registerLibraryItemEl?.(el);
+    },
+    [registerLibraryItemEl],
+  );
 
   useLayoutEffect(() => {
     setPosterNaturalLoaded(movie.posterUrl.trim().length === 0);
@@ -7320,32 +7340,85 @@ function MovieCard({
   }, [movie.id, movie.posterUrl]);
 
   React.useEffect(() => {
+    let overflowRafId: number | null = null;
+
     const checkOverflow = () => {
       if (titleRef.current) {
-        setIsTitleOverflowing(titleRef.current.scrollWidth > titleRef.current.clientWidth);
+        setIsTitleOverflowing(isHorizontallyOverflowing(titleRef.current));
       }
       if (castRef.current) {
-        setIsCastOverflowing(castRef.current.scrollWidth > castRef.current.clientWidth);
+        setIsCastOverflowing(isHorizontallyOverflowing(castRef.current));
       }
       if (directorRef.current) {
-        setIsDirectorOverflowing(directorRef.current.scrollWidth > directorRef.current.clientWidth);
+        setIsDirectorOverflowing(isHorizontallyOverflowing(directorRef.current));
       } else {
         setIsDirectorOverflowing(false);
       }
       if (viewMode === 'grid' && yearRuntimeMetadataRef.current) {
-        const yr = yearRuntimeMetadataRef.current;
-        setIsYearRuntimeOverflowing(yr.scrollWidth > yr.clientWidth);
+        setIsYearRuntimeOverflowing(isHorizontallyOverflowing(yearRuntimeMetadataRef.current));
       } else {
         setIsYearRuntimeOverflowing(false);
       }
     };
-    
-    // Small delay to ensure layout is stable
+
+    const scheduleCheckOverflow = () => {
+      if (overflowRafId !== null) return;
+      overflowRafId = window.requestAnimationFrame(() => {
+        overflowRafId = null;
+        checkOverflow();
+      });
+    };
+
+    const collectOverflowObserveTargets = (): HTMLElement[] => {
+      const nodes: HTMLElement[] = [];
+      const pushWithParent = (el: HTMLElement | null) => {
+        if (!el) return;
+        nodes.push(el);
+        const parent = el.parentElement;
+        if (parent instanceof HTMLElement) nodes.push(parent);
+      };
+      pushWithParent(titleRef.current);
+      pushWithParent(directorRef.current);
+      const root = libraryItemRootElRef.current;
+      if (root) nodes.push(root);
+      return nodes;
+    };
+
     const timer = setTimeout(checkOverflow, 50);
-    window.addEventListener('resize', checkOverflow);
+    window.addEventListener('resize', scheduleCheckOverflow);
+
+    let resizeObserver: ResizeObserver | null = null;
+    const observedOverflowTargets = new Set<Element>();
+
+    const connectOverflowObservers = () => {
+      if (!resizeObserver) return;
+      for (const node of collectOverflowObserveTargets()) {
+        if (observedOverflowTargets.has(node)) continue;
+        observedOverflowTargets.add(node);
+        resizeObserver.observe(node);
+      }
+    };
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(scheduleCheckOverflow);
+      connectOverflowObservers();
+    }
+
+    const connectRafId = window.requestAnimationFrame(() => {
+      connectOverflowObservers();
+      checkOverflow();
+    });
+
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('resize', checkOverflow);
+      window.removeEventListener('resize', scheduleCheckOverflow);
+      window.cancelAnimationFrame(connectRafId);
+      if (overflowRafId !== null) {
+        window.cancelAnimationFrame(overflowRafId);
+        overflowRafId = null;
+      }
+      resizeObserver?.disconnect();
+      observedOverflowTargets.clear();
       setHoverRating(null);
     };
   }, [
@@ -7357,6 +7430,7 @@ function MovieCard({
     movie.contentRating,
     size,
     viewMode,
+    isEditing,
   ]);
 
   /** 将 cast 视口宽度写入 `--cast-marquee-viewport`（layout 阶段同步 + ResizeObserver），避免 React state 首帧为 0。 */
@@ -7665,7 +7739,7 @@ function MovieCard({
   if (viewMode === 'list') {
     return (
       <motion.div
-        ref={registerLibraryItemEl}
+        ref={setLibraryItemRootRef}
         initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
@@ -7926,7 +8000,7 @@ function MovieCard({
 
   return (
     <motion.div
-      ref={registerLibraryItemEl}
+      ref={setLibraryItemRootRef}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
