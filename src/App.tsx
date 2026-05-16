@@ -917,6 +917,158 @@ const LIBRARY_LOADING_SOUND_SRC = '/sounds/library-ready.mp3';
 /** 预览交互禁用提示音：例如 Z 缩放无可用区间时播放（`public/sounds/ui-disabled.mp3`）。 */
 const UI_DISABLED_SOUND_SRC = '/sounds/ui-disabled.mp3';
 
+/** 模拟 macOS 窗口模式（CSS 布局，非浏览器 Fullscreen API）。 */
+type WindowMode = 'open' | 'minimized' | 'closed' | 'fullscreen';
+
+/** 最近一次将主窗口收到桌面的操作（决定从桌面恢复时是否播放「自 Dock 展开」动画）。 */
+type LastWindowAction = 'minimize' | 'close' | null;
+
+/** 模拟窗口「缩入隐藏 Dock」的 transform 时长（ms），与 CSS `transition` 一致。 */
+const FILMBASE_MINIMIZE_TRANSITION_MS = 520;
+
+/** 缩到视口底部中心时的变换；`transform-origin: bottom center` 配合使用。 */
+const FILMBASE_MINIMIZED_TRANSFORM = 'translate3d(0, 42vh, 0) scale(0.16)';
+
+const DESKTOP_WALLPAPER_SRC = '/images/desktop-bg.jpg';
+const DESKTOP_FILMBASE_ICON_SRC = '/icons/desktop-filmbase-icon.svg';
+const DESKTOP_FILMBASE_ICON_PRESSED_SRC = '/icons/desktop-filmbase-icon-pressed.svg';
+
+type RestorePaintPhase = 'idle' | 'restore-pre' | 'restore-animate';
+
+interface TrafficLightButtonProps {
+  /** 无障碍可读标签 */
+  label: string;
+  defaultSrc: string;
+  hoverSrc: string;
+  pressedSrc: string;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+/**
+ * macOS 交通灯按钮：默认 / 悬停 / 按下三态 SVG，不影响布局占位（12×12）。
+ */
+function TrafficLightButton({
+  label,
+  defaultSrc,
+  hoverSrc,
+  pressedSrc,
+  onClick,
+  disabled,
+}: TrafficLightButtonProps) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const src = pressed ? pressedSrc : hovered ? hoverSrc : defaultSrc;
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      className="relative flex h-3 w-3 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50"
+      onClick={onClick}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={(e) => {
+        if (!e.buttons) setPressed(false);
+        setHovered(false);
+      }}
+      onPointerDown={(e) => {
+        if (!e.isPrimary || disabled) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setPressed(true);
+      }}
+      onPointerUp={(e) => {
+        if (!e.isPrimary) return;
+        setPressed(false);
+      }}
+      onPointerCancel={() => setPressed(false)}
+    >
+      <img
+        draggable={false}
+        src={src}
+        alt=""
+        width={12}
+        height={12}
+        className="pointer-events-none block h-3 w-3 select-none"
+        decoding="async"
+        aria-hidden
+      />
+    </button>
+  );
+}
+
+interface DesktopFilmbaseRestoreButtonProps {
+  onRestore: () => void;
+  /**
+   * 仅在为 true 时接收指针事件（窗口置于前层时仍可挂载图标但不可点）。
+   */
+  interactive: boolean;
+}
+
+/**
+ * 模拟桌面右上角 Filmbase 桌面项：图标仅默认/按下两态（按下不改变标签样式），下方为 macOS 风格标签文案。
+ *
+ * @param props.onRestore 恢复主窗口回调
+ * @param props.interactive 是否可点击（关闭/最小化且非缩小动画、非恢复动画时为 true）
+ */
+function DesktopFilmbaseRestoreButton({ onRestore, interactive }: DesktopFilmbaseRestoreButtonProps) {
+  const [pressed, setPressed] = useState(false);
+
+  /** Sequoia 桌面图标标签：系统字体栈 + 阴影提可读性（与按下态无关）。 */
+  const desktopLabelStyle: React.CSSProperties = {
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif',
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#ffffff',
+    textShadow: '0 1px 3px rgba(0, 0, 0, 0.65)',
+    maxWidth: 64,
+  };
+
+  return (
+    <button
+      type="button"
+      aria-hidden={!interactive}
+      tabIndex={interactive ? undefined : -1}
+      aria-label={interactive ? 'Restore Filmbase window' : undefined}
+      title={interactive ? 'Restore Filmbase window' : undefined}
+      className={`absolute right-6 top-6 z-[1] flex flex-col items-center gap-0.5 border-none bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/60 ${
+        interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none cursor-default'
+      }`}
+      onClick={onRestore}
+      onPointerDown={(e) => {
+        if (!e.isPrimary) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setPressed(true);
+      }}
+      onPointerUp={(e) => {
+        if (!e.isPrimary) return;
+        setPressed(false);
+      }}
+      onPointerCancel={() => setPressed(false)}
+    >
+      <img
+        draggable={false}
+        src={pressed ? DESKTOP_FILMBASE_ICON_PRESSED_SRC : DESKTOP_FILMBASE_ICON_SRC}
+        alt=""
+        width={64}
+        height={64}
+        className="pointer-events-none block h-16 w-16 shrink-0 select-none"
+        decoding="async"
+        aria-hidden
+      />
+      <span
+        style={desktopLabelStyle}
+        className="pointer-events-none block w-full max-w-16 select-none text-center leading-tight tracking-tight"
+        aria-hidden
+      >
+        FilmBase.app
+      </span>
+    </button>
+  );
+}
+
 export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const trailerIframeRef = useRef<HTMLIFrameElement>(null);
@@ -929,6 +1081,14 @@ export default function App() {
   const [isSidebarClearSearchPressed, setIsSidebarClearSearchPressed] = useState(false);
   const [isAddMovieClearSearchPressed, setIsAddMovieClearSearchPressed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [windowMode, setWindowMode] = useState<WindowMode>('open');
+  const [lastWindowAction, setLastWindowAction] = useState<LastWindowAction>(null);
+  const [minimizeAnimating, setMinimizeAnimating] = useState(false);
+  const [restorePaintPhase, setRestorePaintPhase] = useState<RestorePaintPhase>('idle');
+  const minimizeAnimatingRef = useRef(false);
+  const restorePaintPhaseRef = useRef<RestorePaintPhase>('idle');
+  /** 防止在双 `rAF` 尚未把 `minimizeAnimating` 置为 true 前重复触发缩小。 */
+  const minimizeScheduleGuardRef = useRef(false);
   const [movies, setMovies] = useState<Movie[]>(() => {
     return MOCK_MOVIES.filter(m => !['Avatar', 'Blade Runner 2049', 'Dune: Part One'].includes(m.title));
   });
@@ -1108,6 +1268,99 @@ export default function App() {
     if (el) map.set(movieId, el);
     else map.delete(movieId);
   }, []);
+
+  useEffect(() => {
+    minimizeAnimatingRef.current = minimizeAnimating;
+  }, [minimizeAnimating]);
+
+  useEffect(() => {
+    restorePaintPhaseRef.current = restorePaintPhase;
+  }, [restorePaintPhase]);
+
+  /** 交通灯缩小动画调度：双 `requestAnimationFrame` 确保首帧仍为展开态，下一帧再过渡到 Dock；`minimizeScheduleGuardRef` 防抖重复调度。 */
+  const scheduleFilmbaseMinimizeAnimation = useCallback(() => {
+    if (minimizeScheduleGuardRef.current) return;
+    minimizeScheduleGuardRef.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        minimizeScheduleGuardRef.current = false;
+        setMinimizeAnimating(true);
+      });
+    });
+  }, []);
+
+  const handleTrafficClose = useCallback(() => {
+    if (windowMode === 'closed' || windowMode === 'minimized') return;
+    if (minimizeAnimating || restorePaintPhase !== 'idle') return;
+    minimizeScheduleGuardRef.current = false;
+    setLastWindowAction('close');
+    setMinimizeAnimating(false);
+    setRestorePaintPhase('idle');
+    setWindowMode('closed');
+  }, [windowMode, minimizeAnimating, restorePaintPhase]);
+
+  const handleTrafficMinimize = useCallback(() => {
+    if (windowMode !== 'open' && windowMode !== 'fullscreen') return;
+    if (minimizeAnimating || restorePaintPhase !== 'idle') return;
+    setLastWindowAction('minimize');
+    scheduleFilmbaseMinimizeAnimation();
+  }, [windowMode, minimizeAnimating, restorePaintPhase, scheduleFilmbaseMinimizeAnimation]);
+
+  const handleTrafficFullscreen = useCallback(() => {
+    if (windowMode === 'closed' || windowMode === 'minimized') return;
+    if (minimizeAnimating || restorePaintPhase !== 'idle') return;
+    setWindowMode((m) => (m === 'fullscreen' ? 'open' : 'fullscreen'));
+  }, [windowMode, minimizeAnimating, restorePaintPhase]);
+
+  /**
+   * 从模拟桌面恢复主窗口：`close` 为瞬时显示；`minimize` 走 Dock 反向缩放动画。
+   */
+  const handleDesktopRestoreFilmbase = useCallback(() => {
+    if (windowMode === 'closed') {
+      minimizeScheduleGuardRef.current = false;
+      setWindowMode('open');
+      setLastWindowAction(null);
+      setMinimizeAnimating(false);
+      setRestorePaintPhase('idle');
+      return;
+    }
+    if (windowMode === 'minimized') {
+      minimizeScheduleGuardRef.current = false;
+      setMinimizeAnimating(false);
+      setRestorePaintPhase('restore-pre');
+    }
+  }, [windowMode]);
+
+  /**
+   * Filmbase 外壳 transform 过渡结束：收口缩小动画 → `minimized`；收口展开动画 → `open`。
+   *
+   * @param e `transitionend` 事件（仅处理 `transform`）
+   */
+  const handleFilmbaseShellTransitionEnd = useCallback((e: React.TransitionEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.propertyName !== 'transform') return;
+
+    if (minimizeAnimatingRef.current) {
+      setMinimizeAnimating(false);
+      setWindowMode('minimized');
+      return;
+    }
+
+    if (restorePaintPhaseRef.current === 'restore-animate') {
+      setRestorePaintPhase('idle');
+      setWindowMode('open');
+      setLastWindowAction(null);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (restorePaintPhase !== 'restore-pre') return;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setRestorePaintPhase('restore-animate'));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [restorePaintPhase]);
+
   /**
    * 遮罩关闭手势：仅当指针在遮罩层本身按下并松开（`target === currentTarget`），
    * 避免从面板内拖选文本后在外围松手误触关闭。
@@ -2254,6 +2507,51 @@ export default function App() {
     await addMovieFromImdbId(newMovieUrl);
   };
 
+  /**
+   * 关闭「Add New Movie」弹窗并清空表单；添加进行中时不执行（与底部遮罩 click 行为一致）。
+   */
+  const closeAddMovieModal = useCallback(() => {
+    if (isAdding) return;
+    setIsAddModalOpen(false);
+    setNewMovieTitle('');
+    setNewMovieUrl('');
+    setIsImdbEntered(false);
+    setIsAddMovieImdbSectionExpanded(false);
+    setNewMovieTrailerUrl('');
+    setAddError('');
+  }, [isAdding]);
+
+  /** Add Movie 弹窗：Esc 关闭；若标题建议列表展开则第一次 Esc 仅收起建议。 */
+  useEffect(() => {
+    if (!isAddModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isAdding) return;
+      const addMovieDropdownOpen =
+        !addMovieSuggestionsDismissed &&
+        newMovieTitle.trim().length >= 2 &&
+        (addMovieSearchLoading || addMovieSearchHits.length > 0);
+      if (addMovieDropdownOpen) {
+        e.preventDefault();
+        setAddMovieSuggestionsDismissed(true);
+        setAddMovieActiveSuggestionIndex(-1);
+        return;
+      }
+      e.preventDefault();
+      closeAddMovieModal();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isAddModalOpen,
+    isAdding,
+    addMovieSuggestionsDismissed,
+    newMovieTitle,
+    addMovieSearchLoading,
+    addMovieSearchHits.length,
+    closeAddMovieModal,
+  ]);
+
   /** Add Movie modal 内：标题 ≥2 字时防抖调用 `search-movies`。 */
   useEffect(() => {
     if (!isAddModalOpen) return;
@@ -2722,8 +3020,145 @@ export default function App() {
   const isMainContentOverlayActive =
     isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen || Boolean(deleteMovieConfirm);
 
+  /** 桌面恢复图标：常驻挂载；仅在关闭/最小化且非缩小、非恢复过渡时可点击（见下方 `interactive`）。 */
+  const isDesktopRestoreInteractive =
+    (windowMode === 'closed' || windowMode === 'minimized') &&
+    restorePaintPhase === 'idle' &&
+    !minimizeAnimating;
+
+  const isFullscreenLayout = windowMode === 'fullscreen';
+
+  const filmbaseShellZ =
+    restorePaintPhase !== 'idle'
+      ? 'z-[70]'
+      : isFullscreenLayout
+        ? 'z-[90]'
+        : 'z-[50]';
+
+  const filmbaseShellPointerEvents =
+    windowMode === 'closed' ||
+    (windowMode === 'minimized' && restorePaintPhase === 'idle')
+      ? 'pointer-events-none'
+      : 'pointer-events-auto';
+
+  let shellTransform: string | undefined;
+  let shellOpacity = 1;
+  let shellVisibility: 'visible' | 'hidden' = 'visible';
+  let shellTransition: string | undefined;
+
+  if (isFullscreenLayout) {
+    shellOpacity = 1;
+    shellVisibility = 'visible';
+    shellTransition = undefined;
+    shellTransform = undefined;
+  } else if (windowMode === 'closed') {
+    shellOpacity = 0;
+    shellVisibility = 'hidden';
+    shellTransition = 'none';
+    shellTransform = undefined;
+  } else if (restorePaintPhase === 'restore-pre') {
+    shellOpacity = 1;
+    shellVisibility = 'visible';
+    shellTransform = FILMBASE_MINIMIZED_TRANSFORM;
+    shellTransition = 'none';
+  } else if (restorePaintPhase === 'restore-animate') {
+    shellOpacity = 1;
+    shellVisibility = 'visible';
+    shellTransform = 'translate3d(0, 0, 0) scale(1)';
+    shellTransition = `transform ${FILMBASE_MINIMIZE_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+  } else if (minimizeAnimating) {
+    shellOpacity = 1;
+    shellVisibility = 'visible';
+    shellTransform = FILMBASE_MINIMIZED_TRANSFORM;
+    shellTransition = `transform ${FILMBASE_MINIMIZE_TRANSITION_MS}ms cubic-bezier(0.33, 1, 0.25, 1)`;
+  } else if (windowMode === 'minimized') {
+    shellOpacity = 0;
+    shellVisibility = 'hidden';
+    shellTransition = 'none';
+    shellTransform = FILMBASE_MINIMIZED_TRANSFORM;
+  } else {
+    shellOpacity = 1;
+    shellVisibility = 'visible';
+    shellTransition = undefined;
+    shellTransform = undefined;
+  }
+
+  const shellWillChange =
+    isFullscreenLayout || minimizeAnimating || restorePaintPhase !== 'idle'
+      ? isFullscreenLayout
+        ? undefined
+        : ('transform' as const)
+      : undefined;
+
+  const trafficChromeBusy = minimizeAnimating || restorePaintPhase !== 'idle';
+
+  const trafficLightsDisabled =
+    trafficChromeBusy ||
+    windowMode === 'closed' ||
+    windowMode === 'minimized';
+
+  /** 模拟全屏布局：相对于 iframe/viewport 铺满（非浏览器 Fullscreen API）。 */
+  const filmbaseFullscreenShellStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    width: '100vw',
+    height: '100vh',
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transform: 'none',
+    borderRadius: 0,
+    zIndex: 90,
+  };
+
+  const filmbaseShellStyle: React.CSSProperties = isFullscreenLayout
+    ? {
+        ...filmbaseFullscreenShellStyle,
+        opacity: shellOpacity,
+        visibility: shellVisibility,
+      }
+    : {
+        transformOrigin: '50% 100%',
+        ...(shellTransform ? { transform: shellTransform } : {}),
+        opacity: shellOpacity,
+        visibility: shellVisibility,
+        transition: shellTransition,
+        willChange: shellWillChange,
+      };
+
   return (
-    <div className="w-screen h-screen bg-[#000] antialiased font-sans overflow-hidden">
+    <div className="relative h-screen w-screen max-h-none max-w-none bg-[#000] antialiased font-sans overflow-hidden">
+      {/* 壁纸常驻底层：最小化缩小过程中即可透出，无需等到 windowMode === minimized */}
+      <div
+        className="filmbase-desktop-wallpaper pointer-events-none absolute inset-0 z-[20]"
+        aria-hidden
+      >
+        <img
+          draggable={false}
+          src={DESKTOP_WALLPAPER_SRC}
+          alt=""
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover select-none"
+          decoding="async"
+        />
+      </div>
+
+      {/* 恢复图标常驻：z-[40] 低于窗口壳 z-[50]，默认被遮住；缩小动画露出壁纸时可同时看到图标 */}
+      <div
+        className="filmbase-desktop-restore-layer pointer-events-none absolute inset-0 z-[40]"
+        aria-hidden={false}
+      >
+        <DesktopFilmbaseRestoreButton
+          onRestore={handleDesktopRestoreFilmbase}
+          interactive={isDesktopRestoreInteractive}
+        />
+      </div>
+
+      <div
+        className={`filmbase-window-shell flex flex-col rounded-none max-h-none max-w-none ${
+          isFullscreenLayout ? '' : `absolute inset-0 ${filmbaseShellZ}`
+        } ${filmbaseShellPointerEvents}`}
+        style={filmbaseShellStyle}
+        onTransitionEnd={handleFilmbaseShellTransitionEnd}
+      >
       {/* Viewport: Acts as the desktop background */}
       {/* The macOS Window Container */}
       <div className="macos-window w-full h-full bg-[#050505] text-[#E0E0E0] flex flex-col relative selection:bg-[#FFD700] selection:text-[#050505]">
@@ -2766,9 +3201,30 @@ export default function App() {
         onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
       >
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-          <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-          <div className="w-3 h-3 rounded-full bg-[#28c840]" />
+          <TrafficLightButton
+            label="Close window"
+            defaultSrc="/icons/traffic-close.svg"
+            hoverSrc="/icons/traffic-close-hover.svg"
+            pressedSrc="/icons/traffic-close-pressed.svg"
+            onClick={handleTrafficClose}
+            disabled={trafficLightsDisabled}
+          />
+          <TrafficLightButton
+            label="Minimize window"
+            defaultSrc="/icons/traffic-minimize.svg"
+            hoverSrc="/icons/traffic-minimize-hover.svg"
+            pressedSrc="/icons/traffic-minimize-pressed.svg"
+            onClick={handleTrafficMinimize}
+            disabled={trafficLightsDisabled}
+          />
+          <TrafficLightButton
+            label="Fullscreen window"
+            defaultSrc="/icons/traffic-fullscreen.svg"
+            hoverSrc="/icons/traffic-fullscreen-hover.svg"
+            pressedSrc="/icons/traffic-fullscreen-pressed.svg"
+            onClick={handleTrafficFullscreen}
+            disabled={trafficLightsDisabled}
+          />
         </div>
         <button
           type="button"
@@ -4739,13 +5195,7 @@ export default function App() {
                 return;
               }
               if (addMovieBackdropCloseArmedRef.current && e.target === e.currentTarget) {
-                setIsAddModalOpen(false);
-                setNewMovieTitle('');
-                setNewMovieUrl('');
-                setIsImdbEntered(false);
-                setIsAddMovieImdbSectionExpanded(false);
-                setNewMovieTrailerUrl('');
-                setAddError('');
+                closeAddMovieModal();
               }
               addMovieBackdropCloseArmedRef.current = false;
             }}
@@ -5060,17 +5510,7 @@ export default function App() {
               </div>
 
               <div className="flex items-center justify-end gap-3 mt-8">
-                <button
-                  onClick={() => {
-                    setIsAddModalOpen(false);
-                    setNewMovieTitle('');
-                    setNewMovieUrl('');
-                    setIsImdbEntered(false);
-                    setIsAddMovieImdbSectionExpanded(false);
-                    setNewMovieTrailerUrl('');
-                    setAddError('');
-                  }}
-                  disabled={isAdding}
+                <button onClick={closeAddMovieModal} disabled={isAdding}
                   className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
@@ -5408,6 +5848,7 @@ export default function App() {
         )}
       </AnimatePresence>
         </div>
+      </div>
       </div>
     </div>
   );
