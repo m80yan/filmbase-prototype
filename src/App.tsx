@@ -1035,13 +1035,14 @@ const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 52;
 
 /**
  * List View 表头与列表行共用的 grid 列布局（单一定义源，避免表头/行错位）。
+ * 列序：编辑删除 | 海报 | 片名（含 hover Play Trailer）| 导演 | 主演 | IMDb | RT | 我的评分。
  *
  * @param isEditing 是否编辑库模式（多一列删除控件）
  */
 function listViewTableGridClassName(isEditing: boolean): string {
   return isEditing
-    ? 'grid grid-cols-[60px_132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8'
-    : 'grid grid-cols-[132px_3.5fr_120px_1.5fr_2.5fr_70px_70px_120px] gap-x-8';
+    ? 'grid grid-cols-[60px_132px_4.75fr_2fr_2.5fr_70px_70px_120px] gap-x-8'
+    : 'grid grid-cols-[132px_4.75fr_2fr_2.5fr_70px_70px_120px] gap-x-8';
 }
 
 /**
@@ -3741,15 +3742,18 @@ export default function App() {
   const isLibraryToolbarLocked = mainLibraryToolbarLockReason != null;
   /** 编辑库（含删除入口）期间禁用 Add Movie，避免与删片流程并行。 */
   const isAddMovieToolbarDisabled = isLibraryToolbarLocked || isEditing;
-  const isMainContentOverlayActive =
-    isPosterPreviewOpen || isTrailerOverlayInMain || isAddModalOpen || Boolean(deleteMovieConfirm);
+  /**
+   * 主片库滚动容器是否在叠层打开时改为 overflow-hidden。
+   * 预告片/海报预览叠层已在宿主上拦截 wheel；改 overflow 会使 List View `scrollTop` 归零。
+   */
+  const isMainLibraryScrollOverflowLocked =
+    isAddModalOpen || Boolean(deleteMovieConfirm);
 
   /**
-   * 仅预告片 / 删除确认等需「吃满」主滚动区时收紧库区内边距并让列表头脱离 sticky；
-   * 海报预览与 Add Movie 叠层不改变 padding / sticky，避免因 scrollbar、布局重排产生上下抖动。
+   * 仅删除确认等需「吃满」主滚动区时收紧库区内边距；
+   * 预告片/海报预览/Add Movie 为 absolute 叠层，不改变 padding，避免列表 scroll 与布局抖动。
    */
-  const suppressLibraryChromeForOverlays =
-    isTrailerOverlayInMain || Boolean(deleteMovieConfirm);
+  const suppressLibraryChromeForOverlays = Boolean(deleteMovieConfirm);
 
   /**
    * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
@@ -5315,7 +5319,7 @@ export default function App() {
             className={
               isListViewRowsScrollSplit
                 ? 'flex h-full min-h-0 flex-col overflow-hidden overflow-x-hidden'
-                : `filmbase-scrollbar h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`
+                : `filmbase-scrollbar h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainLibraryScrollOverflowLocked ? 'overflow-hidden' : 'overflow-y-auto'}`
             }
           >
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
@@ -5498,7 +5502,6 @@ export default function App() {
                     )}
                   </AnimatePresence>
                 </div>
-                <span className="flex min-h-5 items-center justify-center text-center leading-5">Trailer</span>
                 <span className="flex min-h-5 items-center justify-center text-center leading-5">Director</span>
                 <span className="flex min-h-5 items-center justify-center text-center leading-5">Starring</span>
                 <button 
@@ -5565,7 +5568,7 @@ export default function App() {
               ) : null}
               <div
                 ref={mainLibraryScrollRef}
-                className={`filmbase-scrollbar min-h-0 flex-1 overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${isMainContentOverlayActive ? 'overflow-hidden' : 'overflow-y-auto'}`}
+                className={`filmbase-scrollbar min-h-0 flex-1 overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${isMainLibraryScrollOverflowLocked ? 'overflow-hidden' : 'overflow-y-auto'}`}
                 style={
                   filteredMovies.length > 0
                     ? { paddingTop: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }
@@ -6983,6 +6986,21 @@ const CAST_MARQUEE_REF_DURATION_SEC = 8;
 const LIST_CAST_LINE_PX = 20;
 /** 列表 Title 列 `padding-top`（px）：小于其他列 `pt-[66px]`，为 `text-base`/`leading-6` 片名腾高且保持 year·runtime 与 starring 第 2 行对齐。 */
 const LIST_TITLE_COLUMN_PT_PX = 62;
+/** 列表行固定高度（px），与列表行 `h-[172px]` 一致。 */
+const LIST_VIEW_ROW_HEIGHT_PX = 172;
+/** 列表 Starring hover 可见行数（与 6×`h-5` / `group-hover:h-[120px]` 一致）。 */
+const LIST_STARRING_VISIBLE_LINES = 6;
+/**
+ * 列表 Title 列 genre 行 `top`（px）：与 Starring 展开视口第 6 行顶边对齐。
+ */
+const LIST_TITLE_GENRE_LINE_TOP_PX =
+  (LIST_VIEW_ROW_HEIGHT_PX - LIST_STARRING_VISIBLE_LINES * LIST_CAST_LINE_PX) / 2 +
+  (LIST_STARRING_VISIBLE_LINES - 1) * LIST_CAST_LINE_PX;
+/**
+ * 列表 Title 列内容区边距（px）：genre 行底距行底、hover Play Trailer 顶距列顶，数值对称。
+ */
+const LIST_TITLE_CONTENT_EDGE_INSET_PX =
+  LIST_VIEW_ROW_HEIGHT_PX - LIST_TITLE_GENRE_LINE_TOP_PX - LIST_CAST_LINE_PX;
 /**
  * 网格海报 hover 右上角「预览」点击热区边长（px）：与 overlay 内「Play Trailer」全宽胶囊同高（`py-2.5` + `text-[12px]` 单行约 40–42px）。
  */
@@ -7418,16 +7436,8 @@ function MovieCard({
 
   /** 列表行 Starring：行高 / 展开行数 / 视口高度（与 `group-hover:h-[120px]` 一致）。 */
   const lineHeightPx = LIST_CAST_LINE_PX;
-  const starringVisibleLines = 6;
+  const starringVisibleLines = LIST_STARRING_VISIBLE_LINES;
   const windowHeightPx = starringVisibleLines * lineHeightPx;
-  /** 列表行固定高度（与 `h-[172px]` 一致），用于 Title 列 genre 与 Starring 展开视口第 6 行顶对齐。 */
-  const LIST_VIEW_ROW_HEIGHT_PX = 172;
-  /**
-   * Title 列内 genre 绝对定位的 `top`（px）：与 Starring 列在 `group-hover` 时垂直居中、
-   * `windowHeightPx` 高视口内第 6 行（`h-5`）顶边同一 Y。
-   */
-  const listTitleGenreLineTopPx =
-    (LIST_VIEW_ROW_HEIGHT_PX - windowHeightPx) / 2 + (starringVisibleLines - 1) * lineHeightPx;
   const maxVisible = 6;
   const cast = movie.cast ?? [];
   /**
@@ -7685,7 +7695,23 @@ function MovieCard({
           </div>
         </div>
         
-        <div className="flex min-h-0 min-w-0 flex-col self-stretch pl-0">
+        <div className="relative flex min-h-0 min-w-0 flex-col self-stretch pl-0">
+          {/** Play Trailer：悬停显示于片名上方；顶距列顶与 genre 底距列底同为 `LIST_TITLE_CONTENT_EDGE_INSET_PX` */}
+          <div
+            className="pointer-events-none absolute left-0 right-0 z-[3] flex items-start justify-start opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+            style={{ top: LIST_TITLE_CONTENT_EDGE_INSET_PX }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPlayTrailer();
+              }}
+              className="bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl transition-all"
+            >
+              Play Trailer
+            </button>
+          </div>
           {/** 片名 `text-base`/`leading-6`；`pt` 小于他列，首行略上移，year·runtime 仍与 starring 第 2 行对齐 */}
           <div
             className="relative flex min-h-0 flex-1 flex-col items-start justify-start text-left"
@@ -7722,7 +7748,7 @@ function MovieCard({
             {/** genre：默认文字；行 hover 时换为 `-hover` 图标 20px + 与海报网格相同的延迟提示 */}
             <div
               className="pointer-events-none absolute left-0 right-0 z-[1] flex h-5 max-w-full items-center text-[13px] font-medium leading-5 text-white/60 transition-colors group-hover:text-white"
-              style={{ top: listTitleGenreLineTopPx }}
+              style={{ top: LIST_TITLE_GENRE_LINE_TOP_PX }}
             >
               <span className="min-w-0 flex-1 truncate opacity-100 transition-opacity duration-150 group-hover:opacity-0">
                 {movie.genre.length > 0 ? movie.genre.join(', ') : '\u00a0'}
@@ -7738,21 +7764,9 @@ function MovieCard({
           </div>
         </div>
 
-        <div className="flex min-h-0 self-stretch items-center justify-center">
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              onPlayTrailer();
-            }}
-            className="opacity-0 group-hover:opacity-100 transition-all bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl"
-          >
-            Play Trailer
-          </button>
-        </div>
-
         {/** 默认与片名首行同带；hover `translateY`；溢出时与 Title 列同横向 marquee（`pr-8` 与 `gridStripMarqueeDurationSec` 与片名一致） */}
         <div className="flex min-h-0 min-w-0 flex-col self-stretch items-center justify-start pt-[66px] text-center text-[13px] leading-5 text-white/60">
-          {/** `translate-y`：行高 172、Trailer `items-center` 中心约 86px，片名带首行字中心约 76px → 约 10px；`duration-0` 离开无过渡 */}
+          {/** `translate-y`：行高 172、片名首行字中心约 76px，导演首行 hover 下移约 10px 与 starring 对齐；`duration-0` 离开无过渡 */}
           <div className="h-5 min-w-0 w-full shrink-0 translate-y-0 transition-[transform,color] duration-0 ease-out will-change-transform group-hover:translate-y-[10px] group-hover:text-white group-hover:duration-300">
             <div className="relative h-5 min-w-0 w-full shrink-0 overflow-hidden">
               <span

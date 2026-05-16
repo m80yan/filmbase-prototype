@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FilmBase iframe embed test (local)</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: system-ui, sans-serif;
+        background: #1a1a1a;
+        color: #ccc;
+      }
+      code {
+        background: #333;
+        padding: 0 4px;
+        border-radius: 4px;
+      }
+      p {
+        margin: 0 0 12px;
+        max-width: 720px;
+        line-height: 1.5;
+      }
+      iframe {
+        display: block;
+        margin-top: 8px;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <p>
+      Edit <code>width</code> / <code>height</code> in the iframe <code>style</code> below — the default
+      ~900×600 is only an arbitrary local preview size, not a minimum embed requirement. Larger iframes are
+      supported; when FilmBase opens in iframe fullscreen (CSS simulated), it fills the iframe viewport.
+      Start dev server first:
+      <code>npm run dev</code>
+      →
+      <code>http://localhost:3001</code>
+    </p>
+    <!-- Embeds the Vite dev app; iframe viewport = simulated Notion embed area (any dimensions). -->
+    <iframe
+      src="http://localhost:3001"
+      title="FilmBase embed — localhost dev"
+      style="width: 900px; height: 600px; border: 1px solid #555"
+    ></iframe>
+  </body>
+</html>
