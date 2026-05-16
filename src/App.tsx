@@ -1028,6 +1028,9 @@ const FILMBASE_FLOATING_MIN_HEIGHT_PX = 500;
  */
 const FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX = 1024;
 
+/** 片库 hydrate 后侧栏 Genre / Year / My Rating 淡入与高度展开动画时长（ms）。 */
+const SIDEBAR_FILTER_SECTION_REVEAL_MS = 210;
+
 /**
  * List 表头叠层高度（`py-4` + `min-h-5` 列标题行，px），与行滚动区 `padding-top` 一致。
  */
@@ -2713,6 +2716,14 @@ export default function App() {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  /**
+   * 侧栏 Genre / Year / My Rating 是否以展开态渲染。
+   * `!isMoviesHydrated` 时恒为 false（强制收起）；就绪后读取 `expandedSections`。
+   */
+  const isSidebarDynamicFilterExpanded = (
+    section: keyof typeof expandedSections,
+  ): boolean => isMoviesHydrated && expandedSections[section];
+
   const allUniqueGenres = useMemo(() => {
     const set = new Set<string>();
     movies.forEach((m) => m.genre.forEach((g) => set.add(normalizeGenreDisplayLabel(g))));
@@ -4224,15 +4235,26 @@ export default function App() {
         </div>
 	        <div className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]">
           <nav className="space-y-2">
+            <motion.div
+              className={`space-y-2 ease-out ${
+                isMoviesHydrated ? 'pointer-events-auto' : 'pointer-events-none'
+              }`}
+              animate={{ opacity: isMoviesHydrated ? 1 : 0.45 }}
+              transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
+            >
             <div>
-              <button 
+              <button
+                type="button"
                 onClick={() => toggleSection('genre')}
-                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                disabled={!isMoviesHydrated}
+                tabIndex={isMoviesHydrated ? 0 : -1}
+                aria-disabled={!isMoviesHydrated}
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Genre</span>
                 <motion.div
-                  animate={{ rotate: expandedSections.genre ? 90 : 0 }}
-                  transition={{ duration: 0.2 }}
+                  animate={{ rotate: isSidebarDynamicFilterExpanded('genre') ? 90 : 0 }}
+                  transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
                   <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
@@ -4240,10 +4262,10 @@ export default function App() {
               <motion.div
                 initial={false}
                 animate={{ 
-                  height: expandedSections.genre ? 'auto' : 0,
-                  opacity: expandedSections.genre ? 1 : 0,
+                  height: isSidebarDynamicFilterExpanded('genre') ? 'auto' : 0,
+                  opacity: isSidebarDynamicFilterExpanded('genre') ? 1 : 0,
                 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
+                transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 className="overflow-hidden w-[200px]"
               >
                 <ul className="space-y-0.5 w-[200px]">
@@ -4262,14 +4284,18 @@ export default function App() {
             </div>
 
             <div>
-              <button 
+              <button
+                type="button"
                 onClick={() => toggleSection('year')}
-                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                disabled={!isMoviesHydrated}
+                tabIndex={isMoviesHydrated ? 0 : -1}
+                aria-disabled={!isMoviesHydrated}
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Year</span>
                 <motion.div
-                  animate={{ rotate: expandedSections.year ? 90 : 0 }}
-                  transition={{ duration: 0.2 }}
+                  animate={{ rotate: isSidebarDynamicFilterExpanded('year') ? 90 : 0 }}
+                  transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
                   <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
@@ -4277,10 +4303,10 @@ export default function App() {
               <motion.div
                 initial={false}
                 animate={{ 
-                  height: expandedSections.year ? 'auto' : 0,
-                  opacity: expandedSections.year ? 1 : 0,
+                  height: isSidebarDynamicFilterExpanded('year') ? 'auto' : 0,
+                  opacity: isSidebarDynamicFilterExpanded('year') ? 1 : 0,
                 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
+                transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 className="overflow-hidden w-[200px]"
               >
                 <ul className="space-y-0.5 w-[200px]">
@@ -4298,14 +4324,18 @@ export default function App() {
             </div>
 
             <div>
-              <button 
+              <button
+                type="button"
                 onClick={() => toggleSection('ratings')}
-                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors"
+                disabled={!isMoviesHydrated}
+                tabIndex={isMoviesHydrated ? 0 : -1}
+                aria-disabled={!isMoviesHydrated}
+                className="flex items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>My Rating</span>
                 <motion.div
-                  animate={{ rotate: expandedSections.ratings ? 90 : 0 }}
-                  transition={{ duration: 0.2 }}
+                  animate={{ rotate: isSidebarDynamicFilterExpanded('ratings') ? 90 : 0 }}
+                  transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
                   <ChevronRight size={16} strokeWidth={2.5} />
                 </motion.div>
@@ -4313,10 +4343,10 @@ export default function App() {
               <motion.div
                 initial={false}
                 animate={{ 
-                  height: expandedSections.ratings ? 'auto' : 0,
-                  opacity: expandedSections.ratings ? 1 : 0,
+                  height: isSidebarDynamicFilterExpanded('ratings') ? 'auto' : 0,
+                  opacity: isSidebarDynamicFilterExpanded('ratings') ? 1 : 0,
                 }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
+                transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 className="overflow-hidden w-[200px]"
               >
                 <ul className="space-y-0.5 w-[200px]">
@@ -4332,6 +4362,7 @@ export default function App() {
                 </ul>
               </motion.div>
             </div>
+            </motion.div>
           </nav>
         </div>
 
