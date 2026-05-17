@@ -108,5 +108,9 @@ export async function invokeGenerateFilmDna(
     center: body.center,
     left: Array.isArray(body.left) ? body.left : [],
     right: Array.isArray(body.right) ? body.right : [],
+    seriesPrevious: Array.isArray(body.seriesPrevious)
+      ? body.seriesPrevious
+      : undefined,
+    seriesNext: Array.isArray(body.seriesNext) ? body.seriesNext : undefined,
   };
 }

@@ -182,6 +182,18 @@
   background-clip: content-box;
 }
 
+/**
+ * Film DNA：1080×871 虚拟舞台等比缩放进 lightbox（container query，非 ResizeObserver）。
+ */
+.film-dna-stage-host {
+  container-type: size;
+}
+
+.film-dna-stage-fit {
+  transform: scale(min(100cqw / 1080, 100cqh / 871));
+  transform-origin: center center;
+}
+
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
