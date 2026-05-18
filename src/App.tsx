@@ -32,6 +32,7 @@ import {
 } from './lib/filmbaseSupabase';
 import { LibraryLoadingStagedCopy } from './components/LibraryLoadingStagedCopy';
 import { LibraryLoadingShowcase } from './components/LibraryLoadingShowcase';
+import { ClearSearchButton } from './components/ClearSearchButton';
 
 /**
  * `search-movies` Edge Function 返回的单条命中（展示建议时仅保留 `imdbId` 非空的项）。
@@ -47,6 +48,8 @@ type MovieSearchHit = {
   overview: string;
   popularity: number;
   voteAverage: number;
+  /** TMDb credits 导演；搜索 API 未返回时视为缺失。 */
+  director?: string;
 };
 
 /**
@@ -1057,6 +1060,116 @@ const SIDEBAR_FILTER_SECTION_REVEAL_MS = 210;
  */
 const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 52;
 
+/** 视图切换时：已滚动才尝试锚点映射（低于此 `scrollTop` 视为未滚动）。 */
+const VIEW_SWITCH_SCROLL_THRESHOLD_PX = 8;
+
+/** 视图切换后：锚点条目与滚动视口顶部的间距（px）。 */
+const VIEW_SWITCH_SCROLL_TOP_INSET_PX = 12;
+
+/** 网格行分组：`getBoundingClientRect().top` 容差（px）。 */
+const GRID_ROW_TOP_EPSILON_PX = 4;
+
+type LibraryItemGeom = { id: string; top: number; bottom: number; left: number };
+
+/**
+ * 按 `filteredMovies` 顺序收集已注册条目的视口几何（跳过未挂载项）。
+ */
+function collectLibraryItemGeoms(
+  orderedMovieIds: string[],
+  itemEls: Map<string, HTMLElement>,
+): LibraryItemGeom[] {
+  const out: LibraryItemGeom[] = [];
+  for (const id of orderedMovieIds) {
+    const el = itemEls.get(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    out.push({ id, top: r.top, bottom: r.bottom, left: r.left });
+  }
+  return out;
+}
+
+/**
+ * 将网格条目按行分组（同行 `top` 在容差内）。
+ */
+function groupGridRowsByTop(geoms: LibraryItemGeom[]): LibraryItemGeom[][] {
+  if (geoms.length === 0) return [];
+  const rows: LibraryItemGeom[][] = [];
+  let currentRow: LibraryItemGeom[] = [geoms[0]];
+  let rowTop = geoms[0].top;
+  for (let i = 1; i < geoms.length; i++) {
+    const g = geoms[i];
+    if (Math.abs(g.top - rowTop) <= GRID_ROW_TOP_EPSILON_PX) {
+      currentRow.push(g);
+    } else {
+      rows.push(currentRow);
+      currentRow = [g];
+      rowTop = g.top;
+    }
+  }
+  rows.push(currentRow);
+  return rows;
+}
+
+/**
+ * Poster View → List View：取第一个「整行海报均在视口内」的行，锚点为该行最左影片 id。
+ */
+function findGridScrollAnchorMovieId(
+  container: HTMLElement,
+  orderedMovieIds: string[],
+  itemEls: Map<string, HTMLElement>,
+): string | null {
+  const geoms = collectLibraryItemGeoms(orderedMovieIds, itemEls);
+  if (geoms.length === 0) return null;
+
+  const { top: cTop, bottom: cBottom } = container.getBoundingClientRect();
+  const rows = groupGridRowsByTop(geoms);
+
+  for (const row of rows) {
+    const fullyVisible = row.every(
+      (g) => g.top >= cTop - 1 && g.bottom <= cBottom + 1,
+    );
+    if (fullyVisible) {
+      const leftmost = row.slice().sort((a, b) => a.left - b.left)[0];
+      return leftmost?.id ?? row[0].id;
+    }
+  }
+  return null;
+}
+
+/**
+ * List View → Poster View：取视口内最靠上的列表行影片 id。
+ */
+function findListScrollAnchorMovieId(
+  container: HTMLElement,
+  orderedMovieIds: string[],
+  itemEls: Map<string, HTMLElement>,
+): string | null {
+  const { top: cTop, bottom: cBottom } = container.getBoundingClientRect();
+  for (const id of orderedMovieIds) {
+    const el = itemEls.get(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > cTop && r.top < cBottom) return id;
+  }
+  return null;
+}
+
+/**
+ * 将片库条目滚至滚动容器顶部附近（无 smooth，避免视图切换动画）。
+ */
+function scrollLibraryItemNearTop(
+  container: HTMLElement,
+  itemEl: HTMLElement,
+  topInsetPx: number,
+): void {
+  const delta =
+    itemEl.getBoundingClientRect().top -
+    container.getBoundingClientRect().top -
+    topInsetPx;
+  if (Math.abs(delta) < 1) return;
+  container.scrollTop += delta;
+}
+
 /**
  * List View 表头与列表行共用的 grid 列布局（单一定义源，避免表头/行错位）。
  * 列序：编辑删除 | 海报 | 片名（含 hover Play Trailer）| 导演 | 主演 | IMDb | RT | 我的评分。
@@ -1539,8 +1652,6 @@ export default function App() {
   const posterPreviewOverlayRef = useRef<HTMLDivElement>(null);
   const uiDisabledAudioRef = useRef<HTMLAudioElement | null>(null);
   const uiDisabledAudioLastPlayAtRef = useRef(0);
-  const [isSidebarClearSearchPressed, setIsSidebarClearSearchPressed] = useState(false);
-  const [isAddMovieClearSearchPressed, setIsAddMovieClearSearchPressed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [windowMode, setWindowMode] = useState<WindowMode>(() => {
     if (typeof window === 'undefined') return 'open';
@@ -1781,6 +1892,10 @@ export default function App() {
    * 成功添加后写入 id，`useLayoutEffect` 消费后置 `null`。
    */
   const [pendingScrollMovieId, setPendingScrollMovieId] = useState<string | null>(null);
+  /**
+   * Poster ↔ List 切换时待恢复的锚点影片 id；在 `setViewMode` 前写入，`useLayoutEffect` 消费。
+   */
+  const pendingViewSwitchScrollMovieIdRef = useRef<string | null>(null);
 
   /** 注册/卸载片库条目 DOM，供新增后滚动定位。 */
   const registerMovieLibraryItemEl = useCallback((movieId: string, el: HTMLElement | null) => {
@@ -3620,6 +3735,80 @@ export default function App() {
     };
   }, [pendingScrollMovieId, filteredMovies, viewMode, isMoviesHydrated]);
 
+  /**
+   * Poster View ↔ List View：切换前捕获锚点影片 id，切换后在目标视口滚至相近位置。
+   */
+  const handleLibraryViewModeChange = useCallback(
+    (next: 'grid' | 'list') => {
+      if (next === viewMode) return;
+
+      const container = mainLibraryScrollRef.current;
+      if (
+        container &&
+        container.scrollTop > VIEW_SWITCH_SCROLL_THRESHOLD_PX &&
+        filteredMovies.length > 0
+      ) {
+        const orderedIds = filteredMovies.map((m) => m.id);
+        const anchorId =
+          viewMode === 'grid'
+            ? findGridScrollAnchorMovieId(
+                container,
+                orderedIds,
+                movieLibraryItemElsRef.current,
+              )
+            : findListScrollAnchorMovieId(
+                container,
+                orderedIds,
+                movieLibraryItemElsRef.current,
+              );
+        pendingViewSwitchScrollMovieIdRef.current = anchorId;
+      } else {
+        pendingViewSwitchScrollMovieIdRef.current = null;
+      }
+
+      setViewMode(next);
+    },
+    [viewMode, filteredMovies],
+  );
+
+  /** 视图切换后：按锚点影片 id 恢复目标视图的纵向滚动。 */
+  useLayoutEffect(() => {
+    const anchorId = pendingViewSwitchScrollMovieIdRef.current;
+    if (!anchorId || !isMoviesHydrated) return;
+
+    pendingViewSwitchScrollMovieIdRef.current = null;
+
+    let cancelled = false;
+    let rafId = 0;
+
+    const tryScrollToAnchor = (): boolean => {
+      const el = movieLibraryItemElsRef.current.get(anchorId);
+      const container = mainLibraryScrollRef.current;
+      if (!el || !container) return false;
+      scrollLibraryItemNearTop(
+        container,
+        el,
+        VIEW_SWITCH_SCROLL_TOP_INSET_PX,
+      );
+      return true;
+    };
+
+    if (tryScrollToAnchor()) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    rafId = window.requestAnimationFrame(() => {
+      if (!cancelled) tryScrollToAnchor();
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [viewMode, isMoviesHydrated, filteredMovies]);
+
   /** 侧栏「All Films」是否为默认筛选态（与 `resetFilters` 后一致）。 */
   const isAllFilmsDefaultView =
     !isRecentlyAddedFilter &&
@@ -4331,38 +4520,14 @@ export default function App() {
               className="input-focus-primary w-full bg-black/20 border border-white/10 rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all placeholder:text-white/20 text-white shadow-inner"
             />
             {searchQuery && (
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  if (!e.isPrimary) return;
-                  setIsSidebarClearSearchPressed(true);
-                }}
-                onPointerUp={(e) => {
-                  if (!e.isPrimary) return;
+              <ClearSearchButton
+                iconSize={14}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20"
+                onClear={() => {
                   setSearchQuery('');
-                  setIsSidebarClearSearchPressed(false);
                   searchInputRef.current?.focus();
                 }}
-                onPointerCancel={() => setIsSidebarClearSearchPressed(false)}
-                onPointerLeave={() => setIsSidebarClearSearchPressed(false)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20"
-                title="Clear search"
-              >
-                <img
-                  draggable={false}
-                  src={
-                    isSidebarClearSearchPressed
-                      ? '/icons/clear-search-pressed.svg'
-                      : '/icons/clear-search.svg'
-                  }
-                  alt=""
-                  width={14}
-                  height={14}
-                  className="pointer-events-none h-3.5 w-3.5 select-none object-contain"
-                  decoding="async"
-                  aria-hidden
-                />
-              </button>
+              />
             )}
           </div>
         </div>
@@ -4880,7 +5045,7 @@ export default function App() {
                 <div className="flex h-9 min-w-[5.5rem] shrink-0 items-center justify-start gap-2">
                   <button
                     type="button"
-                    onClick={() => setViewMode('grid')}
+                    onClick={() => handleLibraryViewModeChange('grid')}
                     title={mainLibraryToolbarLockReason ?? 'Grid view'}
                     aria-label="Grid view"
                     aria-pressed={viewMode === 'grid'}
@@ -4938,7 +5103,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setViewMode('list')}
+                    onClick={() => handleLibraryViewModeChange('list')}
                     title={mainLibraryToolbarLockReason ?? 'List view'}
                     aria-label="List view"
                     aria-pressed={viewMode === 'list'}
@@ -6596,17 +6761,11 @@ export default function App() {
                       }`}
                     />
                     {newMovieTitle ? (
-                      <button
-                        type="button"
+                      <ClearSearchButton
+                        iconSize={16}
                         disabled={isAdding}
-                        onPointerDown={(e) => {
-                          if (!e.isPrimary) return;
-                          if (isAdding) return;
-                          setIsAddMovieClearSearchPressed(true);
-                        }}
-                        onPointerUp={(e) => {
-                          if (!e.isPrimary) return;
-                          if (isAdding) return;
+                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 disabled:pointer-events-none disabled:opacity-40"
+                        onClear={() => {
                           addMovieSearchSeqRef.current += 1;
                           setNewMovieTitle('');
                           setAddMovieSearchHits([]);
@@ -6615,29 +6774,9 @@ export default function App() {
                           setAddMovieSuggestionsDismissed(true);
                           setAddMovieActiveSuggestionIndex(-1);
                           if (addError) setAddError('');
-                          setIsAddMovieClearSearchPressed(false);
                           addMovieTitleSearchInputRef.current?.focus();
                         }}
-                        onPointerCancel={() => setIsAddMovieClearSearchPressed(false)}
-                        onPointerLeave={() => setIsAddMovieClearSearchPressed(false)}
-                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 disabled:pointer-events-none disabled:opacity-40"
-                        title="Clear search"
-                      >
-                        <img
-                          draggable={false}
-                          src={
-                            isAddMovieClearSearchPressed
-                              ? '/icons/clear-search-pressed.svg'
-                              : '/icons/clear-search.svg'
-                          }
-                          alt=""
-                          width={16}
-                          height={16}
-                          className="pointer-events-none h-4 w-4 select-none object-contain"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </button>
+                      />
                     ) : null}
                   </div>
                   {addMovieSearchError ? (
@@ -6659,6 +6798,10 @@ export default function App() {
                         ) : null}
                         {addMovieSearchHits.map((hit, idx) => {
                           const yearLabel = hit.year != null ? String(hit.year) : '—';
+                          const directorLabel =
+                            typeof hit.director === 'string' && hit.director.trim()
+                              ? hit.director.trim()
+                              : null;
                           const active = idx === addMovieActiveSuggestionIndex;
                           return (
                             <button
@@ -6705,7 +6848,16 @@ export default function App() {
                                     className="pointer-events-none h-4 w-4 shrink-0 object-contain opacity-0 transition-opacity duration-150 group-hover/addsug:opacity-100"
                                   />
                                 </div>
-                                <div className="text-[11px] leading-5 text-white/40 tabular-nums">{yearLabel}</div>
+                                <div className="text-[11px] leading-5 text-white/40 tabular-nums">
+                                  {directorLabel ? (
+                                    <span className="inline-flex items-center">
+                                      <span>{yearLabel}</span>
+                                      <span className="ml-2">{directorLabel}</span>
+                                    </span>
+                                  ) : (
+                                    yearLabel
+                                  )}
+                                </div>
                               </div>
                             </button>
                           );

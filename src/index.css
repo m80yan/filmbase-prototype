@@ -190,8 +190,34 @@
 }
 
 .film-dna-stage-fit {
-  transform: scale(min(100cqw / 1080, 100cqh / 871));
+  transform: translateY(var(--film-dna-stage-anchor-offset-y, 0px))
+    scale(min(100cqw / 1080, 100cqh / var(--film-dna-stage-h, 871)));
   transform-origin: center center;
+}
+
+/** Film DNA：中心海报上方关系摘要（影研注释，非 tooltip）。 */
+.film-dna-relationship-summary {
+  pointer-events: none;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/** Film DNA：海报右侧 significance 摘要（奖项、文化影响、历史地位）。 */
+.film-dna-significance-summary {
+  pointer-events: none;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/** Film DNA：系列轴前/续作 hover 剧情与票房摘要。 */
+.film-dna-series-summary {
+  pointer-events: none;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/** Film DNA：Influence ➝ / ➝ Legacy 连线方向标签。 */
+.film-dna-direction-label {
+  pointer-events: none;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .scrollbar-hide::-webkit-scrollbar {

@@ -314,7 +314,52 @@ white-space: nowrap;
 overflow: hidden;
 text-overflow: ellipsis;
 
-## Connection Line SVG
+
+## Film DNA Line Assets — Updated
+
+Base stage:
+- width: 1080px
+- height: 871px
+
+Center Poster:
+- x: 483
+- y: 350
+- width: 114
+- height: 171
+
+Center poster anchor points:
+- left edge center: x 483, y435.5
+- right edge center: x 597, y435.5
+- top edge center: x 540, y 350
+- bottom edge center: x 540, y 521
+
+---
+
+### Line Influence 01
+
+Figma bounding box:
+- x: 51
+- y: 415.5
+- width: 426.5
+- height: 133
+
+Implementation SVG size:
+- width: 426.5
+- height: 133
+
+Expected center anchor:
+- ends at Center Poster left edge center: x 483, y435.5
+
+Source anchor:
+- starts at Influence Node 01 poster right edge center: x 51, y 533.5
+
+SVG:
+```svg
+<svg width="432" height="124" viewBox="0 0 432 124" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M421.833 9.63743C421.833 10.1897 422.51 10.5802 422.988 10.3041L430.679 5.86393C431.157 5.58779 431.157 4.80674 430.679 4.5306L422.988 0.0904298C422.51 -0.185713 421.833 0.204812 421.833 0.757096V9.63743ZM220.333 5.19727V4.19727L219.333 5.19727H220.333ZM220.333 118.197V119.197L221.333 118.197H220.333ZM0.000162601 118.197C0.000162601 121.143 2.38798 123.531 5.3335 123.531C8.27901 123.531 10.6668 121.143 10.6668 118.197C10.6668 115.252 8.27901 112.864 5.3335 112.864C2.38798 112.864 0.000162601 115.252 0.000162601 118.197ZM422.833 5.19727V4.19727H220.333V5.19727V6.19727H422.833V5.19727ZM220.333 5.19727H219.333V118.197H220.333H221.333V5.19727H220.333ZM220.333 118.197V117.197H5.3335V118.197V119.197H220.333V118.197Z" fill="white" fill-opacity="0.25"/>
+</svg>
+```
+
 
 Implementation notes:
 - These line SVGs are exported from Figma as filled paths, not stroke paths.

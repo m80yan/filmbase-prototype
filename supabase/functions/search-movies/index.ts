@@ -54,6 +54,12 @@ type TmdbExternalIdsResponse = {
   imdb_id?: string | null;
 };
 
+type TmdbCrewMember = { job?: string; name?: string };
+
+type TmdbCredits = {
+  crew?: TmdbCrewMember[];
+};
+
 /** 单条影片摘要（返回给调用方）。 */
 type MovieSearchHit = {
   tmdbId: number;
@@ -66,6 +72,8 @@ type MovieSearchHit = {
   overview: string;
   popularity: number;
   voteAverage: number;
+  /** TMDb credits 中 `job === "Director"` 的姓名；无则空串。 */
+  director: string;
 };
 
 type SearchMoviesSuccess = {
@@ -129,7 +137,36 @@ function mapResult(r: TmdbSearchMovieResult): MovieSearchHit | null {
     popularity: typeof r.popularity === "number" && Number.isFinite(r.popularity) ? r.popularity : 0,
     voteAverage:
       typeof r.vote_average === "number" && Number.isFinite(r.vote_average) ? r.vote_average : 0,
+    director: "",
   };
+}
+
+/**
+ * 从 credits.crew 中取 `job === "Director"` 的姓名，多个用逗号连接。
+ */
+function extractDirectors(crew: TmdbCrewMember[] | undefined): string {
+  if (!crew?.length) return "";
+  const names = crew
+    .filter((c) => c.job === "Director" && c.name)
+    .map((c) => c.name as string);
+  return [...new Set(names)].join(", ");
+}
+
+/**
+ * 抓取单部影片 credits，返回导演姓名（无则空串）。错误静默吞掉。
+ */
+async function fetchDirectorForTmdb(
+  tmdbId: number,
+  token: string
+): Promise<string> {
+  try {
+    const res = await tmdbFetch(`/movie/${tmdbId}/credits`, token);
+    if (!res.ok) return "";
+    const json = (await res.json()) as TmdbCredits;
+    return extractDirectors(json.crew);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -282,11 +319,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (mapped.length >= MAX_RESULTS) break;
   }
 
-  const imdbIds = await Promise.all(
-    mapped.map((hit) => fetchImdbIdForTmdb(hit.tmdbId, token))
-  );
+  const [imdbIds, directors] = await Promise.all([
+    Promise.all(mapped.map((hit) => fetchImdbIdForTmdb(hit.tmdbId, token))),
+    Promise.all(mapped.map((hit) => fetchDirectorForTmdb(hit.tmdbId, token))),
+  ]);
   for (let i = 0; i < mapped.length; i++) {
     mapped[i].imdbId = imdbIds[i];
+    mapped[i].director = directors[i] ?? "";
   }
 
   // 稳定排序：有 imdbId 的项优先（相对原顺序保持），便于前端把可直接 enrich 的候选放在前面。

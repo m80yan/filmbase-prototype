@@ -44,6 +44,15 @@ type FilmDnaNode = {
   year: number | null;
   note: string;
   posterUrl?: string;
+  /** TMDb movie id（collection part / 搜索解析；系列摘要 enrichment）。 */
+  tmdbMovieId?: number;
+  relationshipSummaryTitle?: string;
+  relationshipBullets?: string[];
+  lineageConnectedAbove?: boolean;
+  sameSourceVertical?: boolean;
+  significanceBullets?: string[];
+  plotSummary?: string;
+  boxOffice?: string;
 };
 
 type FilmDnaTree = {
@@ -116,6 +125,78 @@ type ErrorJsonBody = {
   details?: string;
 };
 
+const DEBUG_INGEST_URL =
+  "http://127.0.0.1:7684/ingest/27c00267-50f5-4ead-aaaa-e8a9751002f8";
+const DEBUG_SESSION_ID = "cd85de";
+
+/**
+ * Debug 模式：系列节点 plotSummary / boxOffice 快照（不含密钥）。
+ *
+ * @param nodes 系列槽位节点
+ */
+function seriesSummaryDebugSnapshot(nodes: FilmDnaNode[] | undefined) {
+  return (nodes ?? []).map((n) => ({
+    title: n.title,
+    year: n.year,
+    hasPlotSummary: Boolean(n.plotSummary?.trim()),
+    hasBoxOffice: Boolean(n.boxOffice?.trim()),
+    plotSummaryPreview: n.plotSummary?.slice(0, 48) ?? null,
+    boxOffice: n.boxOffice ?? null,
+  }));
+}
+
+/**
+ * Debug 模式：GPT 原始 JSON 中系列槽位字段快照。
+ *
+ * @param items `seriesPrevious` / `seriesNext` 原始数组
+ */
+function seriesSummaryRawGptSnapshot(items: unknown) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => {
+    if (!item || typeof item !== "object") return { invalid: true };
+    const o = item as Record<string, unknown>;
+    return {
+      title: o.title,
+      year: o.year,
+      hasPlotSummary:
+        typeof o.plotSummary === "string" && o.plotSummary.trim().length > 0,
+      hasBoxOffice:
+        typeof o.boxOffice === "string" && o.boxOffice.trim().length > 0,
+    };
+  });
+}
+
+/**
+ * @param location 日志位置
+ * @param message 简述
+ * @param data 结构化数据
+ * @param hypothesisId 假设编号
+ */
+function agentDebugLog(
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  hypothesisId: string,
+): void {
+  const payload = {
+    sessionId: DEBUG_SESSION_ID,
+    location,
+    message,
+    data,
+    hypothesisId,
+    timestamp: Date.now(),
+  };
+  console.log(`${LOG_PREFIX} [debug][${hypothesisId}]`, message, data);
+  fetch(DEBUG_INGEST_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": DEBUG_SESSION_ID,
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
 /**
  * 截断并去除可能含密钥的片段（仅用于日志/客户端 details）。
  *
@@ -145,6 +226,56 @@ function jsonError(status: number, body: ErrorJsonBody): Response {
 }
 
 /**
+ * 规范化关系摘要要点（最多 4 条短句）。
+ *
+ * @param raw LLM 返回的 bullets 字段
+ */
+function normalizeRelationshipBullets(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const bullets = raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 4);
+  return bullets.length > 0 ? bullets : undefined;
+}
+
+/**
+ * 规范化 significance 悬停摘要要点（最多 4 条）。
+ *
+ * @param raw LLM 返回的 bullets 字段
+ */
+function normalizeSignificanceBullets(raw: unknown): string[] | undefined {
+  return normalizeRelationshipBullets(raw);
+}
+
+/**
+ * 规范化系列轴剧情摘要（单句）。
+ *
+ * @param raw LLM 返回的 plotSummary
+ */
+function normalizePlotSummary(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, 280);
+}
+
+/**
+ * 规范化系列轴票房字段（保留原始金额文本供 UI 格式化）。
+ *
+ * @param raw LLM 返回的 boxOffice
+ */
+function normalizeBoxOffice(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "—" || /^n\/a$/i.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed.slice(0, 64);
+}
+
+/**
  * 规范化 LLM 返回的单个节点。
  *
  * @param raw 原始对象
@@ -164,6 +295,42 @@ function normalizeNode(raw: unknown): FilmDnaNode | null {
   const node: FilmDnaNode = { title, year, note };
   if (typeof o.posterUrl === "string" && o.posterUrl.trim()) {
     node.posterUrl = o.posterUrl.trim();
+  }
+  const relationshipSummaryTitle =
+    typeof o.relationshipSummaryTitle === "string"
+      ? o.relationshipSummaryTitle.trim()
+      : "";
+  if (relationshipSummaryTitle) {
+    node.relationshipSummaryTitle = relationshipSummaryTitle.slice(0, 160);
+  }
+  const relationshipBullets = normalizeRelationshipBullets(
+    o.relationshipBullets,
+  );
+  if (relationshipBullets) {
+    node.relationshipBullets = relationshipBullets;
+  }
+  if (typeof o.lineageConnectedAbove === "boolean") {
+    node.lineageConnectedAbove = o.lineageConnectedAbove;
+  }
+  if (typeof o.sameSourceVertical === "boolean") {
+    node.sameSourceVertical = o.sameSourceVertical;
+  }
+  const significanceBullets = normalizeSignificanceBullets(
+    o.significanceBullets,
+  );
+  if (significanceBullets) {
+    node.significanceBullets = significanceBullets;
+  }
+  const plotSummary = normalizePlotSummary(o.plotSummary);
+  if (plotSummary) {
+    node.plotSummary = plotSummary;
+  }
+  const boxOffice = normalizeBoxOffice(o.boxOffice);
+  if (boxOffice) {
+    node.boxOffice = boxOffice;
+  }
+  if (typeof o.tmdbMovieId === "number" && o.tmdbMovieId > 0) {
+    node.tmdbMovieId = Math.round(o.tmdbMovieId);
   }
   return node;
 }
@@ -272,6 +439,57 @@ function pickTmdbMovieFromSearch(
 }
 
 /**
+ * TMDb `revenue` 格式化为紧凑 USD（如 `$136.4M`），供系列节点 `boxOffice` 字段。
+ *
+ * @param revenue TMDb movie.revenue（美元整数）
+ */
+function formatCompactUsdBoxOffice(
+  revenue: number | null | undefined,
+): string | undefined {
+  if (
+    revenue == null ||
+    typeof revenue !== "number" ||
+    !Number.isFinite(revenue) ||
+    revenue <= 0
+  ) {
+    return undefined;
+  }
+  const formatScaled = (scaled: number): string =>
+    scaled >= 10
+      ? scaled.toFixed(0)
+      : scaled.toFixed(1).replace(/\.0$/, "");
+
+  if (revenue >= 1_000_000_000) {
+    return `$${formatScaled(revenue / 1_000_000_000)}B`;
+  }
+  if (revenue >= 1_000_000) {
+    return `$${formatScaled(revenue / 1_000_000)}M`;
+  }
+  if (revenue >= 1_000) {
+    return `$${formatScaled(revenue / 1_000)}K`;
+  }
+  return `$${revenue.toLocaleString("en-US")}`;
+}
+
+/**
+ * 从 TMDb overview 生成系列节点 `plotSummary`。
+ *
+ * @param overview TMDb movie.overview
+ */
+function plotSummaryFromTmdbOverview(
+  overview: string | undefined,
+): string | undefined {
+  const text = (overview ?? "").trim();
+  if (!text) return undefined;
+  return normalizePlotSummary(text.slice(0, 280));
+}
+
+type TmdbMovieSummaryDetails = {
+  overview?: string;
+  revenue?: number | null;
+};
+
+/**
  * 由 `poster_path` 生成 w500 海报 URL。
  */
 function posterUrlFromPath(path: string | null | undefined): string | null {
@@ -338,6 +556,7 @@ function filmDnaNodeFromCollectionPart(
   };
   const posterUrl = posterUrlFromPath(part.poster_path ?? null);
   if (posterUrl) node.posterUrl = posterUrl;
+  if (part.id > 0) node.tmdbMovieId = part.id;
   return node;
 }
 
@@ -501,23 +720,73 @@ async function applyTmdbSeriesToTree(
     })),
   });
 
+  // #region agent log
+  agentDebugLog(
+    "generate-film-dna/index.ts:applyTmdbSeriesToTree:entry",
+    "GPT tree before TMDb series apply",
+    {
+      matchedInCollection: detection.matchedInCollection,
+      gptSeriesPrevious: seriesSummaryDebugSnapshot(tree.seriesPrevious),
+      gptSeriesNext: seriesSummaryDebugSnapshot(tree.seriesNext),
+    },
+    "D",
+  );
+  // #endregion
+
   if (!detection.matchedInCollection) {
-    return reconcileSeriesAndLegacy(tree);
+    const noTmdb = applySeriesSummaryScope(
+      applySignificanceScope(
+        applySeriesLineageFlags(reconcileSeriesAndLegacy(tree)),
+      ),
+    );
+    // #region agent log
+    agentDebugLog(
+      "generate-film-dna/index.ts:applyTmdbSeriesToTree:no-collection",
+      "After reconcile (no TMDb collection)",
+      {
+        seriesPrevious: seriesSummaryDebugSnapshot(noTmdb.seriesPrevious),
+        seriesNext: seriesSummaryDebugSnapshot(noTmdb.seriesNext),
+      },
+      "D",
+    );
+    // #endregion
+    return noTmdb;
   }
 
   const next: FilmDnaTree = { ...tree };
   if (detection.seriesPrevious.length) {
-    next.seriesPrevious = detection.seriesPrevious;
+    next.seriesPrevious = mergeGptSeriesSlot(
+      detection.seriesPrevious,
+      tree.seriesPrevious,
+    );
   } else {
     delete next.seriesPrevious;
   }
   if (detection.seriesNext.length) {
-    next.seriesNext = detection.seriesNext;
+    next.seriesNext = mergeGptSeriesSlot(detection.seriesNext, tree.seriesNext);
   } else {
     delete next.seriesNext;
   }
 
-  return reconcileSeriesAndLegacy(next);
+  // #region agent log
+  agentDebugLog(
+    "generate-film-dna/index.ts:applyTmdbSeriesToTree:post-merge",
+    "After TMDb slot merge, before reconcile",
+    {
+      seriesPrevious: seriesSummaryDebugSnapshot(next.seriesPrevious),
+      seriesNext: seriesSummaryDebugSnapshot(next.seriesNext),
+    },
+    "C",
+  );
+  console.log("seriesPrevious", next.seriesPrevious);
+  console.log("seriesNext", next.seriesNext);
+  // #endregion
+
+  return applySeriesSummaryScope(
+    applySignificanceScope(
+      applySeriesLineageFlags(reconcileSeriesAndLegacy(next)),
+    ),
+  );
 }
 
 /**
@@ -533,6 +802,139 @@ async function enrichNodePoster(
   if (!posterUrl) return node;
 
   return { ...node, posterUrl };
+}
+
+/**
+ * 解析系列节点的 TMDb movie id（节点字段优先，否则 title+year 搜索）。
+ *
+ * @param node 系列节点
+ * @param token TMDb Read Access Token
+ */
+async function resolveSeriesNodeTmdbMovieId(
+  node: FilmDnaNode,
+  token: string,
+): Promise<number | null> {
+  if (typeof node.tmdbMovieId === "number" && node.tmdbMovieId > 0) {
+    return node.tmdbMovieId;
+  }
+  const hit = await searchTmdbMovie(node.title, node.year, token);
+  return hit?.id ?? null;
+}
+
+/**
+ * 从 TMDb `/movie/{id}` 拉取系列摘要字段（剧情 + 紧凑票房）。
+ *
+ * @param movieId TMDb movie id
+ * @param token TMDb Read Access Token
+ */
+async function fetchSeriesMetadataFromTmdb(
+  movieId: number,
+  token: string,
+): Promise<{ plotSummary?: string; boxOffice?: string }> {
+  const res = await tmdbFetch(`/movie/${movieId}`, token);
+  if (!res.ok) {
+    console.warn(`${LOG_PREFIX} TMDb movie summary failed`, {
+      movieId,
+      status: res.status,
+    });
+    return {};
+  }
+  const movie = (await res.json()) as TmdbMovieSummaryDetails;
+  const plotSummary = plotSummaryFromTmdbOverview(movie.overview);
+  const boxOffice = formatCompactUsdBoxOffice(movie.revenue ?? undefined);
+  return {
+    ...(plotSummary ? { plotSummary } : {}),
+    ...(boxOffice ? { boxOffice } : {}),
+  };
+}
+
+/**
+ * 用 TMDb 详情填充系列节点 plotSummary / boxOffice（TMDb 为准，覆盖 GPT 缺失或空值）。
+ *
+ * @param node 系列节点
+ * @param token TMDb Read Access Token
+ */
+async function enrichSeriesNodeFromTmdb(
+  node: FilmDnaNode,
+  token: string,
+): Promise<FilmDnaNode> {
+  let next: FilmDnaNode = { ...node };
+
+  if (!next.posterUrl?.trim()) {
+    next = await enrichNodePoster(next, token);
+  }
+
+  const movieId = await resolveSeriesNodeTmdbMovieId(next, token);
+  if (!movieId) {
+    console.warn(`${LOG_PREFIX} series node TMDb id unresolved`, {
+      title: next.title,
+      year: next.year,
+    });
+    return next;
+  }
+
+  next.tmdbMovieId = movieId;
+  const meta = await fetchSeriesMetadataFromTmdb(movieId, token);
+
+  if (meta.plotSummary) {
+    next.plotSummary = meta.plotSummary;
+  }
+  if (meta.boxOffice) {
+    next.boxOffice = meta.boxOffice;
+  }
+
+  // #region agent log
+  agentDebugLog(
+    "generate-film-dna/index.ts:enrichSeriesNodeFromTmdb",
+    "TMDb series metadata enrich",
+    {
+      title: next.title,
+      year: next.year,
+      movieId,
+      plotSummary: next.plotSummary ?? null,
+      boxOffice: next.boxOffice ?? null,
+      runId: "post-fix-v2",
+    },
+    "F",
+  );
+  // #endregion
+
+  return next;
+}
+
+/**
+ * 返回前最后一道关卡：为所有 seriesPrevious / seriesNext 强制写入 TMDb 摘要。
+ *
+ * @param tree Film DNA 树
+ * @param token TMDb Read Access Token
+ */
+async function ensureSeriesNodesSummaries(
+  tree: FilmDnaTree,
+  token: string,
+): Promise<FilmDnaTree> {
+  const enrichSlot = async (
+    nodes: FilmDnaNode[] | undefined,
+    maxCount: number,
+  ): Promise<FilmDnaNode[] | undefined> => {
+    if (!nodes?.length) return undefined;
+    return Promise.all(
+      nodes
+        .slice(0, maxCount)
+        .map((node) => enrichSeriesNodeFromTmdb(node, token)),
+    );
+  };
+
+  const seriesPrevious = await enrichSlot(
+    tree.seriesPrevious,
+    MAX_SERIES_PREVIOUS,
+  );
+  const seriesNext = await enrichSlot(tree.seriesNext, MAX_SERIES_NEXT);
+
+  return {
+    ...tree,
+    ...(seriesPrevious?.length ? { seriesPrevious } : {}),
+    ...(seriesNext?.length ? { seriesNext } : {}),
+  };
 }
 
 /**
@@ -629,13 +1031,19 @@ function parseFilmDnaTree(
   );
   const seriesNext = parseSeriesNodes(root.seriesNext, MAX_SERIES_NEXT);
 
-  return reconcileSeriesAndLegacy({
-    center,
-    left,
-    right,
-    ...(seriesPrevious.length ? { seriesPrevious } : {}),
-    ...(seriesNext.length ? { seriesNext } : {}),
-  });
+  return applySeriesSummaryScope(
+    applySignificanceScope(
+      applySeriesLineageFlags(
+        reconcileSeriesAndLegacy({
+          center,
+          left,
+          right,
+          ...(seriesPrevious.length ? { seriesPrevious } : {}),
+          ...(seriesNext.length ? { seriesNext } : {}),
+        }),
+      ),
+    ),
+  );
 }
 
 /**
@@ -652,24 +1060,318 @@ function filmNodesMatchTitle(a: FilmDnaNode, b: FilmDnaNode): boolean {
   return normalizeFilmTitleKey(a.title) === normalizeFilmTitleKey(b.title);
 }
 
+const NON_CANONICAL_LINEAGE_RE =
+  /\b(remake|re-?adaptation|readaptation|reboot|new adaptation|same source material|same story|different era|prior (film|version|adaptation)|earlier (film|version|adaptation)|tv version|stage version|based on the same|another adaptation)\b/i;
+
+/**
+ * 推断系列链上、下相邻节点是否应绘制垂直连线（无显式 API 字段时）。
+ *
+ * @param upper 链中上方节点
+ * @param lower 链中下方节点
+ */
+function inferLineageConnectedAbove(
+  upper: FilmDnaNode,
+  lower: FilmDnaNode,
+): boolean {
+  if (filmNodesMatchTitle(upper, lower)) return false;
+  const combined = `${upper.note} ${lower.note} ${upper.title} ${lower.title}`;
+  if (NON_CANONICAL_LINEAGE_RE.test(combined)) return false;
+  return true;
+}
+
+/**
+ * 为系列链各节点补全 `lineageConnectedAbove`（保留 LLM 显式 `false`/`true`）。
+ *
+ * @param tree Film DNA 树
+ */
+function applySeriesLineageFlags(tree: FilmDnaTree): FilmDnaTree {
+  const chain: FilmDnaNode[] = [
+    ...(tree.seriesPrevious ?? []),
+    tree.center,
+    ...(tree.seriesNext ?? []),
+  ];
+  if (chain.length < 2) return tree;
+
+  const resolved = chain.map((node, index) => {
+    if (index === 0) return node;
+    const upper = chain[index - 1];
+    if (typeof node.lineageConnectedAbove === "boolean") return node;
+    return {
+      ...node,
+      lineageConnectedAbove: inferLineageConnectedAbove(upper, node),
+    };
+  });
+
+  const prevCount = tree.seriesPrevious?.length ?? 0;
+  const nextCount = tree.seriesNext?.length ?? 0;
+  const center = resolved[prevCount];
+  const seriesPrevious = prevCount
+    ? resolved.slice(0, prevCount)
+    : undefined;
+  const seriesNext = nextCount
+    ? resolved.slice(prevCount + 1)
+    : undefined;
+
+  return {
+    ...tree,
+    center,
+    ...(seriesPrevious?.length ? { seriesPrevious } : {}),
+    ...(seriesNext?.length ? { seriesNext } : {}),
+  };
+}
+
+/**
+ * 垂直轴节点是否为同源/重拍/改编（非规范续集链）。
+ *
+ * @param node 系列轴节点
+ * @param center 中心片
+ */
+function inferSameSourceVertical(
+  node: FilmDnaNode,
+  center: FilmDnaNode,
+): boolean {
+  if (typeof node.sameSourceVertical === "boolean") {
+    return node.sameSourceVertical;
+  }
+  if (node.lineageConnectedAbove === true) return false;
+  if (node.lineageConnectedAbove === false) return true;
+  if (isSameStoryTitleAsCenter(node, center)) return true;
+  const text = `${node.note} ${node.title}`;
+  return NON_CANONICAL_LINEAGE_RE.test(text);
+}
+
+/**
+ * 从节点移除 significance 相关字段。
+ *
+ * @param node 原始节点
+ */
+function stripSignificanceFields(node: FilmDnaNode): FilmDnaNode {
+  const next = { ...node };
+  delete next.significanceBullets;
+  delete next.sameSourceVertical;
+  return next;
+}
+
+/**
+ * 从节点移除系列轴剧情/票房摘要字段。
+ *
+ * @param node 原始节点
+ */
+function stripSeriesSummaryFields(node: FilmDnaNode): FilmDnaNode {
+  const next = { ...node };
+  delete next.plotSummary;
+  delete next.boxOffice;
+  return next;
+}
+
+/**
+ * 按槽位限制 plotSummary / boxOffice：仅 seriesPrevious / seriesNext 保留。
+ *
+ * @param tree Film DNA 树
+ */
+function applySeriesSummaryScope(tree: FilmDnaTree): FilmDnaTree {
+  const center = stripSeriesSummaryFields(tree.center);
+  const left = tree.left.map(stripSeriesSummaryFields);
+  const right = tree.right.map(stripSeriesSummaryFields);
+
+  const mapSeriesSlot = (nodes: FilmDnaNode[] | undefined) => {
+    if (!nodes?.length) return undefined;
+    return nodes.map((node) => {
+      const scoped: FilmDnaNode = { ...node };
+      const plotSummary = normalizePlotSummary(scoped.plotSummary);
+      if (plotSummary) {
+        scoped.plotSummary = plotSummary;
+      } else {
+        delete scoped.plotSummary;
+      }
+      const boxOffice = normalizeBoxOffice(scoped.boxOffice);
+      if (boxOffice) {
+        scoped.boxOffice = boxOffice;
+      } else {
+        delete scoped.boxOffice;
+      }
+      return scoped;
+    });
+  };
+
+  const seriesPrevious = mapSeriesSlot(tree.seriesPrevious);
+  const seriesNext = mapSeriesSlot(tree.seriesNext);
+
+  return {
+    center,
+    left,
+    right,
+    ...(seriesPrevious?.length ? { seriesPrevious } : {}),
+    ...(seriesNext?.length ? { seriesNext } : {}),
+  };
+}
+
+/**
+ * TMDb 系列槽覆盖时，按片名+年份保留 GPT 生成的剧情/票房摘要。
+ *
+ * @param target TMDb 节点
+ * @param gptSources 覆盖前的 GPT 系列节点
+ */
+function mergeGptSeriesSummaryFields(
+  target: FilmDnaNode,
+  gptSources: FilmDnaNode[],
+): FilmDnaNode {
+  const match = gptSources.find(
+    (s) => filmNodesMatchTitle(s, target) && s.year === target.year,
+  );
+  // #region agent log
+  agentDebugLog(
+    "generate-film-dna/index.ts:mergeGptSeriesSummaryFields",
+    "TMDb merge title+year match",
+    {
+      targetTitle: target.title,
+      targetYear: target.year,
+      matched: Boolean(match),
+      gptHasPlot: Boolean(match?.plotSummary?.trim()),
+      gptHasBoxOffice: Boolean(match?.boxOffice?.trim()),
+    },
+    "C",
+  );
+  // #endregion
+  if (!match) return target;
+  const next = { ...target };
+  if (typeof match.tmdbMovieId === "number" && match.tmdbMovieId > 0) {
+    next.tmdbMovieId = match.tmdbMovieId;
+  }
+  const plotSummary = normalizePlotSummary(match.plotSummary);
+  if (plotSummary) next.plotSummary = plotSummary;
+  const boxOffice = normalizeBoxOffice(match.boxOffice);
+  if (boxOffice) next.boxOffice = boxOffice;
+  return next;
+}
+
+/**
+ * @param tmdbNodes TMDb collection 节点
+ * @param gptNodes 覆盖前的 GPT 系列节点
+ */
+function mergeGptSeriesSlot(
+  tmdbNodes: FilmDnaNode[],
+  gptNodes: FilmDnaNode[] | undefined,
+): FilmDnaNode[] {
+  if (!gptNodes?.length) return tmdbNodes;
+  return tmdbNodes.map((node, index) => {
+    const byTitle = mergeGptSeriesSummaryFields(node, gptNodes);
+    const hasSummary = Boolean(byTitle.plotSummary?.trim()) ||
+      Boolean(byTitle.boxOffice?.trim());
+    if (hasSummary) return byTitle;
+    const gptPeer = gptNodes[index];
+    if (!gptPeer) return byTitle;
+    return mergeGptSeriesSummaryFields(node, [gptPeer]);
+  });
+}
+
+/**
+ * 按槽位限制 significanceBullets：仅垂直轴同源/重拍/改编节点保留。
+ *
+ * @param tree Film DNA 树
+ */
+function applySignificanceScope(tree: FilmDnaTree): FilmDnaTree {
+  const center = stripSignificanceFields(tree.center);
+  const left = tree.left.map(stripSignificanceFields);
+  const right = tree.right.map(stripSignificanceFields);
+
+  const mapSeriesSlot = (nodes: FilmDnaNode[] | undefined) => {
+    if (!nodes?.length) return undefined;
+    return nodes.map((node) => {
+      const eligible = inferSameSourceVertical(node, tree.center);
+      const scoped: FilmDnaNode = {
+        ...node,
+        sameSourceVertical: eligible,
+      };
+      if (!eligible) {
+        delete scoped.significanceBullets;
+      } else if (scoped.significanceBullets) {
+        scoped.significanceBullets = normalizeSignificanceBullets(
+          scoped.significanceBullets,
+        );
+        if (!scoped.significanceBullets) delete scoped.significanceBullets;
+      }
+      return scoped;
+    });
+  };
+
+  const seriesPrevious = mapSeriesSlot(tree.seriesPrevious);
+  const seriesNext = mapSeriesSlot(tree.seriesNext);
+
+  return {
+    center,
+    left,
+    right,
+    ...(seriesPrevious?.length ? { seriesPrevious } : {}),
+    ...(seriesNext?.length ? { seriesNext } : {}),
+  };
+}
+
+/**
+ * 节点是否与 center 为同一故事/片名（重拍、改编轴用；非系列全集去重）。
+ *
+ * @param node 候选节点
+ * @param center 中心片
+ */
+function isSameStoryTitleAsCenter(
+  node: FilmDnaNode,
+  center: FilmDnaNode,
+): boolean {
+  return filmNodesMatchTitle(node, center);
+}
+
 /**
  * 备注/标题是否像系列续作（误放入 `right[]` 时提升为 `seriesNext`）。
+ * 仅匹配明确续作信号，避免把影史 Legacy 节点误判为系列续作。
  */
-function isLikelySeriesContinuation(node: FilmDnaNode): boolean {
+function isLikelySeriesContinuation(
+  node: FilmDnaNode,
+  center: FilmDnaNode,
+): boolean {
   const text = `${node.note} ${node.title}`.toLowerCase();
-  return /\b(sequel|follow-up|follow up|continuation|next (film|installment|chapter|entry)|direct successor|same series|franchise)\b/.test(
-    text,
-  );
+  const hasCue =
+    /\b(sequel|direct sequel|follow-up|follow up|next installment|next entry|part \d|#\d)\b/.test(
+      text,
+    );
+  return hasCue && titlesShareFranchiseRoot(node.title, center.title);
 }
 
 /**
  * 备注/标题是否像系列前作（误放入 `left[]` 时提升为 `seriesPrevious`）。
  */
-function isLikelySeriesPrequel(node: FilmDnaNode): boolean {
+function isLikelySeriesPrequel(node: FilmDnaNode, center: FilmDnaNode): boolean {
   const text = `${node.note} ${node.title}`.toLowerCase();
-  return /\b(prequel|prior (film|installment|chapter|entry)|previous (film|installment)|earlier (film|installment)|same series|franchise)\b/.test(
-    text,
-  );
+  const hasCue =
+    /\b(prequel|direct prequel|prior installment|previous installment|part \d|#\d)\b/.test(
+      text,
+    );
+  return hasCue && titlesShareFranchiseRoot(node.title, center.title);
+}
+
+/**
+ * 两标题是否可能属于同一系列命名（分集/Part 编号或共享词干）。
+ *
+ * @param a 标题 A
+ * @param b 标题 B
+ */
+function titlesShareFranchiseRoot(a: string, b: string): boolean {
+  const keyA = normalizeFilmTitleKey(a);
+  const keyB = normalizeFilmTitleKey(b);
+  if (keyA === keyB) return true;
+  if (keyA.includes(keyB) || keyB.includes(keyA)) return true;
+  const stripSequel = (s: string) =>
+    s
+      .replace(
+        /\b(part|chapter|episode|vol\.?|volume)\s*\d+\b/gi,
+        "",
+      )
+      .replace(/\s*:\s*.*$/, "")
+      .replace(/\s+\d+$/, "")
+      .trim();
+  const rootA = stripSequel(keyA);
+  const rootB = stripSequel(keyB);
+  if (!rootA || !rootB) return false;
+  return rootA === rootB || rootA.includes(rootB) || rootB.includes(rootA);
 }
 
 /**
@@ -710,6 +1412,71 @@ function promoteSameTitlePriorVersion(tree: FilmDnaTree): FilmDnaTree {
 }
 
 /**
+ * 中心年份是否可用于时间序校验。
+ *
+ * @param year 年份字段
+ */
+function isUsableFilmYear(year: number | null | undefined): year is number {
+  return typeof year === "number" && Number.isFinite(year) && year > 0;
+}
+
+/**
+ * Influence 节点年份是否严格早于 center（未知年份保留，由 prompt 约束补全）。
+ *
+ * @param nodeYear 关联片年份
+ * @param centerYear 中心片年份
+ */
+function isChronologyValidForInfluence(
+  nodeYear: number | null,
+  centerYear: number | null,
+): boolean {
+  if (!isUsableFilmYear(centerYear)) return true;
+  if (!isUsableFilmYear(nodeYear)) return true;
+  return nodeYear < centerYear;
+}
+
+/**
+ * Legacy 节点年份是否严格晚于 center（未知年份保留）。
+ *
+ * @param nodeYear 关联片年份
+ * @param centerYear 中心片年份
+ */
+function isChronologyValidForLegacy(
+  nodeYear: number | null,
+  centerYear: number | null,
+): boolean {
+  if (!isUsableFilmYear(centerYear)) return true;
+  if (!isUsableFilmYear(nodeYear)) return true;
+  return nodeYear > centerYear;
+}
+
+/**
+ * 剔除违反 Influence/Legacy/系列时间方向的节点（服务端硬约束）。
+ *
+ * @param tree 待校验树
+ */
+function enforceFilmDnaChronology(tree: FilmDnaTree): FilmDnaTree {
+  const centerYear = isUsableFilmYear(tree.center.year)
+    ? tree.center.year
+    : null;
+
+  const left = tree.left.filter((n) =>
+    isChronologyValidForInfluence(n.year, centerYear),
+  );
+  const right = tree.right.filter((n) =>
+    isChronologyValidForLegacy(n.year, centerYear),
+  );
+
+  return {
+    ...tree,
+    left,
+    right,
+    ...(tree.seriesPrevious?.length ? { seriesPrevious: tree.seriesPrevious } : {}),
+    ...(tree.seriesNext?.length ? { seriesNext: tree.seriesNext } : {}),
+  };
+}
+
+/**
  * 保证系列槽位与 Influence/Legacy 槽位互斥；必要时从 left/right 提升系列条目。
  */
 function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
@@ -721,33 +1488,35 @@ function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
   let seriesNext = promoted.seriesNext ? [...promoted.seriesNext] : [];
 
   if (!seriesNext.length) {
-    const sequelIdx = right.findIndex((n) => isLikelySeriesContinuation(n));
+    const sequelIdx = right.findIndex((n) =>
+      isLikelySeriesContinuation(n, promoted.center),
+    );
     if (sequelIdx !== -1) {
       seriesNext = [right.splice(sequelIdx, 1)[0]];
     }
   }
 
   if (!seriesPrevious.length) {
-    const prequelIdx = left.findIndex((n) => isLikelySeriesPrequel(n));
+    const prequelIdx = left.findIndex((n) =>
+      isLikelySeriesPrequel(n, promoted.center),
+    );
     if (prequelIdx !== -1) {
       seriesPrevious = [left.splice(prequelIdx, 1)[0]];
     }
   }
 
-  if (seriesNext.length) {
-    const nextKeys = new Set(
-      seriesNext.map((n) => normalizeFilmTitleKey(n.title)),
-    );
-    right = right.filter((n) => !nextKeys.has(normalizeFilmTitleKey(n.title)));
+  /** 仅当侧栏条目与 center 同片名且已上垂直轴时去重，避免系列全集标题误删 Influence/Legacy。 */
+  const verticalHasSameStory = (slot: FilmDnaNode[] | undefined) =>
+    (slot ?? []).some((n) => isSameStoryTitleAsCenter(n, promoted.center));
+
+  if (verticalHasSameStory(seriesPrevious)) {
+    left = left.filter((n) => !isSameStoryTitleAsCenter(n, promoted.center));
   }
-  if (seriesPrevious.length) {
-    const prevKeys = new Set(
-      seriesPrevious.map((n) => normalizeFilmTitleKey(n.title)),
-    );
-    left = left.filter((n) => !prevKeys.has(normalizeFilmTitleKey(n.title)));
+  if (verticalHasSameStory(seriesNext)) {
+    right = right.filter((n) => !isSameStoryTitleAsCenter(n, promoted.center));
   }
 
-  return {
+  const reconciled: FilmDnaTree = {
     ...promoted,
     left: left.slice(0, MAX_INFLUENCE_NODES),
     right: right.slice(0, MAX_LEGACY_NODES),
@@ -758,6 +1527,8 @@ function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
       ? { seriesNext: seriesNext.slice(0, MAX_SERIES_NEXT) }
       : {}),
   };
+
+  return enforceFilmDnaChronology(reconciled);
 }
 
 /**
@@ -766,10 +1537,40 @@ function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
 const FILM_DNA_SYSTEM_PROMPT = `You are a rigorous film historian. Given metadata about one film, output ONLY valid JSON (no markdown) with this exact shape:
 {
   "center": { "title": string, "year": number|null, "note": string },
-  "left": [{ "title": string, "year": number|null, "note": string }],
-  "right": [{ "title": string, "year": number|null, "note": string }],
-  "seriesPrevious": [{ "title": string, "year": number|null, "note": string }],
-  "seriesNext": [{ "title": string, "year": number|null, "note": string }]
+  "left": [{
+    "title": string,
+    "year": number|null,
+    "note": string,
+    "relationshipSummaryTitle": string,
+    "relationshipBullets": string[]
+  }],
+  "right": [{
+    "title": string,
+    "year": number|null,
+    "note": string,
+    "relationshipSummaryTitle": string,
+    "relationshipBullets": string[]
+  }],
+  "seriesPrevious": [{
+    "title": string,
+    "year": number|null,
+    "note": string,
+    "lineageConnectedAbove": boolean,
+    "sameSourceVertical": boolean,
+    "significanceBullets": string[],
+    "plotSummary": string,
+    "boxOffice": string
+  }],
+  "seriesNext": [{
+    "title": string,
+    "year": number|null,
+    "note": string,
+    "lineageConnectedAbove": boolean,
+    "sameSourceVertical": boolean,
+    "significanceBullets": string[],
+    "plotSummary": string,
+    "boxOffice": string
+  }]
 }
 
 Slot semantics:
@@ -807,29 +1608,110 @@ Confidence filter (strict):
 - Do NOT pad to three entries with speculative links. One or two strong links beat three weak ones.
 - Each note must name the specific connection (technique, lineage, homage, director thread)—not vague praise.
 
-Chronology:
-- Influence (left): prefer films released before the subject (or contemporaries that directly fed its formation).
-- Legacy (right): only films released after the subject that plausibly inherit from it.
+Chronology (HARD — never violate):
+- Influence (left): ONLY films or series installments released BEFORE the center title's year.
+  - When both years are known: node.year MUST be less than center.year.
+  - NEVER place a later release in left[].
+- Legacy (right): ONLY films or series installments released AFTER the center title's year.
+  - When both years are known: node.year MUST be greater than center.year.
+  - NEVER label an older title as Legacy. A film released before the center is NEVER right[].
+- Same release year as center: omit from left[] and right[] (franchise continuity → seriesPrevious/seriesNext).
+- If the related title's correct chronological slot is uncertain, OMIT it rather than guess.
 
 Calibration example (Legacy for "12 Angry Men", 1957):
 - GOOD: A Few Good Men, The Verdict, Anatomy of a Murder, Judgment at Nuremberg (courtroom/jury craft lineage).
 - BAD: The Social Network (2010)—prestige drama with no rigorous cinematic legacy tie; omit.
 
+Relationship groups (all may coexist—do NOT collapse into only the vertical axis):
+- left[] + right[]: cinematic craft Influence / Legacy (0–3 each when defensible). ALWAYS try to populate independently of series slots.
+- seriesPrevious[] + seriesNext[]: vertical lineage axis only (canonical sequels/prequels, remakes, re-adaptations, same-source different-era versions).
+- A franchise installment on the vertical axis must NOT remove a different-title craft Influence/Legacy film from left/right.
+
 Series slots:
-- seriesPrevious: optional, 0–10 prior installments in the SAME series/franchise, release-date order (oldest first). Omit or [] if none.
-- seriesNext: optional, 0–10 later installments in the SAME series/franchise, release-date order. Put sequels here, NEVER in right[].
-- Prior TV/stage versions of the SAME story, remakes, or franchise prequels belong in seriesPrevious—not in left[] or right[].
-- Never put the same story title as center in left[] or right[]; use seriesPrevious/seriesNext for earlier/later installments of that property.
+- seriesPrevious: optional, 0–10 entries on the vertical axis above center, release-date order (oldest first). Canonical prequels, earlier same-story versions, remakes, re-adaptations, reboots, TV/stage prior versions.
+- seriesNext: optional, 0–10 entries below center, release-date order. Canonical sequels, later same-story versions, remakes—NEVER craft-only Legacy successors (those stay in right[]).
+- Remakes / re-adaptations / same-source different-era versions: seriesPrevious or seriesNext only (not left/right), any release year relative to center.
+- Never put the same story title as center in left[] or right[]; use seriesPrevious/seriesNext for that property's other versions.
+- Franchise films with different titles (e.g. numbered sequels) belong on the vertical axis, NOT in left/right unless they are also valid craft Influence/Legacy (rare—prefer one slot).
+- lineageConnectedAbove (required on every seriesPrevious[] and seriesNext[] entry, and on center when it has seriesPrevious): boolean.
+  - true ONLY when this entry is a canonical sequel/prequel/story continuation directly above it in the vertical chain (draw connecting line).
+  - false for remakes, re-adaptations, reboots, or same source material in a different era (e.g. All Quiet on the Western Front 1930 above 2022)—still list on the axis, NO line.
+  - Example: center = All Quiet (2022), seriesPrevious = [{ title: "All Quiet on the Western Front", year: 1930, lineageConnectedAbove: false, ... }].
 
 When several films share the same documented craft lineage (e.g. courtroom/jury tradition, cyberpunk visual line), include the strongest documented examples up to three—still omitting weak prestige-only pairings.
 
 Courtroom / jury dramas: Influence = earlier trial or deliberation lineage; Legacy = later films in that craft tradition—not unrelated modern prestige dramas.
 
+Relationship summaries (required on every left[] and right[] entry you emit):
+- relationshipSummaryTitle: one line ending with "through:" — film-study tone, not chat (still required in JSON; UI may hide it).
+  - left (Influence): "{SourceTitle} influenced {CenterTitle} through:"
+  - right (Legacy): "{CenterTitle} influenced {SuccessorTitle} through:"
+- relationshipBullets: 2–4 items (max 4). Apply ONLY this style to bullets—not to note fields.
+
+relationshipBullets writing style (Criterion / museum essay / film criticism):
+- Tone: cinematic, analytical, film-literature oriented. Noun-phrase bullets, not tags or SEO keywords.
+- Length: usually 2–6 words per bullet; concise; no periods.
+- Case: sentence case—EVERY bullet MUST begin with a capital letter; capitalize proper nouns only elsewhere.
+  - GOOD: "Industrial futurist aesthetics", "Expressionist set design"
+  - BAD: "industrial futurist aesthetics", "use of stylized sets", "exploration of psychological themes"
+- Form: cinematic noun phrases—NOT verb-led or meta phrases ("use of…", "exploration of…", "focus on…", "themes of…").
+- Prefer: cinematic terminology, philosophical phrasing, visual language, worldbuilding and narrative craft terms.
+- NEVER use in bullets:
+  - "themes of", "explores", "discusses", "focuses on", "deals with", "use of", "exploration of", "focus on"
+  - lowercase-first bullets of any kind
+  - full sentences, conversational phrasing, recommendation-engine wording ("similar vibes", "fans of", "if you liked")
+  - vague hype ("great movie", "dark atmosphere", "very philosophical", "iconic film")
+  - bare genre/metadata labels without craft specificity ("sci-fi", "psychological", "dystopia" alone)
+- GOOD bullet examples (match this register):
+  - Expressionist set design
+  - Psychological visual distortion
+  - Stylized shadows and architecture
+  - Industrial futurist aesthetics
+  - Human identity under technological systems
+  - Corporate dystopian futurism
+  - Layered philosophical storytelling
+  - Neo-noir urban density
+  - Biotech class stratification
+  - Psychological urban alienation
+  - Ritualized masculine violence
+  - Mechanical body horror
+  - Mythic revenge structure
+- BAD bullet examples (reject this register):
+  - use of stylized sets and lighting
+  - exploration of psychological themes
+  - themes of technology and humanity
+  - explores identity and society
+  - discusses class systems
+  - dark sci-fi atmosphere
+  - very philosophical movie
+- Name specific inherited craft (mise-en-scène grammar, narrative framing, world logic, genre lineage)—not generic praise.
+- Reflect relationship subtype semantics without using internal taxonomy labels in the text.
+- No markdown, no questions.
+- Omit left/right entries entirely if you cannot write a defensible summary title AND at least 2 bullets in this style.
+
 General:
 - center must be the subject film (use the provided title and year when known).
 - Never duplicate a film across left, right, seriesPrevious, and seriesNext.
 - Each note: one short phrase, max 12 words, no URLs, no citations, no footnotes.
-- Use English for notes. Real film titles only. Do not include posterUrl fields.`;
+- Use English for notes and summaries. Real film titles only. Do not include posterUrl fields.
+- seriesPrevious/seriesNext: note + lineageConnectedAbove + sameSourceVertical + optional plotSummary/boxOffice; no relationshipSummary fields.
+- NEVER put significanceBullets, plotSummary, or boxOffice on center, left[], or right[].
+
+Series hover summaries (seriesPrevious[] and seriesNext[] ONLY — NOT significanceBullets):
+- REQUIRED on every seriesPrevious[] and seriesNext[] entry you emit: include plotSummary and/or boxOffice when you know them.
+- plotSummary: one brief sentence (max ~28 words) summarizing that film's plot. Factual; no spoilers beyond setup; no marketing.
+- boxOffice: widely reported worldwide or US theatrical gross when confident (e.g. "$136,400,000" or "$460,998,507").
+- If you omit both, the server may backfill from TMDb when available—still prefer supplying them in JSON.
+- NEVER use plotSummary/boxOffice on center, left[], or right[].
+- Do NOT put plot recap or box office in significanceBullets.
+
+Significance summaries (vertical-axis same-source / remake / re-adaptation ONLY):
+- sameSourceVertical: required on every seriesPrevious[] and seriesNext[] entry.
+  - true for remakes, re-adaptations, reboots, or another era's version of the same source story as center (lineageConnectedAbove should be false).
+  - false for canonical sequels/prequels in the same continuity (lineageConnectedAbove true)—no significanceBullets on those entries.
+- significanceBullets: ONLY when sameSourceVertical is true. 0–4 bullets on awards around release, social/cultural impact, historical significance.
+- Natural phrasing; no plot recap; no marketing; not craft relationship summaries.
+- Omit significanceBullets when sameSourceVertical is false or nothing defensible is known.`;
 
 /**
  * 构建发给 OpenAI 的用户提示（仅使用客户端已知的库内元数据，无联网检索）。
@@ -986,6 +1868,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    // #region agent log
+    if (parsed && typeof parsed === "object") {
+      const gptRoot = parsed as Record<string, unknown>;
+      agentDebugLog(
+        "generate-film-dna/index.ts:gpt-raw",
+        "GPT raw series slots before normalize",
+        {
+          seriesPrevious: seriesSummaryRawGptSnapshot(gptRoot.seriesPrevious),
+          seriesNext: seriesSummaryRawGptSnapshot(gptRoot.seriesNext),
+        },
+        "A",
+      );
+    }
+    // #endregion
+
     const tree = parseFilmDnaTree(parsed, title, fallbackYear);
     if (!tree) {
       console.error(`${LOG_PREFIX} invalid Film DNA shape`, parsed);
@@ -996,44 +1893,96 @@ Deno.serve(async (req) => {
       });
     }
 
+    // #region agent log
+    agentDebugLog(
+      "generate-film-dna/index.ts:post-parse",
+      "After parseFilmDnaTree (normalize + reconcile)",
+      {
+        seriesPrevious: seriesSummaryDebugSnapshot(tree.seriesPrevious),
+        seriesNext: seriesSummaryDebugSnapshot(tree.seriesNext),
+      },
+      "B",
+    );
+    console.log("seriesPrevious", tree.seriesPrevious);
+    console.log("seriesNext", tree.seriesNext);
+    // #endregion
+
     const tmdbToken = Deno.env.get("TMDB_READ_ACCESS_TOKEN")?.trim();
-    let enrichedTree = tree;
+    let result: FilmDnaTree = tree;
     if (tmdbToken) {
       try {
-        enrichedTree = await applyTmdbSeriesToTree(
+        result = await applyTmdbSeriesToTree(
           tree,
           title,
           fallbackYear,
           tmdbToken,
         );
-        enrichedTree = await enrichFilmDnaTreePosters(enrichedTree, tmdbToken);
+        result = await enrichFilmDnaTreePosters(result, tmdbToken);
         const posterCounts = {
-          left: enrichedTree.left.filter((n) => n.posterUrl).length,
-          right: enrichedTree.right.filter((n) => n.posterUrl).length,
-          seriesPrevious: enrichedTree.seriesPrevious?.filter((n) => n.posterUrl)
+          left: result.left.filter((n) => n.posterUrl).length,
+          right: result.right.filter((n) => n.posterUrl).length,
+          seriesPrevious: result.seriesPrevious?.filter((n) => n.posterUrl)
             .length ?? 0,
-          seriesNext: enrichedTree.seriesNext?.filter((n) => n.posterUrl).length ??
-            0,
+          seriesNext: result.seriesNext?.filter((n) => n.posterUrl).length ?? 0,
         };
         console.log(`${LOG_PREFIX} TMDb poster enrichment`, posterCounts);
       } catch (enrichErr) {
         console.error(`${LOG_PREFIX} TMDb enrichment failed`, enrichErr);
       }
+
+      try {
+        result = await ensureSeriesNodesSummaries(result, tmdbToken);
+      } catch (seriesSummaryErr) {
+        console.error(
+          `${LOG_PREFIX} series summary enrichment failed`,
+          seriesSummaryErr,
+        );
+      }
     } else {
       console.warn(
-        `${LOG_PREFIX} TMDB_READ_ACCESS_TOKEN not set; skipping poster enrichment`,
+        `${LOG_PREFIX} TMDB_READ_ACCESS_TOKEN not set; skipping TMDb enrichment`,
       );
     }
 
+    result = applySeriesSummaryScope(result);
+
     console.log(`${LOG_PREFIX} success`, {
       title,
-      leftCount: enrichedTree.left.length,
-      rightCount: enrichedTree.right.length,
-      seriesPreviousCount: enrichedTree.seriesPrevious?.length ?? 0,
-      seriesNextCount: enrichedTree.seriesNext?.length ?? 0,
+      leftCount: result.left.length,
+      rightCount: result.right.length,
+      seriesPreviousCount: result.seriesPrevious?.length ?? 0,
+      seriesNextCount: result.seriesNext?.length ?? 0,
     });
 
-    return new Response(JSON.stringify(enrichedTree), {
+    console.log("[generate-film-dna] final series summaries", {
+      seriesPrevious: result.seriesPrevious?.map((n) => ({
+        title: n.title,
+        year: n.year,
+        plotSummary: n.plotSummary,
+        boxOffice: n.boxOffice,
+      })),
+      seriesNext: result.seriesNext?.map((n) => ({
+        title: n.title,
+        year: n.year,
+        plotSummary: n.plotSummary,
+        boxOffice: n.boxOffice,
+      })),
+    });
+
+    // #region agent log
+    agentDebugLog(
+      "generate-film-dna/index.ts:final-response",
+      "Final HTTP response series slots",
+      {
+        seriesPrevious: seriesSummaryDebugSnapshot(result.seriesPrevious),
+        seriesNext: seriesSummaryDebugSnapshot(result.seriesNext),
+        runId: "post-fix-v2",
+      },
+      "E",
+    );
+    // #endregion
+
+    return new Response(JSON.stringify(result), {
       status: 200,
       headers: jsonHeaders,
     });

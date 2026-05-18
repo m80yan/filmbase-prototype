@@ -104,6 +104,43 @@ export async function invokeGenerateFilmDna(
     throw new Error('Invalid Film DNA response');
   }
 
+  // #region agent log
+  const seriesPreviousRaw = Array.isArray(body.seriesPrevious)
+    ? body.seriesPrevious
+    : [];
+  const seriesNextRaw = Array.isArray(body.seriesNext) ? body.seriesNext : [];
+  const clientSeriesSnapshot = (nodes: typeof seriesPreviousRaw) =>
+    nodes.map((n: { title?: string; year?: number | null; plotSummary?: string; boxOffice?: string }) => ({
+      title: n.title,
+      year: n.year ?? null,
+      hasPlotSummary: Boolean(
+        typeof n.plotSummary === 'string' && n.plotSummary.trim(),
+      ),
+      hasBoxOffice: Boolean(
+        typeof n.boxOffice === 'string' && n.boxOffice.trim(),
+      ),
+    }));
+  fetch('http://127.0.0.1:7684/ingest/27c00267-50f5-4ead-aaaa-e8a9751002f8', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': 'cd85de',
+    },
+    body: JSON.stringify({
+      sessionId: 'cd85de',
+      location: 'generateFilmDna.ts:invoke',
+      message: 'Client received generate-film-dna series slots',
+      hypothesisId: 'E',
+      data: {
+        seriesPrevious: clientSeriesSnapshot(seriesPreviousRaw),
+        seriesNext: clientSeriesSnapshot(seriesNextRaw),
+      },
+      timestamp: Date.now(),
+      runId: 'post-fix-v2',
+    }),
+  }).catch(() => {});
+  // #endregion
+
   return {
     center: body.center,
     left: Array.isArray(body.left) ? body.left : [],
