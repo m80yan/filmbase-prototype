@@ -1,10 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FilmDnaRequestPayload, FilmDnaTree } from '../types/filmDna';
+import {
+  hydrateFilmDnaTreePosters,
+  type FilmDnaLibraryMovie,
+} from './filmDnaPosterHydration';
 
 type InvokeErrorBody = {
   error?: string;
   message?: string;
   details?: string;
+};
+
+export type InvokeGenerateFilmDnaOptions = {
+  /** 当前片库：用于 Influence/Legacy/Series 海报回填。 */
+  libraryMovies?: FilmDnaLibraryMovie[];
+  signal?: AbortSignal;
 };
 
 /**
@@ -66,13 +76,15 @@ async function formatFilmDnaInvokeFailure(
  *
  * @param supabase 已鉴权客户端
  * @param payload 当前影片元数据
- * @param signal 可选中止信号（关闭叠层时取消进行中的请求）
+ * @param options 片库回填与中止信号
  */
 export async function invokeGenerateFilmDna(
   supabase: SupabaseClient,
   payload: FilmDnaRequestPayload,
-  signal?: AbortSignal,
+  options?: InvokeGenerateFilmDnaOptions,
 ): Promise<FilmDnaTree> {
+  const signal = options?.signal;
+
   const { data, error } = await supabase.functions.invoke('generate-film-dna', {
     body: payload,
   });
@@ -104,44 +116,7 @@ export async function invokeGenerateFilmDna(
     throw new Error('Invalid Film DNA response');
   }
 
-  // #region agent log
-  const seriesPreviousRaw = Array.isArray(body.seriesPrevious)
-    ? body.seriesPrevious
-    : [];
-  const seriesNextRaw = Array.isArray(body.seriesNext) ? body.seriesNext : [];
-  const clientSeriesSnapshot = (nodes: typeof seriesPreviousRaw) =>
-    nodes.map((n: { title?: string; year?: number | null; plotSummary?: string; boxOffice?: string }) => ({
-      title: n.title,
-      year: n.year ?? null,
-      hasPlotSummary: Boolean(
-        typeof n.plotSummary === 'string' && n.plotSummary.trim(),
-      ),
-      hasBoxOffice: Boolean(
-        typeof n.boxOffice === 'string' && n.boxOffice.trim(),
-      ),
-    }));
-  fetch('http://127.0.0.1:7684/ingest/27c00267-50f5-4ead-aaaa-e8a9751002f8', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'cd85de',
-    },
-    body: JSON.stringify({
-      sessionId: 'cd85de',
-      location: 'generateFilmDna.ts:invoke',
-      message: 'Client received generate-film-dna series slots',
-      hypothesisId: 'E',
-      data: {
-        seriesPrevious: clientSeriesSnapshot(seriesPreviousRaw),
-        seriesNext: clientSeriesSnapshot(seriesNextRaw),
-      },
-      timestamp: Date.now(),
-      runId: 'post-fix-v2',
-    }),
-  }).catch(() => {});
-  // #endregion
-
-  return {
+  const tree: FilmDnaTree = {
     center: body.center,
     left: Array.isArray(body.left) ? body.left : [],
     right: Array.isArray(body.right) ? body.right : [],
@@ -150,4 +125,9 @@ export async function invokeGenerateFilmDna(
       : undefined,
     seriesNext: Array.isArray(body.seriesNext) ? body.seriesNext : undefined,
   };
+
+  return hydrateFilmDnaTreePosters(supabase, tree, {
+    libraryMovies: options?.libraryMovies,
+    signal,
+  });
 }

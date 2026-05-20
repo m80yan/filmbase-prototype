@@ -125,78 +125,6 @@ type ErrorJsonBody = {
   details?: string;
 };
 
-const DEBUG_INGEST_URL =
-  "http://127.0.0.1:7684/ingest/27c00267-50f5-4ead-aaaa-e8a9751002f8";
-const DEBUG_SESSION_ID = "cd85de";
-
-/**
- * Debug 模式：系列节点 plotSummary / boxOffice 快照（不含密钥）。
- *
- * @param nodes 系列槽位节点
- */
-function seriesSummaryDebugSnapshot(nodes: FilmDnaNode[] | undefined) {
-  return (nodes ?? []).map((n) => ({
-    title: n.title,
-    year: n.year,
-    hasPlotSummary: Boolean(n.plotSummary?.trim()),
-    hasBoxOffice: Boolean(n.boxOffice?.trim()),
-    plotSummaryPreview: n.plotSummary?.slice(0, 48) ?? null,
-    boxOffice: n.boxOffice ?? null,
-  }));
-}
-
-/**
- * Debug 模式：GPT 原始 JSON 中系列槽位字段快照。
- *
- * @param items `seriesPrevious` / `seriesNext` 原始数组
- */
-function seriesSummaryRawGptSnapshot(items: unknown) {
-  if (!Array.isArray(items)) return [];
-  return items.map((item) => {
-    if (!item || typeof item !== "object") return { invalid: true };
-    const o = item as Record<string, unknown>;
-    return {
-      title: o.title,
-      year: o.year,
-      hasPlotSummary:
-        typeof o.plotSummary === "string" && o.plotSummary.trim().length > 0,
-      hasBoxOffice:
-        typeof o.boxOffice === "string" && o.boxOffice.trim().length > 0,
-    };
-  });
-}
-
-/**
- * @param location 日志位置
- * @param message 简述
- * @param data 结构化数据
- * @param hypothesisId 假设编号
- */
-function agentDebugLog(
-  location: string,
-  message: string,
-  data: Record<string, unknown>,
-  hypothesisId: string,
-): void {
-  const payload = {
-    sessionId: DEBUG_SESSION_ID,
-    location,
-    message,
-    data,
-    hypothesisId,
-    timestamp: Date.now(),
-  };
-  console.log(`${LOG_PREFIX} [debug][${hypothesisId}]`, message, data);
-  fetch(DEBUG_INGEST_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": DEBUG_SESSION_ID,
-    },
-    body: JSON.stringify(payload),
-  }).catch(() => {});
-}
-
 /**
  * 截断并去除可能含密钥的片段（仅用于日志/客户端 details）。
  *
@@ -276,6 +204,21 @@ function normalizeBoxOffice(raw: unknown): string | undefined {
 }
 
 /**
+ * 从 LLM/合并对象读取海报 URL（`posterUrl` / `poster_url` / `poster` / `imageUrl`）。
+ *
+ * @param o 原始字段对象
+ */
+function extractPosterUrlFromRecord(
+  o: Record<string, unknown>,
+): string | undefined {
+  for (const key of ["posterUrl", "poster_url", "poster", "imageUrl"]) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+/**
  * 规范化 LLM 返回的单个节点。
  *
  * @param raw 原始对象
@@ -293,9 +236,8 @@ function normalizeNode(raw: unknown): FilmDnaNode | null {
   }
   const note = typeof o.note === "string" ? o.note.trim() : "";
   const node: FilmDnaNode = { title, year, note };
-  if (typeof o.posterUrl === "string" && o.posterUrl.trim()) {
-    node.posterUrl = o.posterUrl.trim();
-  }
+  const posterUrl = extractPosterUrlFromRecord(o);
+  if (posterUrl) node.posterUrl = posterUrl;
   const relationshipSummaryTitle =
     typeof o.relationshipSummaryTitle === "string"
       ? o.relationshipSummaryTitle.trim()
@@ -720,36 +662,12 @@ async function applyTmdbSeriesToTree(
     })),
   });
 
-  // #region agent log
-  agentDebugLog(
-    "generate-film-dna/index.ts:applyTmdbSeriesToTree:entry",
-    "GPT tree before TMDb series apply",
-    {
-      matchedInCollection: detection.matchedInCollection,
-      gptSeriesPrevious: seriesSummaryDebugSnapshot(tree.seriesPrevious),
-      gptSeriesNext: seriesSummaryDebugSnapshot(tree.seriesNext),
-    },
-    "D",
-  );
-  // #endregion
-
   if (!detection.matchedInCollection) {
     const noTmdb = applySeriesSummaryScope(
       applySignificanceScope(
         applySeriesLineageFlags(reconcileSeriesAndLegacy(tree)),
       ),
     );
-    // #region agent log
-    agentDebugLog(
-      "generate-film-dna/index.ts:applyTmdbSeriesToTree:no-collection",
-      "After reconcile (no TMDb collection)",
-      {
-        seriesPrevious: seriesSummaryDebugSnapshot(noTmdb.seriesPrevious),
-        seriesNext: seriesSummaryDebugSnapshot(noTmdb.seriesNext),
-      },
-      "D",
-    );
-    // #endregion
     return noTmdb;
   }
 
@@ -767,20 +685,6 @@ async function applyTmdbSeriesToTree(
   } else {
     delete next.seriesNext;
   }
-
-  // #region agent log
-  agentDebugLog(
-    "generate-film-dna/index.ts:applyTmdbSeriesToTree:post-merge",
-    "After TMDb slot merge, before reconcile",
-    {
-      seriesPrevious: seriesSummaryDebugSnapshot(next.seriesPrevious),
-      seriesNext: seriesSummaryDebugSnapshot(next.seriesNext),
-    },
-    "C",
-  );
-  console.log("seriesPrevious", next.seriesPrevious);
-  console.log("seriesNext", next.seriesNext);
-  // #endregion
 
   return applySeriesSummaryScope(
     applySignificanceScope(
@@ -882,22 +786,6 @@ async function enrichSeriesNodeFromTmdb(
   if (meta.boxOffice) {
     next.boxOffice = meta.boxOffice;
   }
-
-  // #region agent log
-  agentDebugLog(
-    "generate-film-dna/index.ts:enrichSeriesNodeFromTmdb",
-    "TMDb series metadata enrich",
-    {
-      title: next.title,
-      year: next.year,
-      movieId,
-      plotSummary: next.plotSummary ?? null,
-      boxOffice: next.boxOffice ?? null,
-      runId: "post-fix-v2",
-    },
-    "F",
-  );
-  // #endregion
 
   return next;
 }
@@ -1219,20 +1107,6 @@ function mergeGptSeriesSummaryFields(
   const match = gptSources.find(
     (s) => filmNodesMatchTitle(s, target) && s.year === target.year,
   );
-  // #region agent log
-  agentDebugLog(
-    "generate-film-dna/index.ts:mergeGptSeriesSummaryFields",
-    "TMDb merge title+year match",
-    {
-      targetTitle: target.title,
-      targetYear: target.year,
-      matched: Boolean(match),
-      gptHasPlot: Boolean(match?.plotSummary?.trim()),
-      gptHasBoxOffice: Boolean(match?.boxOffice?.trim()),
-    },
-    "C",
-  );
-  // #endregion
   if (!match) return target;
   const next = { ...target };
   if (typeof match.tmdbMovieId === "number" && match.tmdbMovieId > 0) {
@@ -1868,21 +1742,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // #region agent log
-    if (parsed && typeof parsed === "object") {
-      const gptRoot = parsed as Record<string, unknown>;
-      agentDebugLog(
-        "generate-film-dna/index.ts:gpt-raw",
-        "GPT raw series slots before normalize",
-        {
-          seriesPrevious: seriesSummaryRawGptSnapshot(gptRoot.seriesPrevious),
-          seriesNext: seriesSummaryRawGptSnapshot(gptRoot.seriesNext),
-        },
-        "A",
-      );
-    }
-    // #endregion
-
     const tree = parseFilmDnaTree(parsed, title, fallbackYear);
     if (!tree) {
       console.error(`${LOG_PREFIX} invalid Film DNA shape`, parsed);
@@ -1892,20 +1751,6 @@ Deno.serve(async (req) => {
         details: "Parsed JSON did not match expected center/left/right shape.",
       });
     }
-
-    // #region agent log
-    agentDebugLog(
-      "generate-film-dna/index.ts:post-parse",
-      "After parseFilmDnaTree (normalize + reconcile)",
-      {
-        seriesPrevious: seriesSummaryDebugSnapshot(tree.seriesPrevious),
-        seriesNext: seriesSummaryDebugSnapshot(tree.seriesNext),
-      },
-      "B",
-    );
-    console.log("seriesPrevious", tree.seriesPrevious);
-    console.log("seriesNext", tree.seriesNext);
-    // #endregion
 
     const tmdbToken = Deno.env.get("TMDB_READ_ACCESS_TOKEN")?.trim();
     let result: FilmDnaTree = tree;
@@ -1953,34 +1798,6 @@ Deno.serve(async (req) => {
       seriesPreviousCount: result.seriesPrevious?.length ?? 0,
       seriesNextCount: result.seriesNext?.length ?? 0,
     });
-
-    console.log("[generate-film-dna] final series summaries", {
-      seriesPrevious: result.seriesPrevious?.map((n) => ({
-        title: n.title,
-        year: n.year,
-        plotSummary: n.plotSummary,
-        boxOffice: n.boxOffice,
-      })),
-      seriesNext: result.seriesNext?.map((n) => ({
-        title: n.title,
-        year: n.year,
-        plotSummary: n.plotSummary,
-        boxOffice: n.boxOffice,
-      })),
-    });
-
-    // #region agent log
-    agentDebugLog(
-      "generate-film-dna/index.ts:final-response",
-      "Final HTTP response series slots",
-      {
-        seriesPrevious: seriesSummaryDebugSnapshot(result.seriesPrevious),
-        seriesNext: seriesSummaryDebugSnapshot(result.seriesNext),
-        runId: "post-fix-v2",
-      },
-      "E",
-    );
-    // #endregion
 
     return new Response(JSON.stringify(result), {
       status: 200,

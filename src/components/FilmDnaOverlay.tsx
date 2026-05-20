@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { resolvePosterUrlFromRaw } from '../lib/filmDnaPosterHydration';
 import type { FilmDnaNode, FilmDnaTree } from '../types/filmDna';
 
 type FilmDnaPanelProps = {
@@ -77,6 +78,7 @@ const SIGNIFICANCE_SUMMARY_MAX_BULLETS = 4;
 
 /** 系列轴悬停摘要最多展示条数（剧情 + 票房）。 */
 const SERIES_SUMMARY_MAX_BULLETS = 2;
+
 
 const NON_CANONICAL_LINEAGE_RE =
   /\b(remake|re-?adaptation|readaptation|reboot|new adaptation|same source material|same story|different era|prior (film|version|adaptation)|earlier (film|version|adaptation)|tv version|stage version|based on the same|another adaptation)\b/i;
@@ -241,18 +243,6 @@ type ConnectionRoute = {
   routing: ConnectionRouting;
 };
 
-/**
- * Influence/Legacy（单对布局）：自源锚点沿水平方向直连至目标箭头基底前。
- * 不要求三节点 Y 对齐；折线保持源锚点纵坐标。
- */
-function buildInfluenceLegacyStraightHorizontalPolyline(
-  source: StageCoord,
-  target: StageCoord,
-  targetEdge: PosterEdge,
-): string {
-  const approach = approachPointBeforeArrow(target, targetEdge);
-  return `M ${source.x} ${source.y} H ${approach.x}`;
-}
 
 /**
  * Influence/Legacy（多节点布局）：水平出 → 垂直弯 → 水平进（侧向连接）。
@@ -283,31 +273,15 @@ function buildSeriesVerticalPolyline(
   return `M ${source.x} ${source.y} V ${midY} H ${approach.x} V ${approach.y}`;
 }
 
-type BuildConnectionPolylineOptions = {
-  /** 恰好 1 个 Influence + 1 个 Legacy 时使用水平直线，否则走正交折线。 */
-  influenceLegacyStraightHorizontal?: boolean;
-};
-
 /**
  * @param route 连线锚点与路由策略
- * @param options 侧向连线在单对布局下可改为水平直线
  */
-function buildConnectionPolyline(
-  route: ConnectionRoute,
-  options?: BuildConnectionPolylineOptions,
-): string {
+function buildConnectionPolyline(route: ConnectionRoute): string {
   if (route.routing === 'series-vertical') {
     return buildSeriesVerticalPolyline(
       route.source,
       route.target,
       route.targetEdge === 'bottom' ? 'bottom' : 'top',
-    );
-  }
-  if (options?.influenceLegacyStraightHorizontal) {
-    return buildInfluenceLegacyStraightHorizontalPolyline(
-      route.source,
-      route.target,
-      route.targetEdge,
     );
   }
   return buildInfluenceLegacyPolyline(
@@ -583,8 +557,6 @@ function layoutSeriesNextPositions(count: number): StagePoint[] {
 
 type FilmDnaConnectionLinesProps = {
   influenceLegacyPresence: Record<LineKey, boolean>;
-  /** 恰好 1 Influence + 1 Legacy 时侧向连线改水平直线。 */
-  singlePairInfluenceLegacyRouting: boolean;
   seriesSpecs: FilmDnaConnectionSpec[];
   /** center 在系列链中的索引（= seriesPrevious 数量）。 */
   seriesCenterChainIndex: number;
@@ -596,7 +568,6 @@ type FilmDnaConnectionLinesProps = {
  */
 function FilmDnaConnectionLines({
   influenceLegacyPresence,
-  singlePairInfluenceLegacyRouting,
   seriesSpecs,
   seriesCenterChainIndex,
   hover,
@@ -620,9 +591,7 @@ function FilmDnaConnectionLines({
         )
           ? 1
           : 0.25;
-        const polyline = buildConnectionPolyline(route, {
-          influenceLegacyStraightHorizontal: singlePairInfluenceLegacyRouting,
-        });
+        const polyline = buildConnectionPolyline(route);
         return (
           <g key={lineKey} fill="white" opacity={opacity}>
             <path
@@ -1052,6 +1021,7 @@ function significanceSummaryAnchor(posterPos: StagePoint): {
   };
 }
 
+
 type FilmDnaSignificanceSummaryProps = {
   bullets: string[];
   posterPos: StagePoint;
@@ -1403,9 +1373,10 @@ function FilmDnaNodeCard({
 
   const posterSrc = isCenter
     ? resolveCenterPosterUrl(posterUrl)
-    : posterUrl?.trim()
-      ? posterUrl.trim()
-      : '';
+    : resolvePosterUrlFromRaw({
+        ...node,
+        posterUrl: posterUrl ?? node.posterUrl,
+      });
 
   return (
     <motion.article
@@ -1417,12 +1388,12 @@ function FilmDnaNodeCard({
       onPointerLeave={() => onHover(null)}
       aria-label={node.title}
     >
-      {posterSrc ? (
-        <motion.div
-          className={`relative h-[171px] w-[114px] overflow-hidden ${POSTER_VIEW_HOVER} transition-opacity duration-300 ease-out ${
-            dimmed ? 'opacity-25' : 'opacity-100'
-          } group-hover/poster:opacity-100`}
-        >
+      <motion.div
+        className={`relative h-[171px] w-[114px] overflow-hidden transition-opacity duration-300 ease-out ${
+          posterSrc ? POSTER_VIEW_HOVER : ''
+        } ${dimmed ? 'opacity-25' : 'opacity-100'} group-hover/poster:opacity-100`}
+      >
+        {posterSrc ? (
           <img
             draggable={false}
             src={posterSrc}
@@ -1430,12 +1401,17 @@ function FilmDnaNodeCard({
             className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
             referrerPolicy="no-referrer"
           />
-        </motion.div>
-      ) : null}
+        ) : (
+          <div
+            className="block h-[171px] w-[114px] bg-white/10"
+            aria-hidden
+          />
+        )}
+      </motion.div>
       <FilmDnaNodeText
         text={node.title}
         isCenter={isCenter}
-        className={`${posterSrc ? 'mt-4' : ''} ${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
+        className={`mt-4 ${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
       />
       {year ? (
         <FilmDnaNodeText
@@ -1514,6 +1490,7 @@ function FilmDnaGraph({
 
   const [hover, setHover] = useState<HoverTarget | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // Stage panning only
   const dragRef = useRef<{
     pointerId: number | null;
     startX: number;
@@ -1543,8 +1520,6 @@ function FilmDnaGraph({
     seriesNext: false,
   };
 
-  const singlePairInfluenceLegacyRouting =
-    influenceNodes.length === 1 && legacyNodes.length === 1;
 
   const onCanvasPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1676,6 +1651,7 @@ function FilmDnaGraph({
     );
   }, [hover, activePosterHover, centerNode, seriesSummaryBullets]);
 
+
   return (
     <motion.div
       className="film-dna-stage-host relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden"
@@ -1713,9 +1689,6 @@ function FilmDnaGraph({
           >
             <FilmDnaConnectionLines
               influenceLegacyPresence={influenceLegacyPresence}
-              singlePairInfluenceLegacyRouting={
-                singlePairInfluenceLegacyRouting
-              }
               seriesSpecs={seriesConnectionSpecs}
               seriesCenterChainIndex={seriesCenterChainIndex}
               hover={hover}

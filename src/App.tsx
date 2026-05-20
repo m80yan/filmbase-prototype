@@ -2566,7 +2566,15 @@ export default function App() {
             plot: movie.plot,
             tagline: movie.tagline,
           },
-          ac.signal,
+          {
+            libraryMovies: moviesRef.current.map((m) => ({
+              id: m.id,
+              title: m.title,
+              year: m.year,
+              posterUrl: m.posterUrl,
+            })),
+            signal: ac.signal,
+          },
         );
         if (ac.signal.aborted) return;
         setFilmDnaTree(tree);
