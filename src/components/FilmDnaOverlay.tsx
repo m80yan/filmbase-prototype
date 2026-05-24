@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { FilmDnaGeneratingLoader } from './FilmDnaGeneratingLoader';
 import { resolvePosterUrlFromRaw } from '../lib/filmDnaPosterHydration';
 import type { FilmDnaNode, FilmDnaTree } from '../types/filmDna';
 
@@ -1840,10 +1841,7 @@ export default function FilmDnaPanel({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
-          <motion.div
-            className="h-9 w-9 animate-spin rounded-full border-2 border-white/15 border-t-[#EA9794]"
-            aria-hidden
-          />
+          <FilmDnaGeneratingLoader size={104} />
           <p className="text-[14px] font-semibold text-white/70">
             Generating Film DNA…
           </p>
