@@ -6638,7 +6638,7 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Film DNA"
-                      className="filmbase-scrollbar-subtle absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      className="filmbase-scrollbar-subtle filmbase-selectable-text absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >
@@ -6663,7 +6663,7 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Movie information"
-                      className="filmbase-scrollbar-subtle absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      className="filmbase-scrollbar-subtle filmbase-selectable-text absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >

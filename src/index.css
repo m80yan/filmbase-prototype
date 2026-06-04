@@ -99,6 +99,26 @@
     @apply bg-[#121212] text-white font-sans antialiased overflow-hidden;
     margin: 0;
   }
+
+  /* Desktop-app simulation: disable accidental text selection. */
+  #root {
+    user-select: none;
+  }
+
+  #root * {
+    user-select: none;
+  }
+
+  #root input,
+  #root textarea,
+  #root [contenteditable="true"] {
+    user-select: text;
+  }
+
+  #root .filmbase-selectable-text,
+  #root .filmbase-selectable-text * {
+    user-select: text;
+  }
 }
 
 .animate-marquee-vertical {
