@@ -33,6 +33,12 @@ import {
 import { LibraryLoadingStagedCopy } from './components/LibraryLoadingStagedCopy';
 import { LibraryLoadingShowcase } from './components/LibraryLoadingShowcase';
 import { ClearSearchButton } from './components/ClearSearchButton';
+import GenreSidebarItem from './components/GenreSidebarItem';
+import {
+  loadGenreSidebarOrder,
+  mergeGenreSidebarOrder,
+  saveGenreSidebarOrder,
+} from './lib/genreSidebarOrder';
 
 /**
  * `search-movies` Edge Function 返回的单条命中（展示建议时仅保留 `imdbId` 非空的项）。
@@ -2978,7 +2984,107 @@ export default function App() {
     return Array.from(set).sort();
   }, [movies]);
 
-  const genres = allUniqueGenres;
+  /** 侧栏 Genre 列表顺序（localStorage）；与 `allUniqueGenres` 合并后渲染。 */
+  const [genreSidebarOrder, setGenreSidebarOrder] = useState<string[]>([]);
+  const genreListRef = useRef<HTMLUListElement>(null);
+  const genreDragRef = useRef<{ fromIndex: number; pointerId: number } | null>(null);
+  const genreDragOverIndexRef = useRef<number | null>(null);
+  const [genreDragFromIndex, setGenreDragFromIndex] = useState<number | null>(null);
+  const [genreDragOverIndex, setGenreDragOverIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setGenreSidebarOrder((prev) =>
+      mergeGenreSidebarOrder(prev.length > 0 ? prev : loadGenreSidebarOrder(), allUniqueGenres),
+    );
+  }, [allUniqueGenres]);
+
+  const genres = genreSidebarOrder;
+
+  /**
+   * 根据指针 Y 坐标计算 Genre 列表目标插入索引（中线以上归该格，否则下一格）。
+   *
+   * @param clientY 视口 Y
+   */
+  const getGenreDropIndexFromPointer = useCallback((clientY: number): number | null => {
+    const ul = genreListRef.current;
+    if (!ul) return null;
+    const items = ul.querySelectorAll<HTMLElement>('[data-genre-index]');
+    if (items.length === 0) return null;
+    for (let i = 0; i < items.length; i++) {
+      const rect = items[i].getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (clientY < mid) return i;
+    }
+    return items.length - 1;
+  }, []);
+
+  const reorderGenreSidebar = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setGenreSidebarOrder((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      saveGenreSidebarOrder(next);
+      return next;
+    });
+  }, []);
+
+  const finishGenreDrag = useCallback(
+    (pointerId: number) => {
+      const drag = genreDragRef.current;
+      if (!drag || drag.pointerId !== pointerId) return;
+      const from = drag.fromIndex;
+      const to = genreDragOverIndexRef.current ?? from;
+      genreDragRef.current = null;
+      genreDragOverIndexRef.current = null;
+      setGenreDragFromIndex(null);
+      setGenreDragOverIndex(null);
+      reorderGenreSidebar(from, to);
+    },
+    [reorderGenreSidebar],
+  );
+
+  const onGenreHandlePointerDown = useCallback(
+    (index: number) => (e: React.PointerEvent<HTMLSpanElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      genreDragRef.current = { fromIndex: index, pointerId: e.pointerId };
+      genreDragOverIndexRef.current = index;
+      setGenreDragFromIndex(index);
+      setGenreDragOverIndex(index);
+    },
+    [],
+  );
+
+  const onGenreListPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLUListElement>) => {
+      if (!genreDragRef.current || genreDragRef.current.pointerId !== e.pointerId) return;
+      const to = getGenreDropIndexFromPointer(e.clientY);
+      if (to !== null) {
+        genreDragOverIndexRef.current = to;
+        setGenreDragOverIndex(to);
+      }
+    },
+    [getGenreDropIndexFromPointer],
+  );
+
+  const onGenreListPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLUListElement>) => {
+      finishGenreDrag(e.pointerId);
+    },
+    [finishGenreDrag],
+  );
+
+  const onGenreListPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLUListElement>) => {
+      finishGenreDrag(e.pointerId);
+    },
+    [finishGenreDrag],
+  );
   const years = ['2020s', '2010s', '2000s', '1990s', 'Classic'];
   const ratings = [5, 4, 3, 2, 1, 0];
 
@@ -4559,6 +4665,7 @@ export default function App() {
               >
                 <span>Genre</span>
                 <motion.div
+                  className="shrink-0"
                   animate={{ rotate: isSidebarDynamicFilterExpanded('genre') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
@@ -4574,14 +4681,27 @@ export default function App() {
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 className="overflow-hidden w-[200px]"
               >
-                <ul className="space-y-0.5 w-[200px]">
-                  {genres.map(genre => (
-                    <li key={genre} className="w-[200px]">
-                      <SidebarItem
+                <ul
+                  ref={genreListRef}
+                  className="space-y-0.5 w-[200px]"
+                  onPointerMove={onGenreListPointerMove}
+                  onPointerUp={onGenreListPointerUp}
+                  onPointerCancel={onGenreListPointerCancel}
+                >
+                  {genres.map((genre, index) => (
+                    <li key={genre} data-genre-index={index} className="w-[200px]">
+                      <GenreSidebarItem
                         label={genre}
                         active={selectedGenres.includes(genre)}
                         onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
                         iconSlug={genreLabelToIconSlug(genre)}
+                        onHandlePointerDown={onGenreHandlePointerDown(index)}
+                        isDragging={genreDragFromIndex === index}
+                        isDropTarget={
+                          genreDragFromIndex !== null &&
+                          genreDragOverIndex === index &&
+                          genreDragFromIndex !== index
+                        }
                       />
                     </li>
                   ))}
@@ -4600,6 +4720,7 @@ export default function App() {
               >
                 <span>Year</span>
                 <motion.div
+                  className="shrink-0"
                   animate={{ rotate: isSidebarDynamicFilterExpanded('year') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
@@ -4640,6 +4761,7 @@ export default function App() {
               >
                 <span>My Rating</span>
                 <motion.div
+                  className="shrink-0"
                   animate={{ rotate: isSidebarDynamicFilterExpanded('ratings') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >

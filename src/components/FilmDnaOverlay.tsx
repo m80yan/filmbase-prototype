@@ -374,6 +374,40 @@ function filmNodesMatchTitle(a: FilmDnaNode, b: FilmDnaNode): boolean {
 }
 
 /**
+ * @param year 年份字段
+ */
+function isUsableFilmYear(year: number | null | undefined): year is number {
+  return typeof year === 'number' && Number.isFinite(year) && year > 0;
+}
+
+/**
+ * 侧栏节点是否与系列轴节点为同一部影片（与 Edge `generate-film-dna` 跨槽去重一致）。
+ *
+ * @param a 节点 A
+ * @param b 节点 B
+ */
+function filmNodesMatchForSeriesDedup(
+  a: FilmDnaNode,
+  b: FilmDnaNode,
+): boolean {
+  const idA = a.tmdbMovieId;
+  const idB = b.tmdbMovieId;
+  if (
+    typeof idA === 'number' &&
+    idA > 0 &&
+    typeof idB === 'number' &&
+    idB > 0
+  ) {
+    return idA === idB;
+  }
+  if (!filmNodesMatchTitle(a, b)) return false;
+  const yearA = isUsableFilmYear(a.year) ? a.year : null;
+  const yearB = isUsableFilmYear(b.year) ? b.year : null;
+  if (yearA != null && yearB != null) return yearA === yearB;
+  return true;
+}
+
+/**
  * 推断系列链相邻节点是否应绘制垂直连线（无显式 API 字段时）。
  *
  * @param upper 链中上方节点
@@ -754,24 +788,38 @@ function limitVisibleNodes(nodes: FilmDnaNode[]): FilmDnaNode[] {
 }
 
 /**
- * 当垂直轴已展示与 center 同片名的版本时，从侧栏去掉同片名重复项。
- * 不按系列轴全集标题过滤——避免误删有效 Influence/Legacy。
+ * 当垂直轴已展示与 center 同片名的版本时，从侧栏去掉同片名重复项；
+ * 并去掉与系列轴（前作/续作）重复的侧栏节点（系列轴优先）。
  *
  * @param nodes 侧栏节点
  * @param center 中心片
- * @param seriesNodes 系列前/后作列表
+ * @param seriesNodes 与 center 同片名判定用的系列槽（前作或续作）
+ * @param seriesAxisNodes 完整系列轴（前作 + 续作），用于跨槽去重
  */
 function excludeSameStoryOnVerticalAxis(
   nodes: FilmDnaNode[],
   center: FilmDnaNode,
   seriesNodes: FilmDnaNode[],
+  seriesAxisNodes: FilmDnaNode[],
 ): FilmDnaNode[] {
   const centerKey = normalizeFilmTitleKey(center.title);
   const verticalHasSameStory = seriesNodes.some(
     (n) => normalizeFilmTitleKey(n.title) === centerKey,
   );
-  if (!verticalHasSameStory) return nodes;
-  return nodes.filter((n) => normalizeFilmTitleKey(n.title) !== centerKey);
+  let filtered = nodes;
+  if (verticalHasSameStory) {
+    filtered = filtered.filter(
+      (n) => normalizeFilmTitleKey(n.title) !== centerKey,
+    );
+  }
+  // Series axis wins over side lanes to avoid showing the same film as both a
+  // sequel/prequel and an influence/legacy node.
+  if (seriesAxisNodes.length) {
+    filtered = filtered.filter(
+      (n) => !seriesAxisNodes.some((s) => filmNodesMatchForSeriesDedup(n, s)),
+    );
+  }
+  return filtered;
 }
 
 /**
@@ -1474,12 +1522,14 @@ function FilmDnaGraph({
   );
   const seriesCenterChainIndex = seriesPrevious.length;
   const seriesConnectionSpecs = buildAdjacentSeriesConnectionSpecs(seriesChain);
+  const seriesAxisNodes = [...seriesPrevious, ...seriesNext];
   const influenceNodes = excludeSameStoryOnVerticalAxis(
     limitVisibleNodes(
       orderInfluenceLegacyTimelineNodes(tree.left, centerYear, 'influence'),
     ),
     centerNode,
     seriesPrevious,
+    seriesAxisNodes,
   );
   const legacyNodes = excludeSameStoryOnVerticalAxis(
     limitVisibleNodes(
@@ -1487,6 +1537,7 @@ function FilmDnaGraph({
     ),
     centerNode,
     seriesNext,
+    seriesAxisNodes,
   );
 
   const [hover, setHover] = useState<HoverTarget | null>(null);

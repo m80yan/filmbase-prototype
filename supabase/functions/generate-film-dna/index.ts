@@ -277,6 +277,99 @@ function normalizeNode(raw: unknown): FilmDnaNode | null {
   return node;
 }
 
+/** 临时诊断：Influence/Legacy 槽位数量。 */
+type FilmDnaSideCounts = { left: number; right: number };
+
+/** 临时诊断：GPT 原始数组 vs `normalizeNode` 结果。 */
+type RawGptSideDiagnostics = {
+  rawLeftItems: number;
+  rawRightItems: number;
+  normalizedLeft: number;
+  normalizedRight: number;
+  rejectedLeft: number;
+  rejectedRight: number;
+};
+
+/**
+ * 临时诊断日志（Supabase 日志中过滤 `[diag]`）。
+ *
+ * @param stage 管道阶段名
+ * @param counts 左右槽位数
+ * @param extra 附加字段（丢弃原因等）
+ */
+function logFilmDnaDiag(
+  stage: string,
+  counts: FilmDnaSideCounts,
+  extra?: Record<string, unknown>,
+): void {
+  console.log(`${LOG_PREFIX} [diag] ${stage}`, {
+    left: counts.left,
+    right: counts.right,
+    ...extra,
+  });
+}
+
+/**
+ * 统计 GPT JSON 中 left/right 原始条数及 normalize 拒绝数（仅缺 title 会拒绝）。
+ *
+ * @param parsed 已 `JSON.parse` 的模型输出
+ */
+function measureRawGptSideSlots(parsed: unknown): RawGptSideDiagnostics {
+  const root =
+    parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  const rawLeftArr = Array.isArray(root.left) ? root.left : [];
+  const rawRightArr = Array.isArray(root.right) ? root.right : [];
+  let normalizedLeft = 0;
+  let rejectedLeft = 0;
+  for (const item of rawLeftArr) {
+    if (normalizeNode(item)) normalizedLeft++;
+    else rejectedLeft++;
+  }
+  let normalizedRight = 0;
+  let rejectedRight = 0;
+  for (const item of rawRightArr) {
+    if (normalizeNode(item)) normalizedRight++;
+    else rejectedRight++;
+  }
+  return {
+    rawLeftItems: rawLeftArr.length,
+    rawRightItems: rawRightArr.length,
+    normalizedLeft,
+    normalizedRight,
+    rejectedLeft,
+    rejectedRight,
+  };
+}
+
+/**
+ * 从 GPT 根对象解析 Influence/Legacy 槽（与 `parseFilmDnaTree` 相同上限）。
+ *
+ * @param root 模型 JSON 根对象
+ */
+function parseInfluenceLegacySlotsFromRoot(
+  root: Record<string, unknown>,
+): { left: FilmDnaNode[]; right: FilmDnaNode[] } {
+  const left: FilmDnaNode[] = [];
+  if (Array.isArray(root.left)) {
+    for (const item of root.left) {
+      const n = normalizeNode(item);
+      if (n) left.push(n);
+      if (left.length >= MAX_INFLUENCE_NODES) break;
+    }
+  }
+  const right: FilmDnaNode[] = [];
+  if (Array.isArray(root.right)) {
+    for (const item of root.right) {
+      const n = normalizeNode(item);
+      if (n) right.push(n);
+      if (right.length >= MAX_LEGACY_NODES) break;
+    }
+  }
+  return { left, right };
+}
+
 /**
  * 解析系列节点数组（前作 / 续作分别受上限约束）。
  *
@@ -663,11 +756,21 @@ async function applyTmdbSeriesToTree(
   });
 
   if (!detection.matchedInCollection) {
+    logFilmDnaDiag("pre-tmdb-reconcile-no-collection", {
+      left: tree.left.length,
+      right: tree.right.length,
+    });
     const noTmdb = applySeriesSummaryScope(
       applySignificanceScope(
-        applySeriesLineageFlags(reconcileSeriesAndLegacy(tree)),
+        applySeriesLineageFlags(
+          reconcileSeriesAndLegacy(tree, "post-tmdb-no-collection"),
+        ),
       ),
     );
+    logFilmDnaDiag("post-tmdb-reconcile-no-collection", {
+      left: noTmdb.left.length,
+      right: noTmdb.right.length,
+    });
     return noTmdb;
   }
 
@@ -686,11 +789,26 @@ async function applyTmdbSeriesToTree(
     delete next.seriesNext;
   }
 
-  return applySeriesSummaryScope(
+  logFilmDnaDiag("pre-tmdb-reconcile-with-collection", {
+    left: next.left.length,
+    right: next.right.length,
+  }, {
+    seriesPrevious: next.seriesPrevious?.length ?? 0,
+    seriesNext: next.seriesNext?.length ?? 0,
+  });
+
+  const withCollection = applySeriesSummaryScope(
     applySignificanceScope(
-      applySeriesLineageFlags(reconcileSeriesAndLegacy(next)),
+      applySeriesLineageFlags(
+        reconcileSeriesAndLegacy(next, "post-tmdb-collection"),
+      ),
     ),
   );
+  logFilmDnaDiag("post-tmdb-reconcile-with-collection", {
+    left: withCollection.left.length,
+    right: withCollection.right.length,
+  });
+  return withCollection;
 }
 
 /**
@@ -895,23 +1013,8 @@ function parseFilmDnaTree(
       note: "",
     } satisfies FilmDnaNode);
 
-  const left: FilmDnaNode[] = [];
-  if (Array.isArray(root.left)) {
-    for (const item of root.left) {
-      const n = normalizeNode(item);
-      if (n) left.push(n);
-      if (left.length >= MAX_INFLUENCE_NODES) break;
-    }
-  }
-
-  const right: FilmDnaNode[] = [];
-  if (Array.isArray(root.right)) {
-    for (const item of root.right) {
-      const n = normalizeNode(item);
-      if (n) right.push(n);
-      if (right.length >= MAX_LEGACY_NODES) break;
-    }
-  }
+  const { left, right } = parseInfluenceLegacySlotsFromRoot(root);
+  logFilmDnaDiag("parsed-after-normalize", { left: left.length, right: right.length });
 
   const seriesPrevious = parseSeriesNodes(
     root.seriesPrevious,
@@ -919,18 +1022,19 @@ function parseFilmDnaTree(
   );
   const seriesNext = parseSeriesNodes(root.seriesNext, MAX_SERIES_NEXT);
 
+  const reconciled = reconcileSeriesAndLegacy(
+    {
+      center,
+      left,
+      right,
+      ...(seriesPrevious.length ? { seriesPrevious } : {}),
+      ...(seriesNext.length ? { seriesNext } : {}),
+    },
+    "parse",
+  );
+
   return applySeriesSummaryScope(
-    applySignificanceScope(
-      applySeriesLineageFlags(
-        reconcileSeriesAndLegacy({
-          center,
-          left,
-          right,
-          ...(seriesPrevious.length ? { seriesPrevious } : {}),
-          ...(seriesNext.length ? { seriesNext } : {}),
-        }),
-      ),
-    ),
+    applySignificanceScope(applySeriesLineageFlags(reconciled)),
   );
 }
 
@@ -946,6 +1050,58 @@ function normalizeFilmTitleKey(title: string): string {
  */
 function filmNodesMatchTitle(a: FilmDnaNode, b: FilmDnaNode): boolean {
   return normalizeFilmTitleKey(a.title) === normalizeFilmTitleKey(b.title);
+}
+
+/**
+ * 侧栏节点是否与系列轴节点为同一部影片（跨槽去重；系列轴优先）。
+ *
+ * @param a 节点 A
+ * @param b 节点 B
+ */
+function filmNodesMatchForSeriesDedup(
+  a: FilmDnaNode,
+  b: FilmDnaNode,
+): boolean {
+  const idA = a.tmdbMovieId;
+  const idB = b.tmdbMovieId;
+  if (
+    typeof idA === "number" &&
+    idA > 0 &&
+    typeof idB === "number" &&
+    idB > 0
+  ) {
+    return idA === idB;
+  }
+  if (!filmNodesMatchTitle(a, b)) return false;
+  const yearA = isUsableFilmYear(a.year) ? a.year : null;
+  const yearB = isUsableFilmYear(b.year) ? b.year : null;
+  if (yearA != null && yearB != null) return yearA === yearB;
+  return true;
+}
+
+/**
+ * Series axis wins over side lanes to avoid showing the same film as both a
+ * sequel/prequel and an influence/legacy node.
+ *
+ * @param left Influence 槽
+ * @param right Legacy 槽
+ * @param seriesPrevious 系列前作
+ * @param seriesNext 系列续作
+ */
+function excludeSideNodesDuplicatingSeriesAxis(
+  left: FilmDnaNode[],
+  right: FilmDnaNode[],
+  seriesPrevious: FilmDnaNode[],
+  seriesNext: FilmDnaNode[],
+): { left: FilmDnaNode[]; right: FilmDnaNode[] } {
+  const axis = [...seriesPrevious, ...seriesNext];
+  if (!axis.length) return { left, right };
+  const onAxis = (node: FilmDnaNode) =>
+    axis.some((s) => filmNodesMatchForSeriesDedup(node, s));
+  return {
+    left: left.filter((n) => !onAxis(n)),
+    right: right.filter((n) => !onAxis(n)),
+  };
 }
 
 const NON_CANONICAL_LINEAGE_RE =
@@ -1329,7 +1485,10 @@ function isChronologyValidForLegacy(
  *
  * @param tree 待校验树
  */
-function enforceFilmDnaChronology(tree: FilmDnaTree): FilmDnaTree {
+function enforceFilmDnaChronology(
+  tree: FilmDnaTree,
+  diagStage?: string,
+): FilmDnaTree {
   const centerYear = isUsableFilmYear(tree.center.year)
     ? tree.center.year
     : null;
@@ -1340,6 +1499,31 @@ function enforceFilmDnaChronology(tree: FilmDnaTree): FilmDnaTree {
   const right = tree.right.filter((n) =>
     isChronologyValidForLegacy(n.year, centerYear),
   );
+
+  if (diagStage) {
+    const droppedInfluence = tree.left
+      .filter((n) => !isChronologyValidForInfluence(n.year, centerYear))
+      .map((n) => ({ title: n.title, year: n.year }));
+    const droppedLegacy = tree.right
+      .filter((n) => !isChronologyValidForLegacy(n.year, centerYear))
+      .map((n) => ({ title: n.title, year: n.year }));
+    if (
+      droppedInfluence.length > 0 ||
+      droppedLegacy.length > 0 ||
+      left.length !== tree.left.length ||
+      right.length !== tree.right.length
+    ) {
+      logFilmDnaDiag(`after-chronology-${diagStage}`, {
+        left: left.length,
+        right: right.length,
+      }, {
+        centerYear,
+        droppedInfluence,
+        droppedLegacy,
+        before: { left: tree.left.length, right: tree.right.length },
+      });
+    }
+  }
 
   return {
     ...tree,
@@ -1353,41 +1537,113 @@ function enforceFilmDnaChronology(tree: FilmDnaTree): FilmDnaTree {
 /**
  * 保证系列槽位与 Influence/Legacy 槽位互斥；必要时从 left/right 提升系列条目。
  */
-function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
+function reconcileSeriesAndLegacy(
+  tree: FilmDnaTree,
+  diagLabel = "reconcile",
+): FilmDnaTree {
+  logFilmDnaDiag(`${diagLabel}-input`, {
+    left: tree.left.length,
+    right: tree.right.length,
+  }, {
+    seriesPrevious: tree.seriesPrevious?.length ?? 0,
+    seriesNext: tree.seriesNext?.length ?? 0,
+  });
+
   const promoted = promoteSameTitlePriorVersion(tree);
+  logFilmDnaDiag(`${diagLabel}-after-promote-same-title`, {
+    left: promoted.left.length,
+    right: promoted.right.length,
+  }, {
+    seriesPrevious: promoted.seriesPrevious?.length ?? 0,
+    movedFromLeft:
+      tree.left.length > promoted.left.length &&
+      (promoted.seriesPrevious?.length ?? 0) >
+        (tree.seriesPrevious?.length ?? 0),
+  });
 
   let left = [...promoted.left];
   let right = [...promoted.right];
   let seriesPrevious = promoted.seriesPrevious ? [...promoted.seriesPrevious] : [];
   let seriesNext = promoted.seriesNext ? [...promoted.seriesNext] : [];
 
+  let movedSequelToSeries: string | null = null;
   if (!seriesNext.length) {
     const sequelIdx = right.findIndex((n) =>
       isLikelySeriesContinuation(n, promoted.center),
     );
     if (sequelIdx !== -1) {
-      seriesNext = [right.splice(sequelIdx, 1)[0]];
+      const moved = right.splice(sequelIdx, 1)[0];
+      seriesNext = [moved];
+      movedSequelToSeries = moved.title;
     }
   }
 
+  let movedPrequelToSeries: string | null = null;
   if (!seriesPrevious.length) {
     const prequelIdx = left.findIndex((n) =>
       isLikelySeriesPrequel(n, promoted.center),
     );
     if (prequelIdx !== -1) {
-      seriesPrevious = [left.splice(prequelIdx, 1)[0]];
+      const moved = left.splice(prequelIdx, 1)[0];
+      seriesPrevious = [moved];
+      movedPrequelToSeries = moved.title;
     }
+  }
+
+  if (movedSequelToSeries || movedPrequelToSeries) {
+    logFilmDnaDiag(`${diagLabel}-after-series-promotion`, {
+      left: left.length,
+      right: right.length,
+    }, {
+      movedSequelToSeries,
+      movedPrequelToSeries,
+      seriesPrevious: seriesPrevious.length,
+      seriesNext: seriesNext.length,
+    });
   }
 
   /** 仅当侧栏条目与 center 同片名且已上垂直轴时去重，避免系列全集标题误删 Influence/Legacy。 */
   const verticalHasSameStory = (slot: FilmDnaNode[] | undefined) =>
     (slot ?? []).some((n) => isSameStoryTitleAsCenter(n, promoted.center));
 
+  const beforeSameStory = { left: left.length, right: right.length };
   if (verticalHasSameStory(seriesPrevious)) {
     left = left.filter((n) => !isSameStoryTitleAsCenter(n, promoted.center));
   }
   if (verticalHasSameStory(seriesNext)) {
     right = right.filter((n) => !isSameStoryTitleAsCenter(n, promoted.center));
+  }
+  if (
+    beforeSameStory.left !== left.length ||
+    beforeSameStory.right !== right.length
+  ) {
+    logFilmDnaDiag(`${diagLabel}-after-same-story-filter`, {
+      left: left.length,
+      right: right.length,
+    }, { before: beforeSameStory });
+  }
+
+  const beforeAxisDedup = { left: left.length, right: right.length };
+  const axisDeduped = excludeSideNodesDuplicatingSeriesAxis(
+    left,
+    right,
+    seriesPrevious,
+    seriesNext,
+  );
+  left = axisDeduped.left;
+  right = axisDeduped.right;
+  if (
+    beforeAxisDedup.left !== left.length ||
+    beforeAxisDedup.right !== right.length
+  ) {
+    const axisTitles = [...seriesPrevious, ...seriesNext].map((n) => n.title);
+    logFilmDnaDiag(`${diagLabel}-after-series-axis-dedup`, {
+      left: left.length,
+      right: right.length,
+    }, {
+      before: beforeAxisDedup,
+      seriesAxisTitles: axisTitles,
+    });
   }
 
   const reconciled: FilmDnaTree = {
@@ -1402,7 +1658,18 @@ function reconcileSeriesAndLegacy(tree: FilmDnaTree): FilmDnaTree {
       : {}),
   };
 
-  return enforceFilmDnaChronology(reconciled);
+  logFilmDnaDiag(`${diagLabel}-before-chronology`, {
+    left: reconciled.left.length,
+    right: reconciled.right.length,
+  });
+
+  const afterChronology = enforceFilmDnaChronology(reconciled, diagLabel);
+  logFilmDnaDiag(`${diagLabel}-after-reconcile-final`, {
+    left: afterChronology.left.length,
+    right: afterChronology.right.length,
+  });
+
+  return afterChronology;
 }
 
 /**
@@ -1478,8 +1745,11 @@ Prioritize candidates in this order:
 
 Confidence filter (strict):
 - If a relationship feels weak, debatable, or merely associative, OMIT it.
-- Prefer fewer, stronger nodes over weak filler. left and right may contain 0–3 entries each.
-- Do NOT pad to three entries with speculative links. One or two strong links beat three weak ones.
+- Quality matters more than quantity—but do not stop too early when more defensible links exist.
+- left[] and right[] may each contain 0–3 entries. Aim for 2–3 strong nodes per side when you can defend each one.
+- For well-known films with rich documented lineages, try to provide up to 3 influence nodes (left) and up to 3 legacy nodes (right) when widely recognized relationships exist.
+- Do not pad with weak, speculative, or debatable links to reach three. Never invent filler.
+- If only one strong link exists on a side, output one. If additional widely recognized craft or lineage ties exist beyond the first, include them (up to three)—do not stop at one node when those ties are defensible.
 - Each note must name the specific connection (technique, lineage, homage, director thread)—not vague praise.
 
 Chronology (HARD — never violate):
@@ -1497,7 +1767,7 @@ Calibration example (Legacy for "12 Angry Men", 1957):
 - BAD: The Social Network (2010)—prestige drama with no rigorous cinematic legacy tie; omit.
 
 Relationship groups (all may coexist—do NOT collapse into only the vertical axis):
-- left[] + right[]: cinematic craft Influence / Legacy (0–3 each when defensible). ALWAYS try to populate independently of series slots.
+- left[] + right[]: cinematic craft Influence / Legacy (0–3 each when defensible; aim for 2–3 per side on well-known films when ties are strong). ALWAYS try to populate independently of series slots.
 - seriesPrevious[] + seriesNext[]: vertical lineage axis only (canonical sequels/prequels, remakes, re-adaptations, same-source different-era versions).
 - A franchise installment on the vertical axis must NOT remove a different-title craft Influence/Legacy film from left/right.
 
@@ -1512,7 +1782,7 @@ Series slots:
   - false for remakes, re-adaptations, reboots, or same source material in a different era (e.g. All Quiet on the Western Front 1930 above 2022)—still list on the axis, NO line.
   - Example: center = All Quiet (2022), seriesPrevious = [{ title: "All Quiet on the Western Front", year: 1930, lineageConnectedAbove: false, ... }].
 
-When several films share the same documented craft lineage (e.g. courtroom/jury tradition, cyberpunk visual line), include the strongest documented examples up to three—still omitting weak prestige-only pairings.
+When several films share the same documented craft lineage (e.g. courtroom/jury tradition, cyberpunk visual line), include the strongest documented examples up to three per side—still omitting weak prestige-only pairings; do not stop after one if two or three are widely taught or cited.
 
 Courtroom / jury dramas: Influence = earlier trial or deliberation lineage; Legacy = later films in that craft tradition—not unrelated modern prestige dramas.
 
@@ -1742,6 +2012,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    const rawGpt = measureRawGptSideSlots(parsed);
+    logFilmDnaDiag("raw-gpt", {
+      left: rawGpt.rawLeftItems,
+      right: rawGpt.rawRightItems,
+    }, {
+      normalizedLeft: rawGpt.normalizedLeft,
+      normalizedRight: rawGpt.normalizedRight,
+      rejectedLeft: rawGpt.rejectedLeft,
+      rejectedRight: rawGpt.rejectedRight,
+      note:
+        "rejected* = array items where normalizeNode returned null (missing title only)",
+    });
+
     const tree = parseFilmDnaTree(parsed, title, fallbackYear);
     if (!tree) {
       console.error(`${LOG_PREFIX} invalid Film DNA shape`, parsed);
@@ -1751,6 +2034,15 @@ Deno.serve(async (req) => {
         details: "Parsed JSON did not match expected center/left/right shape.",
       });
     }
+
+    logFilmDnaDiag("after-parseFilmDnaTree", {
+      left: tree.left.length,
+      right: tree.right.length,
+    }, {
+      seriesPrevious: tree.seriesPrevious?.length ?? 0,
+      seriesNext: tree.seriesNext?.length ?? 0,
+      note: "includes first reconcile + lineage/significance/summary scopes (left/right length unchanged)",
+    });
 
     const tmdbToken = Deno.env.get("TMDB_READ_ACCESS_TOKEN")?.trim();
     let result: FilmDnaTree = tree;
@@ -1790,6 +2082,22 @@ Deno.serve(async (req) => {
     }
 
     result = applySeriesSummaryScope(result);
+
+    logFilmDnaDiag("final-response", {
+      left: result.left.length,
+      right: result.right.length,
+    }, {
+      seriesPrevious: result.seriesPrevious?.length ?? 0,
+      seriesNext: result.seriesNext?.length ?? 0,
+      maxInfluence: MAX_INFLUENCE_NODES,
+      maxLegacy: MAX_LEGACY_NODES,
+      gptRawLeft: rawGpt.rawLeftItems,
+      gptRawRight: rawGpt.rawRightItems,
+      deltaFromGptRaw: {
+        left: result.left.length - rawGpt.rawLeftItems,
+        right: result.right.length - rawGpt.rawRightItems,
+      },
+    });
 
     console.log(`${LOG_PREFIX} success`, {
       title,
