@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-/** 与 GENRE 标题行 `ChevronRight size={16}` 同宽，保证拖拽把手与 chevron 同一竖列。 */
+/** 与 GENRE 标题行 `ChevronRight size={16}` 同宽，保证拖拽图标与 chevron 同一竖列。 */
 const GENRE_SIDEBAR_TRAILING_COL_PX = 16;
 /** 侧栏滚动区为 scrollbar gutter 预留的空间；继承 `.filmbase-scrollbar` 的 8px 配置。 */
 const GENRE_SIDEBAR_SCROLLBAR_GUTTER = 'var(--filmbase-scrollbar-gutter, 8px)';
@@ -15,7 +15,7 @@ export type GenreSidebarItemProps = {
 };
 
 /**
- * 侧栏 Genre 行：左列图标+筛选；右列 16px 与标题 chevron 对齐的拖拽把手。
+ * 侧栏 Genre 行：左列图标+筛选；右列 16px 与标题 chevron 对齐的拖拽图标。
  */
 export default function GenreSidebarItem({
   label,
@@ -76,7 +76,7 @@ export default function GenreSidebarItem({
         role="button"
         tabIndex={-1}
         aria-label={`Reorder ${label}`}
-        className={`col-start-2 flex h-4 w-4 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-center justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
+        className={`col-start-2 flex h-8 w-8 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-center justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
           handleHovered || isDragging ? 'opacity-100' : ''
         } ${handleHovered || isDragging ? 'cursor-grab' : 'cursor-default'} active:cursor-grabbing`}
         onPointerDown={onHandlePointerDown}

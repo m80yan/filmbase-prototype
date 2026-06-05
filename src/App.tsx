@@ -2990,7 +2990,6 @@ export default function App() {
   const genreDragRef = useRef<{ fromIndex: number; pointerId: number; startPointerY: number } | null>(null);
   const genreDragOverIndexRef = useRef<number | null>(null);
   const genreDragRowMidpointsRef = useRef<number[]>([]);
-  const shouldClearGenreDragAfterRenderRef = useRef(false);
   const [genreDragFromIndex, setGenreDragFromIndex] = useState<number | null>(null);
   const [genreDragOverIndex, setGenreDragOverIndex] = useState<number | null>(null);
   const [genreDragPointerY, setGenreDragPointerY] = useState<number | null>(null);
@@ -3003,14 +3002,6 @@ export default function App() {
 
   const genres = genreSidebarOrder;
   const GENRE_ITEM_PITCH = 38;
-
-  useLayoutEffect(() => {
-    if (!shouldClearGenreDragAfterRenderRef.current) return;
-    shouldClearGenreDragAfterRenderRef.current = false;
-    setGenreDragFromIndex(null);
-    setGenreDragOverIndex(null);
-    setGenreDragPointerY(null);
-  }, [genreSidebarOrder]);
 
   /**
    * 根据指针 Y 坐标计算 Genre 列表目标插入索引（中线以上归该格，否则下一格）。
@@ -3050,8 +3041,10 @@ export default function App() {
       genreDragOverIndexRef.current = null;
       genreDragRowMidpointsRef.current = [];
       if (from !== to) {
-        shouldClearGenreDragAfterRenderRef.current = true;
         reorderGenreSidebar(from, to);
+        setGenreDragFromIndex(null);
+        setGenreDragOverIndex(null);
+        setGenreDragPointerY(null);
         return;
       }
       setGenreDragFromIndex(null);
@@ -4725,7 +4718,7 @@ export default function App() {
                       key={genre}
                       data-genre-index={index}
                       className="w-[200px]"
-                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      transition={genreDragFromIndex === null ? { duration: 0 } : { duration: 0.18, ease: 'easeOut' }}
                       style={
                         isDragged && genreDragPointerY !== null
                           ? { y: genreDragPointerY - (genreDragRef.current?.startPointerY ?? 0), position: 'relative' as const, zIndex: 50, cursor: 'grabbing' as const }
