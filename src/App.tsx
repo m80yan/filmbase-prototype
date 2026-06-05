@@ -2987,10 +2987,11 @@ export default function App() {
   /** 侧栏 Genre 列表顺序（localStorage）；与 `allUniqueGenres` 合并后渲染。 */
   const [genreSidebarOrder, setGenreSidebarOrder] = useState<string[]>([]);
   const genreListRef = useRef<HTMLUListElement>(null);
-  const genreDragRef = useRef<{ fromIndex: number; pointerId: number } | null>(null);
+  const genreDragRef = useRef<{ fromIndex: number; pointerId: number; startPointerY: number } | null>(null);
   const genreDragOverIndexRef = useRef<number | null>(null);
   const [genreDragFromIndex, setGenreDragFromIndex] = useState<number | null>(null);
   const [genreDragOverIndex, setGenreDragOverIndex] = useState<number | null>(null);
+  const [genreDragPointerY, setGenreDragPointerY] = useState<number | null>(null);
 
   useEffect(() => {
     setGenreSidebarOrder((prev) =>
@@ -3042,6 +3043,7 @@ export default function App() {
       genreDragOverIndexRef.current = null;
       setGenreDragFromIndex(null);
       setGenreDragOverIndex(null);
+      setGenreDragPointerY(null);
       reorderGenreSidebar(from, to);
     },
     [reorderGenreSidebar],
@@ -3052,7 +3054,7 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
-      genreDragRef.current = { fromIndex: index, pointerId: e.pointerId };
+      genreDragRef.current = { fromIndex: index, pointerId: e.pointerId, startPointerY: e.clientY };
       genreDragOverIndexRef.current = index;
       setGenreDragFromIndex(index);
       setGenreDragOverIndex(index);
@@ -3063,6 +3065,7 @@ export default function App() {
   const onGenreListPointerMove = useCallback(
     (e: React.PointerEvent<HTMLUListElement>) => {
       if (!genreDragRef.current || genreDragRef.current.pointerId !== e.pointerId) return;
+      setGenreDragPointerY(e.clientY);
       const to = getGenreDropIndexFromPointer(e.clientY);
       if (to !== null) {
         genreDragOverIndexRef.current = to;
@@ -4689,7 +4692,23 @@ export default function App() {
                   onPointerCancel={onGenreListPointerCancel}
                 >
                   {genres.map((genre, index) => (
-                    <motion.li key={genre} data-genre-index={index} className="w-[200px]" layout transition={{ duration: 0.2, ease: 'easeOut' }}>
+                    <motion.li
+                      key={genre}
+                      data-genre-index={index}
+                      className="w-[200px]"
+                      layout
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      style={
+                        genreDragFromIndex === index && genreDragPointerY !== null
+                          ? { y: genreDragPointerY - (genreDragRef.current?.startPointerY ?? 0), position: 'relative' as const, zIndex: 50, cursor: 'grabbing' as const }
+                          : undefined
+                      }
+                      animate={
+                        genreDragFromIndex === index
+                          ? { scale: 1.02 }
+                          : { y: 0, scale: 1 }
+                      }
+                    >
                       <GenreSidebarItem
                         label={genre}
                         active={selectedGenres.includes(genre)}
