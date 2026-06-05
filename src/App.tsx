@@ -3000,6 +3000,7 @@ export default function App() {
   }, [allUniqueGenres]);
 
   const genres = genreSidebarOrder;
+  const GENRE_ITEM_PITCH = 38;
 
   /**
    * 根据指针 Y 坐标计算 Genre 列表目标插入索引（中线以上归该格，否则下一格）。
@@ -3041,10 +3042,14 @@ export default function App() {
       const to = genreDragOverIndexRef.current ?? from;
       genreDragRef.current = null;
       genreDragOverIndexRef.current = null;
-      setGenreDragFromIndex(null);
-      setGenreDragOverIndex(null);
-      setGenreDragPointerY(null);
-      reorderGenreSidebar(from, to);
+      if (from !== to) {
+        reorderGenreSidebar(from, to);
+      }
+      requestAnimationFrame(() => {
+        setGenreDragFromIndex(null);
+        setGenreDragOverIndex(null);
+        setGenreDragPointerY(null);
+      });
     },
     [reorderGenreSidebar],
   );
@@ -4691,22 +4696,31 @@ export default function App() {
                   onPointerUp={onGenreListPointerUp}
                   onPointerCancel={onGenreListPointerCancel}
                 >
-                  {genres.map((genre, index) => (
+                  {genres.map((genre, index) => {
+                    const isDragged = genreDragFromIndex === index;
+                    const reorderOffset =
+                      genreDragFromIndex !== null && genreDragOverIndex !== null && !isDragged
+                        ? genreDragFromIndex < genreDragOverIndex
+                          ? (index > genreDragFromIndex && index <= genreDragOverIndex ? -GENRE_ITEM_PITCH : 0)
+                          : genreDragFromIndex > genreDragOverIndex
+                            ? (index >= genreDragOverIndex && index < genreDragFromIndex ? GENRE_ITEM_PITCH : 0)
+                            : 0
+                        : 0;
+                    return (
                     <motion.li
                       key={genre}
                       data-genre-index={index}
                       className="w-[200px]"
-                      layout
-                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
                       style={
-                        genreDragFromIndex === index && genreDragPointerY !== null
+                        isDragged && genreDragPointerY !== null
                           ? { y: genreDragPointerY - (genreDragRef.current?.startPointerY ?? 0), position: 'relative' as const, zIndex: 50, cursor: 'grabbing' as const }
                           : undefined
                       }
                       animate={
-                        genreDragFromIndex === index
+                        isDragged
                           ? { scale: 1.02 }
-                          : { y: 0, scale: 1 }
+                          : { y: reorderOffset, scale: 1 }
                       }
                     >
                       <GenreSidebarItem
@@ -4723,7 +4737,7 @@ export default function App() {
                         }
                       />
                     </motion.li>
-                  ))}
+                  )})}
                 </ul>
               </motion.div>
             </div>
