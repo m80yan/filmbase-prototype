@@ -4689,7 +4689,7 @@ export default function App() {
                   onPointerCancel={onGenreListPointerCancel}
                 >
                   {genres.map((genre, index) => (
-                    <li key={genre} data-genre-index={index} className="w-[200px]">
+                    <motion.li key={genre} data-genre-index={index} className="w-[200px]" layout transition={{ duration: 0.2, ease: 'easeOut' }}>
                       <GenreSidebarItem
                         label={genre}
                         active={selectedGenres.includes(genre)}
@@ -4703,7 +4703,7 @@ export default function App() {
                           genreDragFromIndex !== index
                         }
                       />
-                    </li>
+                    </motion.li>
                   ))}
                 </ul>
               </motion.div>
