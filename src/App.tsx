@@ -2989,6 +2989,8 @@ export default function App() {
   const genreListRef = useRef<HTMLUListElement>(null);
   const genreDragRef = useRef<{ fromIndex: number; pointerId: number; startPointerY: number } | null>(null);
   const genreDragOverIndexRef = useRef<number | null>(null);
+  const genreDragRowMidpointsRef = useRef<number[]>([]);
+  const shouldClearGenreDragAfterRenderRef = useRef(false);
   const [genreDragFromIndex, setGenreDragFromIndex] = useState<number | null>(null);
   const [genreDragOverIndex, setGenreDragOverIndex] = useState<number | null>(null);
   const [genreDragPointerY, setGenreDragPointerY] = useState<number | null>(null);
@@ -3002,22 +3004,26 @@ export default function App() {
   const genres = genreSidebarOrder;
   const GENRE_ITEM_PITCH = 38;
 
+  useLayoutEffect(() => {
+    if (!shouldClearGenreDragAfterRenderRef.current) return;
+    shouldClearGenreDragAfterRenderRef.current = false;
+    setGenreDragFromIndex(null);
+    setGenreDragOverIndex(null);
+    setGenreDragPointerY(null);
+  }, [genreSidebarOrder]);
+
   /**
    * 根据指针 Y 坐标计算 Genre 列表目标插入索引（中线以上归该格，否则下一格）。
    *
    * @param clientY 视口 Y
    */
   const getGenreDropIndexFromPointer = useCallback((clientY: number): number | null => {
-    const ul = genreListRef.current;
-    if (!ul) return null;
-    const items = ul.querySelectorAll<HTMLElement>('[data-genre-index]');
-    if (items.length === 0) return null;
-    for (let i = 0; i < items.length; i++) {
-      const rect = items[i].getBoundingClientRect();
-      const mid = rect.top + rect.height / 2;
-      if (clientY < mid) return i;
+    const midpoints = genreDragRowMidpointsRef.current;
+    if (midpoints.length === 0) return null;
+    for (let i = 0; i < midpoints.length; i++) {
+      if (clientY < midpoints[i]) return i;
     }
-    return items.length - 1;
+    return midpoints.length - 1;
   }, []);
 
   const reorderGenreSidebar = useCallback((fromIndex: number, toIndex: number) => {
@@ -3042,14 +3048,15 @@ export default function App() {
       const to = genreDragOverIndexRef.current ?? from;
       genreDragRef.current = null;
       genreDragOverIndexRef.current = null;
+      genreDragRowMidpointsRef.current = [];
       if (from !== to) {
+        shouldClearGenreDragAfterRenderRef.current = true;
         reorderGenreSidebar(from, to);
+        return;
       }
-      requestAnimationFrame(() => {
-        setGenreDragFromIndex(null);
-        setGenreDragOverIndex(null);
-        setGenreDragPointerY(null);
-      });
+      setGenreDragFromIndex(null);
+      setGenreDragOverIndex(null);
+      setGenreDragPointerY(null);
     },
     [reorderGenreSidebar],
   );
@@ -3059,6 +3066,13 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
+      const items = genreListRef.current?.querySelectorAll<HTMLElement>('[data-genre-index]');
+      genreDragRowMidpointsRef.current = items
+        ? Array.from(items, (item) => {
+            const rect = item.getBoundingClientRect();
+            return rect.top + rect.height / 2;
+          })
+        : [];
       genreDragRef.current = { fromIndex: index, pointerId: e.pointerId, startPointerY: e.clientY };
       genreDragOverIndexRef.current = index;
       setGenreDragFromIndex(index);
@@ -4730,11 +4744,6 @@ export default function App() {
                         iconSlug={genreLabelToIconSlug(genre)}
                         onHandlePointerDown={onGenreHandlePointerDown(index)}
                         isDragging={genreDragFromIndex === index}
-                        isDropTarget={
-                          genreDragFromIndex !== null &&
-                          genreDragOverIndex === index &&
-                          genreDragFromIndex !== index
-                        }
                       />
                     </motion.li>
                   )})}

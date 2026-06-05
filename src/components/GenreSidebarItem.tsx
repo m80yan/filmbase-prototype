@@ -12,7 +12,6 @@ export type GenreSidebarItemProps = {
   onClick: () => void;
   onHandlePointerDown: (e: React.PointerEvent<HTMLSpanElement>) => void;
   isDragging: boolean;
-  isDropTarget: boolean;
 };
 
 /**
@@ -25,7 +24,6 @@ export default function GenreSidebarItem({
   onClick,
   onHandlePointerDown,
   isDragging,
-  isDropTarget,
 }: GenreSidebarItemProps) {
   const [handleHovered, setHandleHovered] = useState(false);
 
@@ -33,9 +31,7 @@ export default function GenreSidebarItem({
     <div
       className={`group/genreitem grid h-9 w-[200px] min-w-0 items-center rounded-md transition-colors ${
         isDragging ? 'opacity-50' : ''
-      } ${isDropTarget ? 'ring-1 ring-inset ring-white/20' : ''} ${
-        active ? 'bg-[#EB9692]/20' : 'hover:bg-white/5'
-      }`}
+      } ${active ? 'bg-[#EB9692]/20' : 'hover:bg-white/5'}`}
       style={{
         gridTemplateColumns: `minmax(0, 1fr) ${GENRE_SIDEBAR_TRAILING_COL_PX}px ${GENRE_SIDEBAR_SCROLLBAR_GUTTER}`,
       }}
