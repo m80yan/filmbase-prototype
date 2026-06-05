@@ -76,7 +76,7 @@ export default function GenreSidebarItem({
         role="button"
         tabIndex={-1}
         aria-label={`Reorder ${label}`}
-        className={`col-start-2 flex h-8 w-8 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-center justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
+        className={`col-start-2 flex h-8 w-8 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-end justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
           handleHovered || isDragging ? 'opacity-100' : ''
         } ${handleHovered || isDragging ? 'cursor-grab' : 'cursor-default'} active:cursor-grabbing`}
         onPointerDown={onHandlePointerDown}
