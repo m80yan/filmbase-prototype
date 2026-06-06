@@ -143,7 +143,7 @@
 }
 
 /**
- * List View 分层表头：与同行滚动区 `scrollbar-gutter: stable` 预留的 8px 右槽对齐。
+ * List View 分层表头与行内容共用自定义滚动条右槽。
  */
 .filmbase-list-view-layered {
   --filmbase-scrollbar-gutter: 8px;
@@ -154,12 +154,24 @@
   box-sizing: border-box;
 }
 
+.filmbase-list-view-rows-scroll {
+  padding-right: var(--filmbase-scrollbar-gutter);
+}
+
 .filmbase-scrollbar::-webkit-scrollbar {
   width: 8px;
 }
 
 .filmbase-scrollbar::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.filmbase-list-scrollbar-native-hidden {
+  scrollbar-width: none;
+}
+
+.filmbase-list-scrollbar-native-hidden::-webkit-scrollbar {
+  display: none;
 }
 
 .filmbase-scrollbar::-webkit-scrollbar-thumb {

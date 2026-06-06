@@ -1021,10 +1021,7 @@ function clampPosterSizePx(px: number): number {
 const LIBRARY_LOADING_FILM_BASE_SRC = '/icons/library-loading-film-base.svg';
 /** 片库加载叠层：上层旋转卷轴。 */
 const LIBRARY_LOADING_REEL_SRC = '/icons/library-loading-reel.svg';
-/**
- * 片库加载音（方案 A）：`public/sounds/library-ready.mp3` 单次播放、不循环；与 loader 同启，就绪时 cleanup 立刻停声。
- * 若实际加载短于音轨时长则中途截断；长于音轨则播完后静默直至 UI 就绪。
- */
+/** 片库加载音：与 Library hydration 加载态同生命周期。 */
 const LIBRARY_LOADING_SOUND_SRC = '/sounds/library-ready.mp3';
 /** 预览交互禁用提示音：例如 Z 缩放无可用区间时播放（`public/sounds/ui-disabled.mp3`）。 */
 const UI_DISABLED_SOUND_SRC = '/sounds/ui-disabled.mp3';
@@ -1194,7 +1191,7 @@ function scrollLibraryItemNearTop(
  */
 function listViewTableGridClassName(isEditing: boolean): string {
   return isEditing
-    ? 'grid grid-cols-[60px_132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
+    ? 'grid grid-cols-[12px_132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
     : 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8';
 }
 
@@ -1439,7 +1436,7 @@ const FILMBASE_SHELL_RESIZE_HANDLES: readonly {
   {
     edge: 'e',
     className:
-      'filmbase-shell-resize-edge-e pointer-events-auto absolute inset-y-3 right-0 z-[194] w-2 cursor-ew-resize touch-none select-none',
+      'filmbase-shell-resize-edge-e pointer-events-auto absolute inset-y-3 right-[-6px] z-[194] w-2 cursor-ew-resize touch-none select-none',
     title: 'Resize width',
   },
   {
@@ -1803,6 +1800,21 @@ export default function App() {
   const [isPreviewZoomSliderPressed, setIsPreviewZoomSliderPressed] = useState(false);
   const [isMoviesHydrated, setIsMoviesHydrated] = useState(false);
   const [libraryHydratedMovieCount, setLibraryHydratedMovieCount] = useState(0);
+  const libraryLoadingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const startLibraryLoadingSound = useCallback(() => {
+    const audio = libraryLoadingAudioRef.current ?? new Audio(LIBRARY_LOADING_SOUND_SRC);
+    libraryLoadingAudioRef.current = audio;
+    audio.loop = false;
+    audio.volume = 0.28;
+    if (audio.ended) audio.currentTime = 0;
+    void audio.play().catch(() => {});
+  }, []);
+  const stopLibraryLoadingSound = useCallback(() => {
+    const audio = libraryLoadingAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+  }, []);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const trailerOpenGuardUntilRef = useRef(0);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
@@ -1903,6 +1915,36 @@ export default function App() {
   const addMovieImdbUrlInputRef = useRef<HTMLInputElement>(null);
   /** 主片库纵向滚动容器（网格/列表共用），用于 `scrollIntoView` 的滚动祖先与可见区判断。 */
   const mainLibraryScrollRef = useRef<HTMLDivElement>(null);
+  const [listScrollbarMetrics, setListScrollbarMetrics] = useState({
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  });
+  const [isListScrollbarHovered, setIsListScrollbarHovered] = useState(false);
+  const [isListScrollbarDragging, setIsListScrollbarDragging] = useState(false);
+  const listScrollbarDragRef = useRef<{
+    pointerId: number;
+    startClientY: number;
+    startScrollTop: number;
+    maxScrollTop: number;
+    thumbTravel: number;
+  } | null>(null);
+  const listScrollbarDragCleanupRef = useRef<(() => void) | null>(null);
+  const syncListScrollbarMetrics = useCallback((container: HTMLDivElement | null) => {
+    if (!container) return;
+    const next = {
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    };
+    setListScrollbarMetrics((current) =>
+      current.scrollTop === next.scrollTop &&
+      current.scrollHeight === next.scrollHeight &&
+      current.clientHeight === next.clientHeight
+        ? current
+        : next,
+    );
+  }, []);
   /** 片库中每部影片根节点（网格卡片 / 列表行）`movie.id → HTMLElement`。 */
   const movieLibraryItemElsRef = useRef<Map<string, HTMLElement>>(new Map());
   /**
@@ -1990,6 +2032,8 @@ export default function App() {
    * 从模拟桌面恢复主窗口：`close` 为瞬时显示；`minimize` 走 Dock 反向缩放动画。
    */
   const handleDesktopRestoreFilmbase = useCallback(() => {
+    if (!isMoviesHydrated) startLibraryLoadingSound();
+
     if (windowMode === 'closed') {
       minimizeScheduleGuardRef.current = false;
       setWindowMode('open');
@@ -2003,7 +2047,7 @@ export default function App() {
       setMinimizeAnimating(false);
       setRestorePaintPhase('restore-pre');
     }
-  }, [windowMode]);
+  }, [isMoviesHydrated, startLibraryLoadingSound, windowMode]);
 
   /**
    * Filmbase 外壳过渡结束：`transform` 收口缩小 → `minimized`；收口展开 → `open`；
@@ -2468,24 +2512,16 @@ export default function App() {
     };
   }, []);
 
-  /**
-   * 与片库旋转加载文案及胶片 loader 同生命周期：`!isMoviesHydrated` 时单次播放加载音（不 loop）；就绪时 cleanup 立刻停声。
-   */
+  /** 片库加载期间播放加载音；hydration 完成或 effect cleanup 时立即暂停并归零。 */
   useEffect(() => {
-    if (isMoviesHydrated) return;
+    if (isMoviesHydrated) {
+      stopLibraryLoadingSound();
+      return;
+    }
 
-    const audio = new Audio(LIBRARY_LOADING_SOUND_SRC);
-    audio.loop = false;
-    audio.volume = 0.28;
-    void audio.play().catch(() => {});
-
-    return () => {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = '';
-      void audio.load();
-    };
-  }, [isMoviesHydrated]);
+    startLibraryLoadingSound();
+    return stopLibraryLoadingSound;
+  }, [isMoviesHydrated, startLibraryLoadingSound, stopLibraryLoadingSound]);
 
   useEffect(() => {
     if (!selectedMovie && trailerIframeRef.current) {
@@ -4254,6 +4290,178 @@ export default function App() {
    * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
    */
   const isListViewRowsScrollSplit = viewMode === 'list' && isMoviesHydrated;
+  const listScrollbarTrackHeight = Math.max(
+    0,
+    listScrollbarMetrics.clientHeight - LIST_VIEW_TABLE_HEADER_HEIGHT_PX,
+  );
+  const listScrollbarThumbHeight = Math.min(
+    listScrollbarTrackHeight,
+    Math.max(
+      24,
+      (listScrollbarMetrics.clientHeight / listScrollbarMetrics.scrollHeight) *
+        listScrollbarTrackHeight,
+    ),
+  );
+  const listScrollbarThumbTranslateY =
+    listScrollbarMetrics.scrollHeight > listScrollbarMetrics.clientHeight
+      ? (listScrollbarMetrics.scrollTop /
+          (listScrollbarMetrics.scrollHeight - listScrollbarMetrics.clientHeight)) *
+        (listScrollbarTrackHeight - listScrollbarThumbHeight)
+      : 0;
+  const listScrollbarMaxScrollTop = Math.max(
+    0,
+    listScrollbarMetrics.scrollHeight - listScrollbarMetrics.clientHeight,
+  );
+  const listScrollbarThumbTravel = Math.max(
+    0,
+    listScrollbarTrackHeight - listScrollbarThumbHeight,
+  );
+
+  const handleListScrollbarTrackPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const container = mainLibraryScrollRef.current;
+      if (!container || listScrollbarThumbTravel <= 0) return;
+
+      e.preventDefault();
+      const trackRect = e.currentTarget.getBoundingClientRect();
+      const nextThumbTop = Math.max(
+        0,
+        Math.min(
+          listScrollbarThumbTravel,
+          e.clientY - trackRect.top - listScrollbarThumbHeight / 2,
+        ),
+      );
+      container.scrollTop =
+        (nextThumbTop / listScrollbarThumbTravel) * listScrollbarMaxScrollTop;
+    },
+    [listScrollbarMaxScrollTop, listScrollbarThumbHeight, listScrollbarThumbTravel],
+  );
+
+  const handleListScrollbarThumbPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const container = mainLibraryScrollRef.current;
+      if (!container || listScrollbarThumbTravel <= 0) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      listScrollbarDragCleanupRef.current?.();
+      setIsListScrollbarDragging(true);
+      listScrollbarDragRef.current = {
+        pointerId: e.pointerId,
+        startClientY: e.clientY,
+        startScrollTop: container.scrollTop,
+        maxScrollTop: listScrollbarMaxScrollTop,
+        thumbTravel: listScrollbarThumbTravel,
+      };
+
+      const onPointerMove = (event: PointerEvent) => {
+        const drag = listScrollbarDragRef.current;
+        const scrollContainer = mainLibraryScrollRef.current;
+        if (!drag || drag.pointerId !== event.pointerId || !scrollContainer) return;
+
+        event.preventDefault();
+        scrollContainer.scrollTop =
+          drag.startScrollTop +
+          ((event.clientY - drag.startClientY) / drag.thumbTravel) * drag.maxScrollTop;
+      };
+
+      const finishDrag = (event: PointerEvent) => {
+        if (listScrollbarDragRef.current?.pointerId !== event.pointerId) return;
+        listScrollbarDragCleanupRef.current?.();
+      };
+
+      const cleanup = () => {
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', finishDrag);
+        document.removeEventListener('pointercancel', finishDrag);
+        listScrollbarDragRef.current = null;
+        listScrollbarDragCleanupRef.current = null;
+        setIsListScrollbarDragging(false);
+      };
+
+      listScrollbarDragCleanupRef.current = cleanup;
+      document.addEventListener('pointermove', onPointerMove, { passive: false });
+      document.addEventListener('pointerup', finishDrag);
+      document.addEventListener('pointercancel', finishDrag);
+    },
+    [listScrollbarMaxScrollTop, listScrollbarThumbTravel],
+  );
+
+  useEffect(() => () => listScrollbarDragCleanupRef.current?.(), []);
+
+  useLayoutEffect(() => {
+    if (!isListViewRowsScrollSplit) return;
+
+    let rafId = 0;
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        syncListScrollbarMetrics(mainLibraryScrollRef.current);
+      });
+    };
+
+    scheduleSync();
+    window.addEventListener('resize', scheduleSync);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', scheduleSync);
+    };
+  }, [isListViewRowsScrollSplit, filteredMovies, syncListScrollbarMetrics]);
+
+  const isLibraryPageScrollBlocked =
+    isPosterPreviewOpen ||
+    Boolean(selectedMovie) ||
+    isAddModalOpen ||
+    Boolean(deleteMovieConfirm) ||
+    isEditTrailerModalOpen ||
+    isSortDropdownOpen;
+
+  const handleFilmBasePointerDownFocus = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      if (!isMoviesHydrated) startLibraryLoadingSound();
+
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+
+      const focusable = target.closest(
+        'input, textarea, select, button, a[href], iframe, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable === e.currentTarget) {
+        e.currentTarget.focus({ preventScroll: true });
+      }
+    },
+    [isMoviesHydrated, startLibraryLoadingSound],
+  );
+
+  const handleLibraryPageKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== 'PageDown' && e.key !== 'PageUp') return;
+      if (isLibraryPageScrollBlocked) return;
+
+      const target = e.target;
+      if (!(target instanceof Element) || !e.currentTarget.contains(target)) return;
+      if (
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+        )
+      ) {
+        return;
+      }
+
+      const container = mainLibraryScrollRef.current;
+      if (!container) return;
+
+      e.preventDefault();
+      container.scrollBy({
+        top: container.clientHeight * 0.85 * (e.key === 'PageDown' ? 1 : -1),
+        behavior: 'smooth',
+      });
+    },
+    [isLibraryPageScrollBlocked],
+  );
 
   /** 桌面恢复图标：常驻挂载；仅在关闭/最小化且非缩小、非恢复过渡时可点击（见下方 `interactive`）。 */
   const isDesktopRestoreInteractive =
@@ -4511,8 +4719,11 @@ export default function App() {
         ref={filmbaseWindowShellRef}
         className={`filmbase-window-shell relative flex flex-col overflow-hidden ${
           isFullscreenLayout ? 'rounded-none max-h-none max-w-none' : `h-full w-full max-h-none max-w-none min-h-0 ${filmbaseShellZ}`
-        } ${filmbaseShellPointerEvents}`}
+        } ${filmbaseShellPointerEvents} focus:outline-none`}
         style={filmbaseShellStyle}
+        tabIndex={0}
+        onPointerDownCapture={handleFilmBasePointerDownFocus}
+        onKeyDown={handleLibraryPageKeyDown}
         onTransitionEnd={handleFilmbaseShellTransitionEnd}
       >
       {/* Viewport: Acts as the desktop background */}
@@ -6056,7 +6267,7 @@ export default function App() {
               <div
                 className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold uppercase tracking-widest text-white/40 items-center`}
               >
-                {isEditing && <div className="flex min-h-5 w-[60px] shrink-0 items-center justify-center pl-8 leading-5" aria-hidden />}
+                {isEditing && <div className="min-h-5" aria-hidden />}
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
                   <span className="block w-[100px] max-w-full text-center">Poster</span>
                 </div>
@@ -6249,7 +6460,8 @@ export default function App() {
               ) : null}
               <div
                 ref={mainLibraryScrollRef}
-                className={`filmbase-scrollbar min-h-0 flex-1 overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${isMainLibraryScrollOverflowLocked ? 'overflow-hidden' : 'overflow-y-auto'}`}
+                onScroll={(event) => syncListScrollbarMetrics(event.currentTarget)}
+                className={`filmbase-scrollbar filmbase-list-scrollbar-native-hidden filmbase-list-view-rows-scroll min-h-0 flex-1 overflow-x-hidden pb-8 [scrollbar-gutter:stable] ${isMainLibraryScrollOverflowLocked ? 'overflow-hidden' : 'overflow-y-auto'}`}
                 style={
                   filteredMovies.length > 0
                     ? { paddingTop: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }
@@ -6312,6 +6524,33 @@ export default function App() {
             </div>
           )}
               </div>
+              {filteredMovies.length > 0 &&
+              listScrollbarMetrics.scrollHeight > listScrollbarMetrics.clientHeight ? (
+                <div
+                  className="pointer-events-auto absolute bottom-0 right-0 z-[80] w-2 touch-none cursor-default"
+                  style={{ top: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }}
+                  onPointerDown={handleListScrollbarTrackPointerDown}
+                >
+                  <div
+                    className="pointer-events-auto absolute right-px top-0 w-[6px] cursor-default"
+                    style={{
+                      height: listScrollbarThumbHeight,
+                      transform: `translateY(${listScrollbarThumbTranslateY}px)`,
+                    }}
+                    onPointerDown={handleListScrollbarThumbPointerDown}
+                    onPointerEnter={() => setIsListScrollbarHovered(true)}
+                    onPointerLeave={() => setIsListScrollbarHovered(false)}
+                  >
+                    <div
+                      className={`pointer-events-none h-full w-full rounded-[999px] ${
+                        isListScrollbarHovered || isListScrollbarDragging
+                          ? 'bg-white/[0.28]'
+                          : 'bg-white/[0.18]'
+                      }`}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>
@@ -8398,7 +8637,8 @@ function MovieCard({
         }}
       >
         {isEditing && (
-          <div className="flex min-h-0 self-stretch items-center justify-center pl-8">
+          <>
+          <div className="absolute inset-y-0 left-0 z-[2] flex w-[60px] items-center justify-center pl-8">
             <button
               type="button"
               onClick={(e) => {
@@ -8419,6 +8659,8 @@ function MovieCard({
               />
             </button>
           </div>
+          <div aria-hidden />
+          </>
         )}
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
