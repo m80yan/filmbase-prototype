@@ -6449,7 +6449,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
-                  className={`flex min-h-5 items-center gap-1.5 justify-center pr-8 leading-5 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
+                  className={`flex min-h-5 items-center gap-1.5 justify-start pr-8 leading-5 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
                 >
                   <span className="text-[12px] font-bold uppercase tracking-widest whitespace-nowrap leading-5">MY RATING</span>
                   <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
