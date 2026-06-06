@@ -261,12 +261,13 @@ const LIBRARY_MOVIE_SELECT_COLUMNS = [
  */
 async function hydrateMoviesFromLibraryRows(
   supabase: SupabaseClient,
-  rows: LibraryMovieRow[]
+  rows: LibraryMovieRow[],
+  onProgress?: (completed: number, total: number) => void,
 ): Promise<Movie[]> {
   const movies: Movie[] = [];
   const posterUrlFallback = 'https://picsum.photos/seed/movie/400/600';
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const movie = rowToMovieBase(row);
     if (row.poster_storage_path) {
       try {
@@ -300,6 +301,7 @@ async function hydrateMoviesFromLibraryRows(
         : new Date(movie.dateAdded ?? 0).getTime();
     movie.isRecentlyAdded = Date.now() - dateAddedMs < 86400000;
     movies.push(movie);
+    onProgress?.(index + 1, rows.length);
   }
 
   return movies;
@@ -308,7 +310,10 @@ async function hydrateMoviesFromLibraryRows(
 /**
  * 从 Supabase 读取公共 demo 片单，并把 Storage 海报回填为 signed URL。
  */
-export async function loadPublicMovies(supabase: SupabaseClient): Promise<Movie[]> {
+export async function loadPublicMovies(
+  supabase: SupabaseClient,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<Movie[]> {
   const { data, error } = await supabase
     .from(PUBLIC_MOVIES_TABLE)
     .select(LIBRARY_MOVIE_SELECT_COLUMNS);
@@ -316,7 +321,8 @@ export async function loadPublicMovies(supabase: SupabaseClient): Promise<Movie[
   if (error) throw error;
 
   const rows = (data ?? []) as unknown as LibraryMovieRow[];
-  return hydrateMoviesFromLibraryRows(supabase, rows);
+  onProgress?.(0, rows.length);
+  return hydrateMoviesFromLibraryRows(supabase, rows, onProgress);
 }
 
 /**
@@ -1078,4 +1084,3 @@ function mergeSavedRowIntoPublic(
 
   return next;
 }
-

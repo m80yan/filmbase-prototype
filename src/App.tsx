@@ -1802,6 +1802,7 @@ export default function App() {
   /** 海报预览 Fit↔最大刻度 滑块：按下/拖动中为 true（禁用时不用 pressed 图）。 */
   const [isPreviewZoomSliderPressed, setIsPreviewZoomSliderPressed] = useState(false);
   const [isMoviesHydrated, setIsMoviesHydrated] = useState(false);
+  const [libraryHydratedMovieCount, setLibraryHydratedMovieCount] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const trailerOpenGuardUntilRef = useRef(0);
   const [modalMode, setModalMode] = useState<'trailer' | 'poster'>('trailer');
@@ -2416,7 +2417,9 @@ export default function App() {
       let publicMovies: Movie[] = [];
       let publicLoadFailed = false;
       try {
-        publicMovies = await loadPublicMovies(supabase);
+        publicMovies = await loadPublicMovies(supabase, (completed) => {
+          setLibraryHydratedMovieCount(completed);
+        });
       } catch (err) {
         console.error('loadPublicMovies failed:', err);
         publicLoadFailed = true;
@@ -4913,7 +4916,11 @@ export default function App() {
                 </span>
                 <span className="min-w-0 flex-1 text-left">All Films</span>
               </span>
-              {isAllFilmsDefaultView ? <span className="col-start-2 text-right">{movies.length}</span> : null}
+              {isAllFilmsDefaultView ? (
+                <span className="col-start-2 text-right">
+                  {isMoviesHydrated ? movies.length : libraryHydratedMovieCount}
+                </span>
+              ) : null}
             </span>
           </button>
           <button
