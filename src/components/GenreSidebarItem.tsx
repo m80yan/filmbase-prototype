@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 
-/** 与 GENRE 标题行 `ChevronRight size={16}` 同宽，保证拖拽图标与 chevron 同一竖列。 */
-const GENRE_SIDEBAR_TRAILING_COL_PX = 16;
+/** 拖拽手柄 32px 命中区；图标仍通过内部对齐与 GENRE 标题 chevron 保持同列。 */
+const GENRE_SIDEBAR_HANDLE_HIT_AREA_PX = 32;
 /** 侧栏滚动区为 scrollbar gutter 预留的空间；继承 `.filmbase-scrollbar` 的 8px 配置。 */
 const GENRE_SIDEBAR_SCROLLBAR_GUTTER = 'var(--filmbase-scrollbar-gutter, 8px)';
 
 export type GenreSidebarItemProps = {
   label: string;
+  count?: number;
   active: boolean;
   iconSlug: string;
   onClick: () => void;
@@ -19,6 +20,7 @@ export type GenreSidebarItemProps = {
  */
 export default function GenreSidebarItem({
   label,
+  count,
   active,
   iconSlug,
   onClick,
@@ -33,13 +35,13 @@ export default function GenreSidebarItem({
         isDragging ? 'opacity-50' : ''
       } ${active ? 'bg-[#EB9692]/20' : 'hover:bg-white/5'}`}
       style={{
-        gridTemplateColumns: `minmax(0, 1fr) ${GENRE_SIDEBAR_TRAILING_COL_PX}px ${GENRE_SIDEBAR_SCROLLBAR_GUTTER}`,
+        gridTemplateColumns: `minmax(0, 1fr) ${GENRE_SIDEBAR_HANDLE_HIT_AREA_PX}px ${GENRE_SIDEBAR_SCROLLBAR_GUTTER}`,
       }}
     >
       <button
         type="button"
         onClick={onClick}
-        className={`col-start-1 flex min-w-0 items-center pl-3 pr-0 py-0 text-left text-[13px] transition-colors ${
+        className={`col-start-1 flex h-full min-w-0 items-center pl-3 pr-0 py-0 text-left text-[13px] transition-colors ${
           active ? 'font-bold text-white' : 'font-medium text-white/70 group-hover/genreitem:text-white'
         }`}
       >
@@ -70,6 +72,7 @@ export default function GenreSidebarItem({
           />
         </span>
         <span className="min-w-0 flex-1 truncate">{label}</span>
+        {active && count !== undefined ? <span className="ml-1.5 mr-[-5px] shrink-0">{count}</span> : null}
       </button>
 
       <span

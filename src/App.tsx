@@ -593,6 +593,16 @@ function normalizeGenreDisplayLabel(g: string): string {
   return t;
 }
 
+function isMovieRecentlyAdded(movie: Movie): boolean {
+  const addedAt =
+    typeof movie.dateAdded === 'number'
+      ? movie.dateAdded
+      : new Date(movie.dateAdded ?? '').getTime();
+  if (!Number.isFinite(addedAt)) return false;
+  const age = Date.now() - addedAt;
+  return age >= 0 && age < 86400000;
+}
+
 /**
  * 将片库中的 genre 文案映射为侧栏图标 slug。
  * 无单独设计的类型统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
@@ -1686,6 +1696,7 @@ export default function App() {
   });
   const floatingShellSizeRef = useRef(floatingShellSizePx);
   floatingShellSizeRef.current = floatingShellSizePx;
+  const previousFloatingShellWidthRef = useRef<number | null>(null);
 
   /** CSS 全屏下悬停顶部 chrome 是否显示交通灯。 */
   const [fullscreenTrafficReveal, setFullscreenTrafficReveal] = useState(false);
@@ -2246,10 +2257,20 @@ export default function App() {
     setPreviewLayoutTick((t) => t + 1);
   }, [floatingShellSizePx.w, floatingShellSizePx.h]);
 
-  /** 非全屏且窗口宽度接近下限时自动折叠侧栏（复用 `isSidebarOpen`）。 */
+  /** 非全屏首次以小窗口打开，或宽度向下跨过阈值时自动折叠侧栏。 */
   useEffect(() => {
+    const previousWidth = previousFloatingShellWidthRef.current;
+    previousFloatingShellWidthRef.current = floatingShellSizePx.w;
     if (windowMode !== 'open') return;
-    if (floatingShellSizePx.w <= FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX) {
+    const crossedCollapseThreshold =
+      previousWidth !== null &&
+      previousWidth > FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX &&
+      floatingShellSizePx.w <= FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX;
+    if (
+      (previousWidth === null &&
+        floatingShellSizePx.w <= FILMBASE_SIDEBAR_AUTO_COLLAPSE_AT_WIDTH_PX) ||
+      crossedCollapseThreshold
+    ) {
       setIsSidebarOpen(false);
     }
   }, [windowMode, floatingShellSizePx.w]);
@@ -2983,6 +3004,19 @@ export default function App() {
     movies.forEach((m) => m.genre.forEach((g) => set.add(normalizeGenreDisplayLabel(g))));
     return Array.from(set).sort();
   }, [movies]);
+
+  const genreMovieCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    movies.forEach((movie) => {
+      new Set<string>(movie.genre.map((genre) => normalizeGenreDisplayLabel(genre))).forEach((genre) => {
+        counts.set(genre, (counts.get(genre) ?? 0) + 1);
+      });
+    });
+    return counts;
+  }, [movies]);
+
+  const recentlyAddedCount = movies.filter(isMovieRecentlyAdded).length;
+  const isRecentlyAddedDisabled = recentlyAddedCount === 0;
 
   /** 侧栏 Genre 列表顺序（localStorage）；与 `allUniqueGenres` 合并后渲染。 */
   const [genreSidebarOrder, setGenreSidebarOrder] = useState<string[]>([]);
@@ -3759,8 +3793,7 @@ export default function App() {
     const filtered = movies.filter(movie => {
       // Recently Added Filter (24h)
       if (isRecentlyAddedFilter) {
-        const addedDate = typeof movie.dateAdded === 'number' ? movie.dateAdded : new Date(movie.dateAdded || 0).getTime();
-        if (Date.now() - addedDate >= 86400000) return false;
+        if (!isMovieRecentlyAdded(movie)) return false;
       }
 
       const matchesSearch = movie.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -3807,7 +3840,7 @@ export default function App() {
       if (sortMode === 'personal-desc') return b.personalRating - a.personalRating;
       return 0;
     });
-  }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode]);
+  }, [movies, searchQuery, selectedGenres, selectedYears, selectedRatings, sortMode, isRecentlyAddedFilter]);
 
   /** 新增影片后：将对应卡片/列表行滚入主片库视口顶部区域（不改变排序）。 */
   useLayoutEffect(() => {
@@ -4732,8 +4765,12 @@ export default function App() {
                     >
                       <GenreSidebarItem
                         label={genre}
+                        count={genreMovieCounts.get(genre) ?? 0}
                         active={selectedGenres.includes(genre)}
-                        onClick={() => toggleFilter(selectedGenres, genre, setSelectedGenres)}
+                        onClick={() => {
+                          setIsRecentlyAddedFilter(false);
+                          toggleFilter(selectedGenres, genre, setSelectedGenres);
+                        }}
                         iconSlug={genreLabelToIconSlug(genre)}
                         onHandlePointerDown={onGenreHandlePointerDown(index)}
                         isDragging={genreDragFromIndex === index}
@@ -4833,86 +4870,126 @@ export default function App() {
           <button
             type="button"
             onClick={resetFilters}
-            className={`group/allfilms flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+            className={`group/allfilms flex h-9 w-full items-center rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
               isAllFilmsDefaultView
                 ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <span className="relative block h-[20px] w-[20px] shrink-0">
-              <img draggable={false}
-                src="/icons/films.svg"
-                alt=""
-                width={20}
-                height={20}
-                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                  isAllFilmsDefaultView
-                    ? 'opacity-0'
-                    : 'opacity-100 group-hover/allfilms:opacity-0'
-                }`}
-                decoding="async"
-                aria-hidden
-              />
-              <img draggable={false}
-                src="/icons/films-hover.svg"
-                alt=""
-                width={20}
-                height={20}
-                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                  isAllFilmsDefaultView
-                    ? 'opacity-100'
-                    : 'opacity-0 group-hover/allfilms:opacity-100'
-                }`}
-                decoding="async"
-                aria-hidden
-              />
+            <span
+              className="grid h-full w-[200px] min-w-0 items-center"
+              style={{
+                gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
+              }}
+            >
+              <span className="col-start-1 flex min-w-0 items-center gap-3 pl-3">
+                <span className="relative block h-[20px] w-[20px] shrink-0">
+                  <img draggable={false}
+                    src="/icons/films.svg"
+                    alt=""
+                    width={20}
+                    height={20}
+                    className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
+                      isAllFilmsDefaultView
+                        ? 'opacity-0'
+                        : 'opacity-100 group-hover/allfilms:opacity-0'
+                    }`}
+                    decoding="async"
+                    aria-hidden
+                  />
+                  <img draggable={false}
+                    src="/icons/films-hover.svg"
+                    alt=""
+                    width={20}
+                    height={20}
+                    className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
+                      isAllFilmsDefaultView
+                        ? 'opacity-100'
+                        : 'opacity-0 group-hover/allfilms:opacity-100'
+                    }`}
+                    decoding="async"
+                    aria-hidden
+                  />
+                </span>
+                <span className="min-w-0 flex-1 text-left">All Films</span>
+              </span>
+              {isAllFilmsDefaultView ? <span className="col-start-2 text-right">{movies.length}</span> : null}
             </span>
-            All Films
           </button>
           <button
             type="button"
+            disabled={isRecentlyAddedDisabled}
             onClick={() => {
+              if (isRecentlyAddedDisabled) return;
               setSelectedGenres([]);
               setSelectedYears([]);
               setSelectedRatings([]);
               setSearchQuery('');
               setIsRecentlyAddedFilter(true);
             }}
-            className={`group/recent flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-              isRecentlyAddedFilter
+            className={`group/recent flex h-9 w-full items-center rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+              isRecentlyAddedDisabled
+                ? 'cursor-default text-white/15'
+                : isRecentlyAddedFilter
                 ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
             }`}
           >
-            <span className="relative block h-[20px] w-[20px] shrink-0">
-              <img draggable={false}
-                src="/icons/recently-added.svg"
-                alt=""
-                width={20}
-                height={20}
-                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                  isRecentlyAddedFilter
-                    ? 'opacity-0'
-                    : 'opacity-100 group-hover/recent:opacity-0'
-                }`}
-                decoding="async"
-                aria-hidden
-              />
-              <img draggable={false}
-                src="/icons/recently-added-hover.svg"
-                alt=""
-                width={20}
-                height={20}
-                className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                  isRecentlyAddedFilter
-                    ? 'opacity-100'
-                    : 'opacity-0 group-hover/recent:opacity-100'
-                }`}
-                decoding="async"
-                aria-hidden
-              />
+            <span
+              className="grid h-full w-[200px] min-w-0 items-center"
+              style={{
+                gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
+              }}
+            >
+              <span className="col-start-1 flex min-w-0 items-center gap-3 pl-3">
+                <span className="relative block h-[20px] w-[20px] shrink-0">
+                  {isRecentlyAddedDisabled ? (
+                    <img draggable={false}
+                      src="/icons/recently-added-disabled.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px]"
+                      decoding="async"
+                      aria-hidden
+                    />
+                  ) : (
+                    <>
+                      <img draggable={false}
+                        src="/icons/recently-added.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
+                          isRecentlyAddedFilter
+                            ? 'opacity-0'
+                            : 'opacity-100 group-hover/recent:opacity-0'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                      <img draggable={false}
+                        src="/icons/recently-added-hover.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
+                          isRecentlyAddedFilter
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover/recent:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
+                    </>
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 text-left">Recently Added</span>
+              </span>
+              {isRecentlyAddedFilter ? (
+                <span className="col-start-2 text-right">{recentlyAddedCount}</span>
+              ) : null}
             </span>
-            Recently Added
           </button>
         </div>
 
@@ -7479,7 +7556,7 @@ function PosterGenreIconWithTooltip({
 
   return (
     <span
-      className="relative inline-flex shrink-0"
+      className="relative inline-flex shrink-0 cursor-default"
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
     >
@@ -8189,7 +8266,7 @@ function MovieCard({
             const newRating = i + 1;
             onRatingChange(newRating === movie.personalRating ? 0 : newRating);
           }}
-          className="transition-transform hover:scale-110 duration-300 ease-out focus:outline-none"
+          className="cursor-pointer transition-transform hover:scale-110 duration-300 ease-out focus:outline-none"
         >
           <Star 
             size={14} 
@@ -8305,7 +8382,7 @@ function MovieCard({
         initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
-        className={`group relative hover:z-10 overflow-visible ${listViewTableGridClassName(isEditing)} items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-pointer w-full transition-[background-color] duration-200 ease-out`}
+        className={`group relative hover:z-10 overflow-visible ${listViewTableGridClassName(isEditing)} items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-default w-full transition-[background-color] duration-200 ease-out`}
         style={{ flexDirection: 'column' }}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
@@ -8339,7 +8416,7 @@ function MovieCard({
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
             ref={listPosterShellRef}
-            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit' : 'cursor-zoom-in group-hover:scale-115'}`}
+            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit' : 'cursor-pointer group-hover:scale-115'}`}
             onClick={
               isEditing
                 ? undefined
@@ -8392,7 +8469,7 @@ function MovieCard({
                 e.stopPropagation();
                 onPlayTrailer();
               }}
-              className="bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl transition-all"
+              className="cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl transition-all"
             >
               Play Trailer
             </button>
@@ -8566,7 +8643,7 @@ function MovieCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      className="group min-w-0 w-full cursor-pointer"
+      className="group min-w-0 w-full cursor-default"
       onMouseEnter={() => {
         if (viewMode === 'grid' && isCastOverflowing) {
           setCastMarqueeRunKey((k) => k + 1);
@@ -8607,7 +8684,7 @@ function MovieCard({
         {!isEditing ? (
           <button
             type="button"
-            className="absolute inset-0 z-0 block h-full w-full cursor-pointer border-none bg-transparent p-0"
+            className="absolute inset-0 z-0 block h-full w-full cursor-default border-none bg-transparent p-0"
             onClick={(e) => {
               e.stopPropagation();
               onShowPoster();
@@ -8757,7 +8834,7 @@ function MovieCard({
               e.stopPropagation();
               onPlayTrailer();
             }}
-            className="w-full py-2.5 mt-2 rounded-full bg-white/80 hover:bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-xl"
+            className="w-full cursor-pointer py-2.5 mt-2 rounded-full bg-white/80 hover:bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-xl"
           >
             Play Trailer
           </button>
@@ -8777,7 +8854,7 @@ function MovieCard({
               top: 10,
               right: 10,
             }}
-            className="group/posterzoom pointer-events-auto absolute z-30 flex items-center justify-center rounded-[10px] bg-white/20 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+            className="group/posterzoom pointer-events-auto absolute z-30 flex cursor-pointer items-center justify-center rounded-[10px] bg-white/20 p-0 opacity-0 transition-opacity group-hover:opacity-100"
           >
             <span className="relative inline-flex h-6 w-6 shrink-0">
               <img draggable={false}
