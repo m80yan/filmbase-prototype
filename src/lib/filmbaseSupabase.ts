@@ -6,6 +6,7 @@ const SAVED_MOVIES_TABLE = 'filmbase_saved_movies';
 const PUBLIC_MOVIES_TABLE = 'filmbase_public_movies';
 const POSTERS_BUCKET = 'filmbase-posters';
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
+const MOVIE_HYDRATION_CONCURRENCY = 20;
 const LOCALSTORAGE_MIGRATION_MARKER = 'filmbase_supabase_migrated_v1';
 /** 一次性把当前匿名用户的 saved → public 迁移标记。 */
 const LOCALSTORAGE_SAVED_TO_PUBLIC_MARKER = 'filmbase_saved_to_public_migrated_v1';
@@ -264,10 +265,15 @@ async function hydrateMoviesFromLibraryRows(
   rows: LibraryMovieRow[],
   onProgress?: (completed: number, total: number) => void,
 ): Promise<Movie[]> {
-  const movies: Movie[] = [];
+  const movies = new Array<Movie>(rows.length);
   const posterUrlFallback = 'https://picsum.photos/seed/movie/400/600';
+  let nextIndex = 0;
+  let completed = 0;
 
-  for (const [index, row] of rows.entries()) {
+  const hydrateNextMovie = async (): Promise<void> => {
+    const index = nextIndex++;
+    if (index >= rows.length) return;
+    const row = rows[index];
     const movie = rowToMovieBase(row);
     if (row.poster_storage_path) {
       try {
@@ -300,9 +306,19 @@ async function hydrateMoviesFromLibraryRows(
         ? movie.dateAdded
         : new Date(movie.dateAdded ?? 0).getTime();
     movie.isRecentlyAdded = Date.now() - dateAddedMs < 86400000;
-    movies.push(movie);
-    onProgress?.(index + 1, rows.length);
-  }
+    movies[index] = movie;
+    completed++;
+    onProgress?.(completed, rows.length);
+
+    await hydrateNextMovie();
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(MOVIE_HYDRATION_CONCURRENCY, rows.length) },
+      () => hydrateNextMovie(),
+    ),
+  );
 
   return movies;
 }
