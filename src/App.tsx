@@ -1787,6 +1787,7 @@ export default function App() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
   const [selectedRatings, setSelectedRatings] = useState<number[]>([]);
+  const [hoveredYearIndex, setHoveredYearIndex] = useState<number | null>(null);
   const [isRecentlyAddedFilter, setIsRecentlyAddedFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [posterSize, setPosterSize] = useState(GRID_POSTER_SIZE_MIN_PX);
@@ -2352,7 +2353,7 @@ export default function App() {
   }, [libraryActionError]);
   const [expandedSections, setExpandedSections] = useState({
     genre: true,
-    year: false,
+    year: true,
     ratings: true
   });
 
@@ -3061,6 +3062,33 @@ export default function App() {
       new Set<string>(movie.genre.map((genre) => normalizeGenreDisplayLabel(genre))).forEach((genre) => {
         counts.set(genre, (counts.get(genre) ?? 0) + 1);
       });
+    });
+    return counts;
+  }, [movies]);
+
+  const yearMovieCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    movies.forEach((movie) => {
+      const bucket =
+        movie.year >= 2020
+          ? '2020s'
+          : movie.year >= 2010
+            ? '2010s'
+            : movie.year >= 2000
+              ? '2000s'
+              : movie.year >= 1990
+                ? '1990s'
+                : 'Classic';
+      counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+    });
+    return counts;
+  }, [movies]);
+
+  const ratingMovieCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    movies.forEach((movie) => {
+      const rating = movie.personalRating || 0;
+      counts.set(rating, (counts.get(rating) ?? 0) + 1);
     });
     return counts;
   }, [movies]);
@@ -4029,61 +4057,6 @@ export default function App() {
     selectedRatings.length === 0 &&
     !searchQuery;
 
-  /**
-   * 侧栏 Genre / Year 筛选项行。左内边距为原 `px-2.5`（10px）+ 14px = `pl-6`（24px），右为 `pr-2.5`；图标与文案间距仍为 `mr-[10px]`。
-   * 底栏 All Films、Recently Added 不使用本组件。
-   */
-  const SidebarItem = ({
-    active,
-    label,
-    onClick,
-    iconSlug,
-  }: {
-    active: boolean;
-    label: string | React.ReactNode;
-    onClick: () => void;
-    /** 有值时在文案左侧显示 `public/icons/{slug}.svg`（与 `-hover` 配对）；未知类型用 `fallback`；`Genre` 总标题行勿传。 */
-    iconSlug?: string | null;
-  }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group/sidebarrow flex h-9 w-[200px] items-center pl-3 pr-2.5 py-0 rounded-md text-[13px] transition-colors text-left ${
-        active
-          ? 'bg-[#EB9692]/20 font-bold text-white'
-          : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
-      }`}
-    >
-      {iconSlug ? (
-        <span className="relative mr-[10px] h-[20px] w-[20px] shrink-0">
-          <img draggable={false}
-            src={`/icons/${iconSlug}.svg`}
-            alt=""
-            width={20}
-            height={20}
-            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-              active ? 'opacity-0' : 'opacity-100 group-hover/sidebarrow:opacity-0'
-            }`}
-            decoding="async"
-            aria-hidden
-          />
-          <img draggable={false}
-            src={`/icons/${iconSlug}-hover.svg`}
-            alt=""
-            width={20}
-            height={20}
-            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-              active ? 'opacity-100' : 'opacity-0 group-hover/sidebarrow:opacity-100'
-            }`}
-            decoding="async"
-            aria-hidden
-          />
-        </span>
-      ) : null}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
-  );
-
   const posterPreviewLayout = useMemo(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return null;
     const host = mainPreviewHostRef.current?.getBoundingClientRect();
@@ -5034,15 +5007,34 @@ export default function App() {
                 className="overflow-hidden w-[200px]"
               >
                 <ul className="space-y-0.5 w-[200px]">
-                  {years.map(year => (
+                  {years.map((year, index) => {
+                    const active = selectedYears.includes(year);
+                    const nextActive = index < years.length - 1 && selectedYears.includes(years[index + 1]);
+                    const highlighted = active || hoveredYearIndex === index;
+                    const nextHighlighted = nextActive || hoveredYearIndex === index + 1;
+                    const connectorState =
+                      highlighted && nextHighlighted
+                        ? 'hidden'
+                        : highlighted
+                          ? 'short-after'
+                          : nextHighlighted
+                            ? 'short-before'
+                            : 'normal';
+                    return (
                     <li key={year} className="w-[200px]">
-                      <SidebarItem 
+                      <SidebarYearTimelineFilterRow
                         label={year}
-                        active={selectedYears.includes(year)}
+                        count={yearMovieCounts.get(year) ?? 0}
+                        active={active}
+                        hovered={hoveredYearIndex === index}
+                        connectorState={index < years.length - 1 ? connectorState : null}
                         onClick={() => toggleFilter(selectedYears, year, setSelectedYears)}
+                        onMouseEnter={() => setHoveredYearIndex(index)}
+                        onMouseLeave={() => setHoveredYearIndex(null)}
                       />
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </motion.div>
             </div>
@@ -5079,6 +5071,7 @@ export default function App() {
                     <li key={rating} className="w-[200px]">
                       <SidebarMyRatingFilterRow
                         rating={rating}
+                        count={ratingMovieCounts.get(rating) ?? 0}
                         active={selectedRatings.includes(rating)}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
                       />
@@ -5139,7 +5132,7 @@ export default function App() {
                 <span className="min-w-0 flex-1 text-left">All Films</span>
               </span>
               {isAllFilmsDefaultView ? (
-                <span className="col-start-2 text-right">
+                <span className="col-start-2 flex h-full items-center justify-center text-center leading-none">
                   {isMoviesHydrated ? movies.length : libraryHydratedMovieCount}
                 </span>
               ) : null}
@@ -5216,7 +5209,9 @@ export default function App() {
                 <span className="min-w-0 flex-1 text-left">Recently Added</span>
               </span>
               {isRecentlyAddedFilter ? (
-                <span className="col-start-2 text-right">{recentlyAddedCount}</span>
+                <span className="col-start-2 flex h-full items-center justify-center text-center leading-none">
+                  {recentlyAddedCount}
+                </span>
               ) : null}
             </span>
           </button>
@@ -8104,18 +8099,81 @@ const SIDEBAR_MY_RATING_HOVER_LABEL_UPPER: Record<number, string> = {
   5: 'EXCELLENT',
 };
 
+type SidebarYearTimelineConnectorState = 'normal' | 'short-before' | 'short-after' | 'hidden';
+
+function SidebarYearTimelineFilterRow({
+  label,
+  count,
+  active,
+  hovered,
+  connectorState,
+  onClick,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  hovered: boolean;
+  connectorState: SidebarYearTimelineConnectorState | null;
+  onClick: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  return (
+    <div className="relative h-9 w-[200px]">
+      {connectorState ? (
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute left-[21px] top-[27px] z-0 w-0.5 bg-white/20 transition-[height,top,opacity] duration-150 ease-out ${
+            connectorState === 'normal'
+              ? 'h-5 opacity-100'
+              : connectorState === 'short-before'
+                ? 'h-[10px] opacity-100'
+                : connectorState === 'short-after'
+                  ? 'top-[37px] h-[10px] opacity-100'
+                  : 'top-8 h-[10px] opacity-0'
+          }`}
+        />
+      ) : null}
+      <button
+        type="button"
+        onClick={onClick}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        className={`relative z-10 flex h-9 w-full items-center rounded-md pl-[42px] pr-2.5 py-0 text-left text-[13px] transition-colors ${
+          active
+            ? 'bg-[#EB9692]/20 font-bold text-white'
+            : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
+        }`}
+      >
+        <span
+          aria-hidden
+          className={`absolute left-[18px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors duration-150 ease-out ${
+            active || hovered ? 'bg-white' : 'bg-white/40'
+          }`}
+        />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {active ? <span className="absolute right-[35px] shrink-0">{count}</span> : null}
+      </button>
+    </div>
+  );
+}
+
 /**
  * 侧栏「My Rating」下单条筛选：默认仅星标（N 颗粉星或 Unrated 五颗描边空星）；悬停时星标不隐藏，星排与文案间距同侧栏 Genre 图标与文案（`mr-[10px]`），标签样式与海报星级 hover 一致（不改行高与背景态）。
- * 左内边距与 `SidebarItem` 一致：`pl-6 pr-2.5`（较原 `px-2.5` 整体右移 14px），与 Genre/Year 条目左缘对齐。
+ * 第一颗星星中心与 Year 时间线节点中心对齐；选中 count 默认对齐 Genre / Year，hover 时移至 section header chevron 轴。
  *
  * @param rating 筛选项分值 `0`…`5`（与 `selectedRatings` 一致）
  */
 function SidebarMyRatingFilterRow({
   rating,
+  count,
   active,
   onClick,
 }: {
   rating: number;
+  count: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -8132,14 +8190,14 @@ function SidebarMyRatingFilterRow({
       type="button"
       onClick={onClick}
       aria-label={aria}
-      className={`group/sidebarrow flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors ${
+      className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors ${
         active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
       }`}
     >
       <div className="flex min-h-0 min-w-0 flex-1 items-center">
-        <span className="mr-[10px] flex shrink-0 items-center gap-0.5" aria-hidden>
+        <span className="ml-[4.5px] mr-[10px] flex shrink-0 items-center gap-0.5" aria-hidden>
           {rating === 0
             ? [0, 1, 2, 3, 4].map((i) => (
                 <Star key={i} size={11} fill="none" stroke="#D4AF37" className="opacity-30" />
@@ -8154,6 +8212,11 @@ function SidebarMyRatingFilterRow({
           {hoverUpper}
         </span>
       </div>
+      {active ? (
+        <span className="absolute right-[35px] top-1/2 flex w-4 shrink-0 -translate-y-1/2 justify-end text-right leading-none transition-[right] duration-150 ease-out group-hover/sidebarrow:right-2 group-hover/sidebarrow:justify-center group-hover/sidebarrow:text-center">
+          {count}
+        </span>
+      ) : null}
     </button>
   );
 }
