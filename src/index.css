@@ -130,7 +130,7 @@
 }
 
 .sidebar-gradient {
-  background: linear-gradient(180deg, rgba(45, 45, 45, 0.8) 0%, rgba(30, 30, 30, 0.9) 100%);
+  background: #1f1f1f;
 }
 
 /**
