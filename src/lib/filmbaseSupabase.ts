@@ -6,7 +6,6 @@ const SAVED_MOVIES_TABLE = 'filmbase_saved_movies';
 const PUBLIC_MOVIES_TABLE = 'filmbase_public_movies';
 const POSTERS_BUCKET = 'filmbase-posters';
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
-const MOVIE_HYDRATION_CONCURRENCY = 20;
 const LOCALSTORAGE_MIGRATION_MARKER = 'filmbase_supabase_migrated_v1';
 /** 一次性把当前匿名用户的 saved → public 迁移标记。 */
 const LOCALSTORAGE_SAVED_TO_PUBLIC_MARKER = 'filmbase_saved_to_public_migrated_v1';
@@ -265,34 +264,32 @@ async function hydrateMoviesFromLibraryRows(
   rows: LibraryMovieRow[],
   onProgress?: (completed: number, total: number) => void,
 ): Promise<Movie[]> {
-  const movies = new Array<Movie>(rows.length);
-  const posterUrlFallback = 'https://picsum.photos/seed/movie/400/600';
-  let nextIndex = 0;
-  let completed = 0;
+  const storagePaths = Array.from(
+    new Set(
+      rows
+        .map((row) => row.poster_storage_path)
+        .filter((path): path is string => Boolean(path)),
+    ),
+  );
+  const signedUrlByPath = new Map<string, string>();
 
-  const hydrateNextMovie = async (): Promise<void> => {
-    const index = nextIndex++;
-    if (index >= rows.length) return;
-    const row = rows[index];
+  if (storagePaths.length > 0) {
+    const { data, error } = await supabase.storage
+      .from(POSTERS_BUCKET)
+      .createSignedUrls(storagePaths, SIGNED_URL_TTL_SECONDS);
+    if (error) throw error;
+
+    for (const item of data) {
+      if (item.path && item.signedUrl) signedUrlByPath.set(item.path, item.signedUrl);
+    }
+  }
+
+  return rows.map((row, index) => {
     const movie = rowToMovieBase(row);
     if (row.poster_storage_path) {
-      try {
-        const signedUrl = await storagePathToSignedUrl(supabase, row.poster_storage_path);
+      const signedUrl = signedUrlByPath.get(row.poster_storage_path);
+      if (signedUrl) {
         movie.posterUrl = posterUrlForUIFromSignedUrl(signedUrl);
-        movie.posterStoragePath = row.poster_storage_path;
-      } catch (posterErr) {
-        console.warn(
-          '[filmbaseSupabase] Poster Storage missing or signed URL failed; using poster_url or placeholder.',
-          {
-            storagePath: row.poster_storage_path,
-            movie_id: row.movie_id,
-            title: row.title,
-            error: posterErr,
-          },
-        );
-        const fromUrl = row.poster_url?.trim();
-        movie.posterUrl = fromUrl && fromUrl.length > 0 ? fromUrl : posterUrlFallback;
-        movie.posterStoragePath = undefined;
       }
     } else if (row.poster_url?.trim()) {
       movie.posterUrl = row.poster_url.trim();
@@ -306,21 +303,9 @@ async function hydrateMoviesFromLibraryRows(
         ? movie.dateAdded
         : new Date(movie.dateAdded ?? 0).getTime();
     movie.isRecentlyAdded = Date.now() - dateAddedMs < 86400000;
-    movies[index] = movie;
-    completed++;
-    onProgress?.(completed, rows.length);
-
-    await hydrateNextMovie();
-  };
-
-  await Promise.all(
-    Array.from(
-      { length: Math.min(MOVIE_HYDRATION_CONCURRENCY, rows.length) },
-      () => hydrateNextMovie(),
-    ),
-  );
-
-  return movies;
+    onProgress?.(index + 1, rows.length);
+    return movie;
+  });
 }
 
 /**

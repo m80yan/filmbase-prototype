@@ -2428,6 +2428,7 @@ export default function App() {
   useEffect(() => {
     if (hasHydratedRef.current) return;
     hasHydratedRef.current = true;
+    const libraryLoadStartedAt = performance.now();
 
     let unsubscribeRealtime: (() => void) | null = null;
 
@@ -2477,6 +2478,11 @@ export default function App() {
 
       setMovies(initial);
       setIsMoviesHydrated(true);
+      console.info(
+        `[Library] Loaded ${initial.length} movies in ${(
+          performance.now() - libraryLoadStartedAt
+        ).toFixed(0)} ms${usePublic ? '' : ' (local fallback)'}.`,
+      );
 
       /**
        * 订阅公共表行变更，让其它用户的新增 / 海报 / 预告片更新对当前会话即时可见。
@@ -2505,6 +2511,11 @@ export default function App() {
       console.error('Failed to initialize Supabase:', err);
       setLibraryActionError('Could not connect to shared library.');
       setIsMoviesHydrated(true);
+      console.info(
+        `[Library] Initialization stopped after ${(
+          performance.now() - libraryLoadStartedAt
+        ).toFixed(0)} ms.`,
+      );
     });
 
     return () => {
