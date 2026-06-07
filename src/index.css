@@ -75,7 +75,7 @@
    * 主搜索类输入焦点：侧栏 FilmBase 搜索、Add Movie「按标题搜索」——强珊瑚描边 + 双层 ring。
    */
   .input-focus-primary {
-    @apply focus:outline-none focus:border-2 focus:border-[#EA9794] transition-[border-color,border-width] disabled:focus:border disabled:focus:border-white/10;
+    @apply focus:outline-none focus:border-[#EA9794] focus:shadow-[0_0_0_1px_#EA9794] transition-[border-color,box-shadow] disabled:focus:border-white/10 disabled:focus:shadow-none;
   }
 
   /**
