@@ -989,8 +989,15 @@ const LIST_HEADER_RATINGS_ICON = {
 const GRID_POSTER_SIZE_MIN_PX = 170;
 /** 网格海报尺寸 slider 最大值（px）。 */
 const GRID_POSTER_SIZE_MAX_PX = 240;
-/** 网格海报尺寸 +/- 按钮步长（px）；slider 仍为无级拖动。 */
+/** 网格海报尺寸候选步长（px）；最终 slider 刻度按当前网格实际列布局去重。 */
 const GRID_POSTER_SIZE_STEP_PX = 10;
+/** Poster View 网格横向间距；与 `gap-x-6` 一致。 */
+const GRID_POSTER_GAP_X_PX = 24;
+/** 离散 slider 总宽度与段间距；单段宽度按当前段数均分。 */
+const GRID_POSTER_SIZE_SLIDER_TRACK_W_PX = 128;
+const GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX = 2;
+/** 首次测量前 / 无法产生至少两个有效布局时保留的安全刻度。 */
+const GRID_POSTER_SIZE_FALLBACK_LEVELS = [GRID_POSTER_SIZE_MIN_PX, GRID_POSTER_SIZE_MAX_PX] as const;
 /**
  * 海报尺寸滑块 CSS 轨道高度（px）；两端整半圆时半径 = `H/2`。无 `border` / 外描边式阴影，填充色与原先 `accent-white/40` 控件同系（浅白半透明条）。
  */
@@ -1015,6 +1022,42 @@ const MAIN_MODAL_PANEL_TRANSITION = { duration: 0.24, ease: 'easeInOut' } as con
  */
 function clampPosterSizePx(px: number): number {
   return Math.min(GRID_POSTER_SIZE_MAX_PX, Math.max(GRID_POSTER_SIZE_MIN_PX, px));
+}
+
+/** 按当前网格宽度折叠会产生相同 CSS Grid 列布局的海报尺寸候选。 */
+function getPosterSizeLevelsForGridWidth(gridWidthPx: number): number[] {
+  if (gridWidthPx <= 0) return [];
+
+  const levels: number[] = [];
+  let previousColumnCount: number | null = null;
+  for (
+    let candidate = GRID_POSTER_SIZE_MIN_PX;
+    candidate <= GRID_POSTER_SIZE_MAX_PX;
+    candidate += GRID_POSTER_SIZE_STEP_PX
+  ) {
+    const columnCount = Math.max(
+      1,
+      Math.floor((gridWidthPx + GRID_POSTER_GAP_X_PX) / (candidate + GRID_POSTER_GAP_X_PX)),
+    );
+    if (columnCount === previousColumnCount) continue;
+    levels.push(candidate);
+    previousColumnCount = columnCount;
+  }
+  return levels;
+}
+
+function nearestPosterSizeLevelIndex(levels: readonly number[], posterSizePx: number): number {
+  let nearestIndex = 0;
+  for (let index = 1; index < levels.length; index += 1) {
+    if (Math.abs(levels[index]! - posterSizePx) < Math.abs(levels[nearestIndex]! - posterSizePx)) {
+      nearestIndex = index;
+    }
+  }
+  return nearestIndex;
+}
+
+function posterSizeLevelArraysEqual(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 /** 片库加载叠层：底层静态胶片。 */
@@ -1791,6 +1834,9 @@ export default function App() {
   const [isRecentlyAddedFilter, setIsRecentlyAddedFilter] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [posterSize, setPosterSize] = useState(GRID_POSTER_SIZE_MIN_PX);
+  const [posterSizeLevels, setPosterSizeLevels] = useState<number[]>(() => [
+    ...GRID_POSTER_SIZE_FALLBACK_LEVELS,
+  ]);
   /** 海报尺寸自定义滑块：按下/拖动中为 true（列表模式下不用 pressed 图）。 */
   const [isPosterSizeSliderPressed, setIsPosterSizeSliderPressed] = useState(false);
   /** 海报预览 slider：0 = 铺满内容区（Fit/Fill），100 = 1:1 像素（100%）。 */
@@ -1916,6 +1962,8 @@ export default function App() {
   const addMovieImdbUrlInputRef = useRef<HTMLInputElement>(null);
   /** 主片库纵向滚动容器（网格/列表共用），用于 `scrollIntoView` 的滚动祖先与可见区判断。 */
   const mainLibraryScrollRef = useRef<HTMLDivElement>(null);
+  /** Poster View 实际网格宽度，用于只暴露会改变 CSS Grid 布局的海报尺寸刻度。 */
+  const posterGridRef = useRef<HTMLDivElement>(null);
   const [listScrollbarMetrics, setListScrollbarMetrics] = useState({
     scrollTop: 0,
     scrollHeight: 0,
@@ -3098,6 +3146,14 @@ export default function App() {
 
   /** 侧栏 Genre 列表顺序（localStorage）；与 `allUniqueGenres` 合并后渲染。 */
   const [genreSidebarOrder, setGenreSidebarOrder] = useState<string[]>([]);
+  const [hasCustomGenreSidebarOrder, setHasCustomGenreSidebarOrder] = useState(
+    () => loadGenreSidebarOrder() !== null,
+  );
+  const [isGenreListExpanded, setIsGenreListExpanded] = useState(false);
+  const [areGenreExtraRowsMounted, setAreGenreExtraRowsMounted] = useState(false);
+  const [areGenreExtraRowsCollapsing, setAreGenreExtraRowsCollapsing] = useState(false);
+  const genreExtraRowsCollapseTimeoutRef = useRef<number | null>(null);
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const genreListRef = useRef<HTMLUListElement>(null);
   const genreDragRef = useRef<{ fromIndex: number; pointerId: number; startPointerY: number } | null>(null);
   const genreDragOverIndexRef = useRef<number | null>(null);
@@ -3112,8 +3168,67 @@ export default function App() {
     );
   }, [allUniqueGenres]);
 
-  const genres = genreSidebarOrder;
+  const autoOrderedGenres = useMemo(() => {
+    const taxonomyIndex = new Map(allUniqueGenres.map((genre, index) => [genre, index]));
+    const topGenres = [...allUniqueGenres]
+      .sort((a, b) => {
+        const countDifference = (genreMovieCounts.get(b) ?? 0) - (genreMovieCounts.get(a) ?? 0);
+        return countDifference || (taxonomyIndex.get(a) ?? 0) - (taxonomyIndex.get(b) ?? 0);
+      })
+      .slice(0, 7);
+    const topGenreSet = new Set(topGenres);
+    return [...topGenres, ...allUniqueGenres.filter((genre) => !topGenreSet.has(genre))];
+  }, [allUniqueGenres, genreMovieCounts]);
+  const genres = hasCustomGenreSidebarOrder ? genreSidebarOrder : autoOrderedGenres;
+  const primaryGenres = genres.slice(0, 7);
+  const extraGenres = genres.slice(7);
   const GENRE_ITEM_PITCH = 38;
+  const GENRE_EXTRA_ROWS_TRANSITION_MS = 160;
+
+  const finishGenreExtraRowsCollapse = useCallback(() => {
+    if (genreExtraRowsCollapseTimeoutRef.current !== null) {
+      window.clearTimeout(genreExtraRowsCollapseTimeoutRef.current);
+      genreExtraRowsCollapseTimeoutRef.current = null;
+    }
+    setAreGenreExtraRowsMounted(false);
+    setAreGenreExtraRowsCollapsing(false);
+    sidebarScrollRef.current?.scrollTo({ top: 0 });
+  }, []);
+
+  const expandGenreExtraRows = useCallback(() => {
+    setAreGenreExtraRowsMounted(true);
+    setAreGenreExtraRowsCollapsing(false);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setIsGenreListExpanded(true);
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setIsGenreListExpanded(true));
+    });
+  }, []);
+
+  const collapseGenreExtraRows = useCallback(() => {
+    if (areGenreExtraRowsCollapsing) return;
+    setAreGenreExtraRowsCollapsing(true);
+    setIsGenreListExpanded(false);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      window.requestAnimationFrame(finishGenreExtraRowsCollapse);
+      return;
+    }
+    genreExtraRowsCollapseTimeoutRef.current = window.setTimeout(
+      finishGenreExtraRowsCollapse,
+      GENRE_EXTRA_ROWS_TRANSITION_MS + 40,
+    );
+  }, [areGenreExtraRowsCollapsing, finishGenreExtraRowsCollapse]);
+
+  useEffect(
+    () => () => {
+      if (genreExtraRowsCollapseTimeoutRef.current !== null) {
+        window.clearTimeout(genreExtraRowsCollapseTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   /**
    * 根据指针 Y 坐标计算 Genre 列表目标插入索引（中线以上归该格，否则下一格）。
@@ -3131,17 +3246,14 @@ export default function App() {
 
   const reorderGenreSidebar = useCallback((fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex) return;
-    setGenreSidebarOrder((prev) => {
-      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) {
-        return prev;
-      }
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      saveGenreSidebarOrder(next);
-      return next;
-    });
-  }, []);
+    if (fromIndex < 0 || fromIndex >= genres.length || toIndex < 0 || toIndex >= genres.length) return;
+    const next = [...genres];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setHasCustomGenreSidebarOrder(true);
+    setGenreSidebarOrder(next);
+    saveGenreSidebarOrder(next);
+  }, [genres]);
 
   const finishGenreDrag = useCallback(
     (pointerId: number) => {
@@ -3212,6 +3324,50 @@ export default function App() {
     },
     [finishGenreDrag],
   );
+
+  const renderGenreSidebarRow = (genre: string, index: number) => {
+    const isDragged = genreDragFromIndex === index;
+    const reorderOffset =
+      genreDragFromIndex !== null && genreDragOverIndex !== null && !isDragged
+        ? genreDragFromIndex < genreDragOverIndex
+          ? (index > genreDragFromIndex && index <= genreDragOverIndex ? -GENRE_ITEM_PITCH : 0)
+          : genreDragFromIndex > genreDragOverIndex
+            ? (index >= genreDragOverIndex && index < genreDragFromIndex ? GENRE_ITEM_PITCH : 0)
+            : 0
+        : 0;
+    return (
+      <motion.li
+        key={genre}
+        data-genre-index={index}
+        className="w-[200px]"
+        transition={genreDragFromIndex === null ? { duration: 0 } : { duration: 0.18, ease: 'easeOut' }}
+        style={
+          isDragged && genreDragPointerY !== null
+            ? { y: genreDragPointerY - (genreDragRef.current?.startPointerY ?? 0), position: 'relative' as const, zIndex: 50, cursor: 'grabbing' as const }
+            : undefined
+        }
+        animate={
+          isDragged
+            ? { scale: 1.02 }
+            : { y: reorderOffset, scale: 1 }
+        }
+      >
+        <GenreSidebarItem
+          label={genre}
+          count={genreMovieCounts.get(genre) ?? 0}
+          active={selectedGenres.includes(genre)}
+          onClick={() => {
+            setIsRecentlyAddedFilter(false);
+            toggleFilter(selectedGenres, genre, setSelectedGenres);
+          }}
+          iconSlug={genreLabelToIconSlug(genre)}
+          onHandlePointerDown={onGenreHandlePointerDown(index)}
+          isDragging={genreDragFromIndex === index}
+        />
+      </motion.li>
+    );
+  };
+
   const years = ['2020s', '2010s', '2000s', '1990s', 'Classic'];
   const ratings = [5, 4, 3, 2, 1, 0];
 
@@ -4274,6 +4430,47 @@ export default function App() {
    * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
    */
   const isListViewRowsScrollSplit = viewMode === 'list' && isMoviesHydrated;
+  const posterSizeLevelIndex = nearestPosterSizeLevelIndex(posterSizeLevels, posterSize);
+  const posterSizeSliderSegmentCount = Math.max(1, posterSizeLevels.length - 1);
+  const posterSizeSliderSegmentWidthPx =
+    (GRID_POSTER_SIZE_SLIDER_TRACK_W_PX -
+      (posterSizeSliderSegmentCount - 1) * GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX) /
+    posterSizeSliderSegmentCount;
+  const isPosterSizeControlDisabled = viewMode === 'list' || isLibraryToolbarLocked;
+
+  /**
+   * 仅在 Poster View 测量实际网格宽度；List View 保留最后一组安全刻度与拇指位置。
+   * 宽度无效或只能产生一个布局时不覆盖现有刻度，避免渲染损坏的零段 slider。
+   */
+  useLayoutEffect(() => {
+    if (viewMode !== 'grid') return;
+    const grid = posterGridRef.current;
+    if (!grid) return;
+
+    const syncLevels = () => {
+      const nextLevels = getPosterSizeLevelsForGridWidth(grid.getBoundingClientRect().width);
+      if (nextLevels.length < 2) return;
+      setPosterSizeLevels((current) =>
+        posterSizeLevelArraysEqual(current, nextLevels) ? current : nextLevels,
+      );
+      setPosterSize((current) => nextLevels[nearestPosterSizeLevelIndex(nextLevels, current)]!);
+    };
+
+    syncLevels();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncLevels);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [
+    viewMode,
+    isMoviesHydrated,
+    isListViewRowsScrollSplit,
+    isSidebarOpen,
+    windowMode,
+    floatingShellSizePx.w,
+    desktopViewportPx.w,
+  ]);
+
   const listScrollbarTrackHeight = Math.max(
     0,
     listScrollbarMetrics.clientHeight - LIST_VIEW_TABLE_HEADER_HEIGHT_PX,
@@ -4891,7 +5088,10 @@ export default function App() {
             )}
           </div>
         </div>
-	        <div className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]">
+        <div
+          ref={sidebarScrollRef}
+          className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]"
+        >
           <nav className="space-y-2">
             <motion.div
               className={`space-y-2 ease-out ${
@@ -4928,53 +5128,80 @@ export default function App() {
                 className="overflow-hidden w-[200px]"
               >
                 <ul
+                  id="genre-filter-list"
                   ref={genreListRef}
                   className="space-y-0.5 w-[200px]"
                   onPointerMove={onGenreListPointerMove}
                   onPointerUp={onGenreListPointerUp}
                   onPointerCancel={onGenreListPointerCancel}
                 >
-                  {genres.map((genre, index) => {
-                    const isDragged = genreDragFromIndex === index;
-                    const reorderOffset =
-                      genreDragFromIndex !== null && genreDragOverIndex !== null && !isDragged
-                        ? genreDragFromIndex < genreDragOverIndex
-                          ? (index > genreDragFromIndex && index <= genreDragOverIndex ? -GENRE_ITEM_PITCH : 0)
-                          : genreDragFromIndex > genreDragOverIndex
-                            ? (index >= genreDragOverIndex && index < genreDragFromIndex ? GENRE_ITEM_PITCH : 0)
-                            : 0
-                        : 0;
-                    return (
-                    <motion.li
-                      key={genre}
-                      data-genre-index={index}
-                      className="w-[200px]"
-                      transition={genreDragFromIndex === null ? { duration: 0 } : { duration: 0.18, ease: 'easeOut' }}
+                  {primaryGenres.map(renderGenreSidebarRow)}
+                  {areGenreExtraRowsMounted ? (
+                    <li
+                      className={`genre-extra-rows ${
+                        isGenreListExpanded ? 'is-expanded' : ''
+                      } ${areGenreExtraRowsCollapsing ? 'is-collapsing' : ''}`}
                       style={
-                        isDragged && genreDragPointerY !== null
-                          ? { y: genreDragPointerY - (genreDragRef.current?.startPointerY ?? 0), position: 'relative' as const, zIndex: 50, cursor: 'grabbing' as const }
-                          : undefined
+                        {
+                          '--genre-extra-rows-height': `${extraGenres.length * GENRE_ITEM_PITCH}px`,
+                        } as React.CSSProperties
                       }
-                      animate={
-                        isDragged
-                          ? { scale: 1.02 }
-                          : { y: reorderOffset, scale: 1 }
-                      }
+                      onTransitionEnd={(event) => {
+                        if (
+                          areGenreExtraRowsCollapsing &&
+                          event.target === event.currentTarget &&
+                          event.propertyName === 'max-height'
+                        ) {
+                          finishGenreExtraRowsCollapse();
+                        }
+                      }}
                     >
-                      <GenreSidebarItem
-                        label={genre}
-                        count={genreMovieCounts.get(genre) ?? 0}
-                        active={selectedGenres.includes(genre)}
-                        onClick={() => {
-                          setIsRecentlyAddedFilter(false);
-                          toggleFilter(selectedGenres, genre, setSelectedGenres);
-                        }}
-                        iconSlug={genreLabelToIconSlug(genre)}
-                        onHandlePointerDown={onGenreHandlePointerDown(index)}
-                        isDragging={genreDragFromIndex === index}
-                      />
-                    </motion.li>
-                  )})}
+                      <ul className="space-y-0.5">
+                        {extraGenres.map((genre, index) => renderGenreSidebarRow(genre, index + 7))}
+                      </ul>
+                    </li>
+                  ) : null}
+                  <li className="w-[200px]">
+                    {areGenreExtraRowsMounted ? (
+                      <button
+                        type="button"
+                        className="genre-show-fewer"
+                        aria-expanded={isGenreListExpanded}
+                        aria-controls="genre-filter-list"
+                        onClick={collapseGenreExtraRows}
+                      >
+                        <span className="genre-show-toggle-icon" aria-hidden>
+                          <img
+                            draggable={false}
+                            src="/icons/genre-show-less.svg"
+                            alt=""
+                            width={10}
+                            height={10}
+                          />
+                        </span>
+                        <span>Show less</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="genre-show-more"
+                        aria-expanded="false"
+                        aria-controls="genre-filter-list"
+                        onClick={expandGenreExtraRows}
+                      >
+                        <span className="genre-show-toggle-icon" aria-hidden>
+                          <img
+                            draggable={false}
+                            src="/icons/genre-show-more.svg"
+                            alt=""
+                            width={10}
+                            height={10}
+                          />
+                        </span>
+                        <span>{`Show all ${genres.length}`}</span>
+                      </button>
+                    )}
+                  </li>
                 </ul>
               </motion.div>
             </div>
@@ -5630,20 +5857,15 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() =>
-                      setPosterSize(Math.max(GRID_POSTER_SIZE_MIN_PX, posterSize - GRID_POSTER_SIZE_STEP_PX))
-                    }
+                    onClick={() => setPosterSize(posterSizeLevels[Math.max(0, posterSizeLevelIndex - 1)]!)}
                     disabled={
-                      viewMode === 'list' ||
-                      posterSize <= GRID_POSTER_SIZE_MIN_PX ||
-                      isLibraryToolbarLocked
+                      isPosterSizeControlDisabled ||
+                      posterSizeLevelIndex === 0
                     }
                     className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title={mainLibraryToolbarLockReason ?? 'Decrease poster size'}
                   >
-                    {viewMode === 'list' ||
-                    posterSize <= GRID_POSTER_SIZE_MIN_PX ||
-                    isLibraryToolbarLocked ? (
+                    {isPosterSizeControlDisabled || posterSizeLevelIndex === 0 ? (
                       <img draggable={false}
                         src="/icons/poster-size-decrease-disabled.svg"
                         alt=""
@@ -5677,44 +5899,47 @@ export default function App() {
                     )}
                   </button>
                   <div
-                    className="relative h-8 w-32 shrink-0"
+                    className="relative h-8 shrink-0"
+                    style={{ width: GRID_POSTER_SIZE_SLIDER_TRACK_W_PX }}
                     onPointerDownCapture={(e) => {
-                      if (viewMode === 'list' || isLibraryToolbarLocked) return;
+                      if (isPosterSizeControlDisabled) return;
                       if (e.button !== 0) return;
                       setIsPosterSizeSliderPressed(true);
                     }}
                   >
                     <div
-                      className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                        viewMode === 'list' || isLibraryToolbarLocked ? 'opacity-15' : 'opacity-100'
+                      className={`pointer-events-none absolute left-0 top-1/2 flex w-full -translate-y-1/2 transition-opacity ${
+                        isPosterSizeControlDisabled ? 'opacity-15' : 'opacity-100'
                       }`}
-                      style={{
-                        height: POSTER_SIZE_SLIDER_TRACK_H_PX,
-                        borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
-                      }}
+                      style={{ gap: GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX }}
                       aria-hidden
-                    />
-                    <div
-                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 bg-white/40 transition-opacity ${
-                        viewMode === 'list' || isLibraryToolbarLocked ? 'opacity-15' : 'opacity-100'
-                      }`}
-                      style={{
-                        width: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${Math.max(
-                          0,
-                          Math.min(
-                            1,
-                            (clampPosterSizePx(posterSize) - GRID_POSTER_SIZE_MIN_PX) /
-                              (GRID_POSTER_SIZE_MAX_PX - GRID_POSTER_SIZE_MIN_PX),
-                          ),
-                        )})`,
-                        height: POSTER_SIZE_SLIDER_TRACK_H_PX,
-                        borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
-                      }}
-                      aria-hidden
-                    />
+                    >
+                      {Array.from({ length: posterSizeSliderSegmentCount }, (_, segmentIndex) => (
+                        <span
+                          key={segmentIndex}
+                          className={segmentIndex < posterSizeLevelIndex ? 'bg-white/40' : 'bg-white/15'}
+                          style={{
+                            width: posterSizeSliderSegmentWidthPx,
+                            height: POSTER_SIZE_SLIDER_TRACK_H_PX,
+                            borderTopLeftRadius:
+                              segmentIndex === 0 ? POSTER_SIZE_SLIDER_TRACK_H_PX / 2 : 0,
+                            borderBottomLeftRadius:
+                              segmentIndex === 0 ? POSTER_SIZE_SLIDER_TRACK_H_PX / 2 : 0,
+                            borderTopRightRadius:
+                              segmentIndex === posterSizeSliderSegmentCount - 1
+                                ? POSTER_SIZE_SLIDER_TRACK_H_PX / 2
+                                : 0,
+                            borderBottomRightRadius:
+                              segmentIndex === posterSizeSliderSegmentCount - 1
+                                ? POSTER_SIZE_SLIDER_TRACK_H_PX / 2
+                                : 0,
+                          }}
+                        />
+                      ))}
+                    </div>
                     <img draggable={false}
                       src={
-                        viewMode === 'list' || isLibraryToolbarLocked
+                        isPosterSizeControlDisabled
                           ? '/icons/poster-size-slider-thumb-disabled.svg'
                           : isPosterSizeSliderPressed
                             ? '/icons/poster-size-slider-thumb-pressed.svg'
@@ -5725,45 +5950,38 @@ export default function App() {
                       height={POSTER_SIZE_SLIDER_THUMB_PX}
                       className="pointer-events-none absolute top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none"
                       style={{
-                        left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${Math.max(
-                          0,
-                          Math.min(
-                            1,
-                            (clampPosterSizePx(posterSize) - GRID_POSTER_SIZE_MIN_PX) /
-                              (GRID_POSTER_SIZE_MAX_PX - GRID_POSTER_SIZE_MIN_PX),
-                          ),
-                        )})`,
+                        left: `${(posterSizeLevelIndex / (posterSizeLevels.length - 1)) * 100}%`,
                       }}
                       decoding="async"
                       aria-hidden
                     />
                     <input
                       type="range"
-                      min={GRID_POSTER_SIZE_MIN_PX}
-                      max={GRID_POSTER_SIZE_MAX_PX}
-                      step={GRID_POSTER_SIZE_STEP_PX}
-                      value={posterSize}
-                      disabled={viewMode === 'list' || isLibraryToolbarLocked}
-                      onChange={(e) => setPosterSize(clampPosterSizePx(Number(e.target.value)))}
+                      min={0}
+                      max={posterSizeLevels.length - 1}
+                      step={1}
+                      value={posterSizeLevelIndex}
+                      disabled={isPosterSizeControlDisabled}
+                      onChange={(e) => setPosterSize(posterSizeLevels[Number(e.target.value)]!)}
                       className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none opacity-0 focus:outline-none disabled:cursor-not-allowed"
+                      aria-label="Poster grid size"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() =>
-                      setPosterSize(Math.min(GRID_POSTER_SIZE_MAX_PX, posterSize + GRID_POSTER_SIZE_STEP_PX))
+                      setPosterSize(
+                        posterSizeLevels[Math.min(posterSizeLevels.length - 1, posterSizeLevelIndex + 1)]!,
+                      )
                     }
                     disabled={
-                      viewMode === 'list' ||
-                      posterSize >= GRID_POSTER_SIZE_MAX_PX ||
-                      isLibraryToolbarLocked
+                      isPosterSizeControlDisabled ||
+                      posterSizeLevelIndex === posterSizeLevels.length - 1
                     }
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title={mainLibraryToolbarLockReason ?? 'Increase poster size'}
                   >
-                    {viewMode === 'list' ||
-                    posterSize >= GRID_POSTER_SIZE_MAX_PX ||
-                    isLibraryToolbarLocked ? (
+                    {isPosterSizeControlDisabled || posterSizeLevelIndex === posterSizeLevels.length - 1 ? (
                       <img draggable={false}
                         src="/icons/poster-size-increase-disabled.svg"
                         alt=""
@@ -6476,6 +6694,7 @@ export default function App() {
               >
           <AnimatePresence mode="sync">
             <motion.div 
+              ref={viewMode === 'grid' ? posterGridRef : undefined}
               className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
               style={viewMode === 'grid' ? { 
                 gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
@@ -6562,6 +6781,7 @@ export default function App() {
             <>
           <AnimatePresence mode="sync">
             <motion.div 
+              ref={viewMode === 'grid' ? posterGridRef : undefined}
               className={viewMode === 'grid' ? 'grid gap-x-6 gap-y-10 pt-12' : 'flex flex-col gap-0'}
               style={viewMode === 'grid' ? { 
                 gridTemplateColumns: `repeat(auto-fill, minmax(${posterSize}px, 1fr))` 
@@ -7942,9 +8162,9 @@ const LIST_TITLE_GENRE_LINE_TOP_PX =
 const LIST_TITLE_CONTENT_EDGE_INSET_PX =
   LIST_VIEW_ROW_HEIGHT_PX - LIST_TITLE_GENRE_LINE_TOP_PX - LIST_CAST_LINE_PX;
 /**
- * 网格海报 hover 右上角「预览」点击热区边长（px）：与 overlay 内「Play Trailer」全宽胶囊同高（`py-2.5` + `text-[12px]` 单行约 40–42px）。
+ * 网格海报 hover 右上角「预览」图标与点击热区边长（px）。
  */
-const GRID_POSTER_PREVIEW_HIT_PX = 42;
+const GRID_POSTER_PREVIEW_HIT_PX = 24;
 /**
  * 片库网格/列表海报：前若干张 `loading="eager"`，其余 `lazy`，减轻首帧解码与带宽竞争。
  */
@@ -8739,6 +8959,8 @@ function MovieCard({
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
           <div
             ref={listPosterShellRef}
+            title={isEditing ? undefined : 'Open details'}
+            aria-label={isEditing ? undefined : 'Open film details'}
             className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit' : 'cursor-pointer group-hover:scale-115'}`}
             onClick={
               isEditing
@@ -9165,8 +9387,8 @@ function MovieCard({
         {!isEditing && (
           <button
             type="button"
-            title="Preview poster"
-            aria-label="Preview poster"
+            title="Open details"
+            aria-label="Open film details"
             onClick={(e) => {
               e.stopPropagation();
               onOpenPosterPreview(gridPosterShellRef.current);
@@ -9175,9 +9397,9 @@ function MovieCard({
               width: GRID_POSTER_PREVIEW_HIT_PX,
               height: GRID_POSTER_PREVIEW_HIT_PX,
               top: 10,
-              right: 10,
+              right: 4,
             }}
-            className="group/posterzoom pointer-events-auto absolute z-30 flex cursor-pointer items-center justify-center rounded-[10px] bg-white/20 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+            className="group/posterzoom pointer-events-auto absolute z-30 flex cursor-pointer items-center justify-center p-0 opacity-0 transition-opacity group-hover:opacity-100"
           >
             <span className="relative inline-flex h-6 w-6 shrink-0">
               <img draggable={false}
@@ -9185,7 +9407,7 @@ function MovieCard({
                 alt=""
                 width={24}
                 height={24}
-                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 object-contain opacity-100 transition-opacity group-hover/posterzoom:opacity-0"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-[calc(50%+4px)] -translate-y-1/2 object-contain opacity-100 transition-opacity group-hover/posterzoom:opacity-0"
                 decoding="async"
                 aria-hidden
               />
@@ -9194,7 +9416,7 @@ function MovieCard({
                 alt=""
                 width={24}
                 height={24}
-                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 object-contain opacity-0 transition-opacity group-hover/posterzoom:opacity-100"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-[calc(50%+4px)] -translate-y-1/2 object-contain opacity-0 transition-opacity group-hover/posterzoom:opacity-100"
                 decoding="async"
                 aria-hidden
               />
