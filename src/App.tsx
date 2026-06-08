@@ -3795,6 +3795,7 @@ export default function App() {
     }
     const userTrailerSnapshot = newMovieTrailerUrl.trim();
     const placeholder = buildPlaceholderMovieFromSearchHit(hit);
+    if (searchQuery) setSearchQuery('');
     setMovies((prev) => [placeholder, ...prev]);
     setPendingScrollMovieId(imdbId);
     setIsAddModalOpen(false);
@@ -3849,6 +3850,7 @@ export default function App() {
 
     try {
       const newMovie = await enrichAndUpsertNewMovie(imdbId, newMovieTrailerUrl.trim());
+      if (searchQuery) setSearchQuery('');
       setMovies((prev) => [newMovie, ...prev]);
       setPendingScrollMovieId(newMovie.id);
 
@@ -5897,28 +5899,16 @@ export default function App() {
                         aria-hidden
                       />
                     ) : isFilmDnaOpen ? (
-                      <>
-                        <img
-                          draggable={false}
-                          src="/icons/film-dna-active.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/filmdna:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img
-                          draggable={false}
-                          src="/icons/film-dna-active-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/filmdna:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </>
+                      <img
+                        draggable={false}
+                        src="/icons/film-dna-active.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/filmdna:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
                     ) : (
                       <img
                         draggable={false}
@@ -5965,26 +5955,15 @@ export default function App() {
                         aria-hidden
                       />
                     ) : isInfoMode ? (
-                      <>
-                        <img draggable={false}
-                          src="/icons/info-active.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/info-active-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </>
+                      <img draggable={false}
+                        src="/icons/info-active.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/infoprev:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
                     ) : (
                       <img draggable={false}
                         src="/icons/info.svg"
@@ -6116,18 +6095,7 @@ export default function App() {
                             width={20}
                             height={20}
                             className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                              isEditing ? 'opacity-100 group-hover/editlib:opacity-0' : 'opacity-0'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/edit-library-active-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                              isEditing ? 'opacity-0 group-hover/editlib:opacity-100' : 'opacity-0'
+                              isEditing ? 'opacity-75 group-hover/editlib:opacity-100' : 'opacity-0'
                             }`}
                             decoding="async"
                             aria-hidden
