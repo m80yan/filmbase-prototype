@@ -6729,7 +6729,7 @@ export default function App() {
             />
             <div className="pointer-events-none relative z-[2] box-border flex h-full min-h-0 w-full max-w-full items-center justify-center px-4 sm:px-6">
               <div
-                className={`relative shrink-0 overflow-hidden${isPosterPreviewEnterAnimating ? ' pointer-events-none' : ' pointer-events-auto'}`}
+                className="pointer-events-none relative shrink-0 overflow-hidden"
                 style={
                   posterPreviewLayout
                     ? {
@@ -6773,7 +6773,7 @@ export default function App() {
                     onPointerLeave={() => {
                       previewPointerOverImgRef.current = false;
                     }}
-                    className={`max-h-none max-w-none select-none object-contain${isPosterPreviewSubModeActive ? ' pointer-events-none' : ''}`}
+                    className={`max-h-none max-w-none select-none object-contain${isPosterPreviewSubModeActive ? ' pointer-events-none' : ' pointer-events-auto'}`}
                     style={(() => {
                       const enter = getPosterPreviewEnterVisual(
                         isPosterPreviewEnterAnimating,
@@ -6964,7 +6964,7 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Film DNA"
-                      className="filmbase-scrollbar-subtle filmbase-selectable-text absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      className="filmbase-scrollbar-subtle filmbase-selectable-text pointer-events-auto absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >
@@ -6989,7 +6989,7 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Movie information"
-                      className="filmbase-scrollbar-subtle filmbase-selectable-text absolute inset-0 z-[25] overflow-y-auto bg-black/85"
+                      className="filmbase-scrollbar-subtle filmbase-selectable-text pointer-events-auto absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >
@@ -7023,7 +7023,7 @@ export default function App() {
                         animate={{ y: 0, opacity: 1 }}
                         exit={{ y: 24, opacity: 0 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute left-0 right-0 bottom-0 z-20"
+                        className="pointer-events-auto absolute left-0 right-0 bottom-0 z-20"
                       >
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/85 via-black/55 to-transparent" />
                         <div className="relative pointer-events-none flex flex-col gap-3 p-4">
