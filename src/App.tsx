@@ -5098,7 +5098,7 @@ export default function App() {
             {searchQuery && (
               <ClearSearchButton
                 iconSize={14}
-                className={`absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20 ${
+                className={`absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full ${
                   isBackgroundInert ? 'opacity-[0.2]' : ''
                 }`}
                 onClear={() => {
@@ -7252,7 +7252,7 @@ export default function App() {
                       <ClearSearchButton
                         iconSize={16}
                         disabled={isAdding}
-                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 disabled:pointer-events-none disabled:opacity-40"
+                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40"
                         onClear={() => {
                           addMovieSearchSeqRef.current += 1;
                           setNewMovieTitle('');

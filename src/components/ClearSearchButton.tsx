@@ -1,23 +1,5 @@
 import React, { useState } from 'react';
 
-const CLEAR_SEARCH_ICON = {
-  default: '/icons/clear-search.svg',
-  hover: '/icons/clear-search-hover.svg',
-  pressed: '/icons/clear-search-pressed.svg',
-} as const;
-
-/**
- * Resolves the clear-search icon asset from pointer interaction state.
- *
- * @param pressed - Primary pointer is down on the button
- * @param hovered - Pointer is over the button
- */
-export function getClearSearchIconSrc(pressed: boolean, hovered: boolean): string {
-  if (pressed) return CLEAR_SEARCH_ICON.pressed;
-  if (hovered) return CLEAR_SEARCH_ICON.hover;
-  return CLEAR_SEARCH_ICON.default;
-}
-
 type ClearSearchButtonProps = {
   /** Icon dimensions in px (sidebar 14, add-movie 16). */
   iconSize: 14 | 16;
@@ -30,9 +12,7 @@ type ClearSearchButtonProps = {
   onPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
 };
 
-/**
- * Clear-search control with default, hover, and pressed icon states.
- */
+/** Clear-search control with a code-drawn circular background and shared X asset. */
 export function ClearSearchButton({
   iconSize,
   className,
@@ -44,7 +24,12 @@ export function ClearSearchButton({
   const [isPressed, setIsPressed] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
-  const iconClassName = iconSize === 14 ? 'h-3.5 w-3.5' : 'h-4 w-4';
+  const xSize = iconSize === 14 ? 6 : 8;
+  const backgroundColor = isPressed
+    ? '#FFFFFF'
+    : isHovered
+      ? '#EA9794'
+      : 'rgba(255, 255, 255, 0.40)';
 
   return (
     <button
@@ -69,15 +54,17 @@ export function ClearSearchButton({
       }}
       onPointerCancel={() => setIsPressed(false)}
       className={className}
+      style={{ backgroundColor }}
       title={title}
     >
       <img
         draggable={false}
-        src={getClearSearchIconSrc(isPressed, isHovered)}
+        src="/icons/clear-x.svg"
         alt=""
-        width={iconSize}
-        height={iconSize}
-        className={`pointer-events-none select-none object-contain ${iconClassName}`}
+        width={xSize}
+        height={xSize}
+        className="pointer-events-none select-none object-contain"
+        style={{ width: xSize, height: xSize }}
         decoding="async"
         aria-hidden
       />
