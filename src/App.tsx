@@ -9009,10 +9009,11 @@ function MovieCard({
         ) : null}
         {/* Hover Metadata Overlay */}
         <div
+          onClick={() => onOpenPosterPreview(gridPosterShellRef.current)}
           className={`absolute inset-0 z-20 flex flex-col justify-end bg-black/75 p-4 opacity-0 transition-opacity space-y-2 ${
             isEditing
               ? 'pointer-events-none'
-              : 'pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100'
+              : 'pointer-events-none cursor-pointer group-hover:pointer-events-auto group-hover:opacity-100'
           }`}
         >
           <div className="min-w-0 space-y-0 text-sm tracking-tight leading-relaxed font-medium text-white/60 group-hover:text-white">
