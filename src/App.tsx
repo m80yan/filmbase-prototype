@@ -545,7 +545,7 @@ function isAddMovieSearchSuggestionInLibrary(hit: MovieSearchHit, list: Movie[])
   return list.some((m) => normalizeTitleForIdentity(m.title) === nt && m.year === y);
 }
 
-/** `public/icons` 下已有素材的类型 slug（与 `{slug}.svg` / `{slug}-hover.svg` 文件名一致）。 */
+/** `public/icons` 下已有素材的类型 slug（与 `{slug}.svg` 文件名一致）。 */
 const SIDEBAR_GENRE_ICON_SLUGS = new Set([
   'action',
   'adventure',
@@ -605,7 +605,7 @@ function isMovieRecentlyAdded(movie: Movie): boolean {
 
 /**
  * 将片库中的 genre 文案映射为侧栏图标 slug。
- * 无单独设计的类型统一使用 `fallback`（`fallback.svg` / `fallback-hover.svg`）。
+ * 无单独设计的类型统一使用 `fallback.svg`。
  *
  * @param label 如 `Sci-Fi`、`War`、`Western`（映射为 `lasso` 素材）、`TV Movie`（`tv-movie`）
  */
@@ -5349,29 +5349,14 @@ export default function App() {
               }}
             >
               <span className="col-start-1 flex min-w-0 items-center gap-3 pl-3">
-                <span className="relative block h-[20px] w-[20px] shrink-0">
+                <span className="block h-[20px] w-[20px] shrink-0">
                   <img draggable={false}
                     src="/icons/films.svg"
                     alt=""
                     width={20}
                     height={20}
-                    className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                      isAllFilmsDefaultView
-                        ? 'opacity-0'
-                        : 'opacity-100 group-hover/allfilms:opacity-0'
-                    }`}
-                    decoding="async"
-                    aria-hidden
-                  />
-                  <img draggable={false}
-                    src="/icons/films-hover.svg"
-                    alt=""
-                    width={20}
-                    height={20}
-                    className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                      isAllFilmsDefaultView
-                        ? 'opacity-100'
-                        : 'opacity-0 group-hover/allfilms:opacity-100'
+                    className={`pointer-events-none h-[20px] w-[20px] transition-opacity ${
+                      isAllFilmsDefaultView ? 'opacity-100' : 'opacity-40 group-hover/allfilms:opacity-100'
                     }`}
                     decoding="async"
                     aria-hidden
@@ -5412,47 +5397,22 @@ export default function App() {
               }}
             >
               <span className="col-start-1 flex min-w-0 items-center gap-3 pl-3">
-                <span className="relative block h-[20px] w-[20px] shrink-0">
-                  {isRecentlyAddedDisabled ? (
-                    <img draggable={false}
-                      src="/icons/recently-added-disabled.svg"
-                      alt=""
-                      width={20}
-                      height={20}
-                      className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px]"
-                      decoding="async"
-                      aria-hidden
-                    />
-                  ) : (
-                    <>
-                      <img draggable={false}
-                        src="/icons/recently-added.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                          isRecentlyAddedFilter
-                            ? 'opacity-0'
-                            : 'opacity-100 group-hover/recent:opacity-0'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img draggable={false}
-                        src="/icons/recently-added-hover.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                          isRecentlyAddedFilter
-                            ? 'opacity-100'
-                            : 'opacity-0 group-hover/recent:opacity-100'
-                        }`}
-                        decoding="async"
-                        aria-hidden
-                      />
-                    </>
-                  )}
+                <span className="block h-[20px] w-[20px] shrink-0">
+                  <img draggable={false}
+                    src="/icons/recently-added.svg"
+                    alt=""
+                    width={20}
+                    height={20}
+                    className={`pointer-events-none h-[20px] w-[20px] transition-opacity ${
+                      isRecentlyAddedDisabled
+                        ? 'opacity-[0.15]'
+                        : isRecentlyAddedFilter
+                          ? 'opacity-100'
+                          : 'opacity-40 group-hover/recent:opacity-100'
+                    }`}
+                    decoding="async"
+                    aria-hidden
+                  />
                 </span>
                 <span className="min-w-0 flex-1 text-left">Recently Added</span>
               </span>
@@ -5518,22 +5478,13 @@ export default function App() {
                     }
                     aria-label="Close poster preview"
                   >
-                    <span className="relative block h-[18px] w-[18px] shrink-0">
+                    <span className="block h-[18px] w-[18px] shrink-0">
                       <img draggable={false}
                         src="/icons/back.svg"
                         alt=""
                         width={18}
                         height={18}
-                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-100 transition-opacity group-hover/backprev:opacity-0"
-                        decoding="async"
-                        aria-hidden
-                      />
-                      <img draggable={false}
-                        src="/icons/back-hover.svg"
-                        alt=""
-                        width={18}
-                        height={18}
-                        className="pointer-events-none absolute left-0 top-0 h-[18px] w-[18px] opacity-0 transition-opacity group-hover/backprev:opacity-100"
+                        className="pointer-events-none h-[18px] w-[18px] opacity-40 transition-opacity group-hover/backprev:opacity-100"
                         decoding="async"
                         aria-hidden
                       />
@@ -5559,39 +5510,20 @@ export default function App() {
                     className="group/prevfit relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward fit / fill"
                   >
-                    {previewSliderPercent <= previewSliderMinPercent ||
-                    isPosterPreviewZoomControlsDisabled ? (
-                      <img draggable={false}
-                        src="/icons/poster-preview-fit-disabled.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <span className="relative block h-[20px] w-[20px] shrink-0">
-                        <img draggable={false}
-                          src="/icons/poster-preview-fit.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/prevfit:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/poster-preview-fit-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/prevfit:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </span>
-                    )}
+                    <img draggable={false}
+                      src="/icons/poster-preview-fit.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className={`pointer-events-none h-[20px] w-[20px] shrink-0 transition-opacity ${
+                        previewSliderPercent <= previewSliderMinPercent ||
+                        isPosterPreviewZoomControlsDisabled
+                          ? 'opacity-15'
+                          : 'opacity-40 group-hover/prevfit:opacity-100'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
                   </button>
                   <div className="group relative flex h-8 w-32 shrink-0 items-center">
                     {previewSliderHoverLabel && !isPosterPreviewSubModeActive ? (
@@ -5696,39 +5628,20 @@ export default function App() {
                     className="group/prev100 relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title="Toward 100%"
                   >
-                    {previewSliderPercent >= previewSliderMaxPercent ||
-                    isPosterPreviewZoomControlsDisabled ? (
-                      <img draggable={false}
-                        src="/icons/poster-preview-100-disabled.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <span className="relative block h-[20px] w-[20px] shrink-0">
-                        <img draggable={false}
-                          src="/icons/poster-preview-100.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/prev100:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/poster-preview-100-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/prev100:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </span>
-                    )}
+                    <img draggable={false}
+                      src="/icons/poster-preview-100.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className={`pointer-events-none h-[20px] w-[20px] shrink-0 transition-opacity ${
+                        previewSliderPercent >= previewSliderMaxPercent ||
+                        isPosterPreviewZoomControlsDisabled
+                          ? 'opacity-15'
+                          : 'opacity-40 group-hover/prev100:opacity-100'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
                   </button>
                 </div>
               </>
@@ -5750,47 +5663,22 @@ export default function App() {
                           : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-5 w-5 shrink-0">
-                      {isLibraryToolbarLocked ? (
-                        <img draggable={false}
-                          src="/icons/view-grid-hover-disabled.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none h-5 w-5 shrink-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      ) : (
-                        <>
-                          <img draggable={false}
-                            src="/icons/view-grid.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
-                              viewMode === 'grid'
-                                ? 'opacity-0'
-                                : 'opacity-100 group-hover/viewgrid:opacity-0'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/view-grid-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
-                              viewMode === 'grid'
-                                ? 'opacity-100'
-                                : 'opacity-0 group-hover/viewgrid:opacity-100'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                        </>
-                      )}
+                    <span className="block h-5 w-5 shrink-0">
+                      <img draggable={false}
+                        src="/icons/view-grid.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className={`pointer-events-none h-5 w-5 transition-opacity ${
+                          isLibraryToolbarLocked
+                            ? 'opacity-15'
+                            : viewMode === 'grid'
+                              ? 'opacity-100'
+                              : 'opacity-40 group-hover/viewgrid:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
                     </span>
                   </button>
                   <button
@@ -5808,47 +5696,22 @@ export default function App() {
                           : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span className="relative block h-5 w-5 shrink-0">
-                      {isLibraryToolbarLocked ? (
-                        <img draggable={false}
-                          src="/icons/view-list-hover-disabled.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none h-5 w-5 shrink-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      ) : (
-                        <>
-                          <img draggable={false}
-                            src="/icons/view-list.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
-                              viewMode === 'list'
-                                ? 'opacity-0'
-                                : 'opacity-100 group-hover/viewlist:opacity-0'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/view-list-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-5 w-5 transition-opacity ${
-                              viewMode === 'list'
-                                ? 'opacity-100'
-                                : 'opacity-0 group-hover/viewlist:opacity-100'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                        </>
-                      )}
+                    <span className="block h-5 w-5 shrink-0">
+                      <img draggable={false}
+                        src="/icons/view-list.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className={`pointer-events-none h-5 w-5 transition-opacity ${
+                          isLibraryToolbarLocked
+                            ? 'opacity-15'
+                            : viewMode === 'list'
+                              ? 'opacity-100'
+                              : 'opacity-40 group-hover/viewlist:opacity-100'
+                        }`}
+                        decoding="async"
+                        aria-hidden
+                      />
                     </span>
                   </button>
                 </div>
@@ -5864,38 +5727,19 @@ export default function App() {
                     className="group/postdec relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title={mainLibraryToolbarLockReason ?? 'Decrease poster size'}
                   >
-                    {isPosterSizeControlDisabled || posterSizeLevelIndex === 0 ? (
-                      <img draggable={false}
-                        src="/icons/poster-size-decrease-disabled.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <span className="relative block h-[20px] w-[20px] shrink-0">
-                        <img draggable={false}
-                          src="/icons/poster-size-decrease.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/postdec:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/poster-size-decrease-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/postdec:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </span>
-                    )}
+                    <img draggable={false}
+                      src="/icons/poster-size-decrease.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className={`pointer-events-none h-[20px] w-[20px] shrink-0 transition-opacity ${
+                        isPosterSizeControlDisabled || posterSizeLevelIndex === 0
+                          ? 'opacity-15'
+                          : 'opacity-40 group-hover/postdec:opacity-100'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
                   </button>
                   <div
                     className="relative h-8 shrink-0"
@@ -5980,38 +5824,19 @@ export default function App() {
                     className="group/postinc relative flex h-8 w-8 shrink-0 items-center justify-center text-white/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/10 transition-colors"
                     title={mainLibraryToolbarLockReason ?? 'Increase poster size'}
                   >
-                    {isPosterSizeControlDisabled || posterSizeLevelIndex === posterSizeLevels.length - 1 ? (
-                      <img draggable={false}
-                        src="/icons/poster-size-increase-disabled.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-5 w-5 shrink-0"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <span className="relative block h-5 w-5 shrink-0">
-                        <img draggable={false}
-                          src="/icons/poster-size-increase.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-5 w-5 opacity-100 transition-opacity group-hover/postinc:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/poster-size-increase-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-5 w-5 opacity-0 transition-opacity group-hover/postinc:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </span>
-                    )}
+                    <img draggable={false}
+                      src="/icons/poster-size-increase.svg"
+                      alt=""
+                      width={20}
+                      height={20}
+                      className={`pointer-events-none h-5 w-5 shrink-0 transition-opacity ${
+                        isPosterSizeControlDisabled || posterSizeLevelIndex === posterSizeLevels.length - 1
+                          ? 'opacity-15'
+                          : 'opacity-40 group-hover/postinc:opacity-100'
+                      }`}
+                      decoding="async"
+                      aria-hidden
+                    />
                   </button>
                 </div>
               </>
@@ -6063,11 +5888,11 @@ export default function App() {
                     (isFilmDnaOpen && filmDnaStatus === 'loading') ? (
                       <img
                         draggable={false}
-                        src="/icons/film-dna-disabled.svg"
+                        src="/icons/film-dna.svg"
                         alt=""
                         width={20}
                         height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
                         decoding="async"
                         aria-hidden
                       />
@@ -6095,28 +5920,16 @@ export default function App() {
                         />
                       </>
                     ) : (
-                      <>
-                        <img
-                          draggable={false}
-                          src="/icons/film-dna.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/filmdna:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img
-                          draggable={false}
-                          src="/icons/film-dna-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/filmdna:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </>
+                      <img
+                        draggable={false}
+                        src="/icons/film-dna.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/filmdna:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
                     )}
                   </span>
                 </button>
@@ -6143,11 +5956,11 @@ export default function App() {
                   <span className="relative block h-[20px] w-[20px] shrink-0">
                     {isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
                       <img draggable={false}
-                        src="/icons/info-disabled.svg"
+                        src="/icons/info.svg"
                         alt=""
                         width={20}
                         height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
                         decoding="async"
                         aria-hidden
                       />
@@ -6173,26 +5986,15 @@ export default function App() {
                         />
                       </>
                     ) : (
-                      <>
-                        <img draggable={false}
-                          src="/icons/info.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/infoprev:opacity-0"
-                          decoding="async"
-                          aria-hidden
-                        />
-                        <img draggable={false}
-                          src="/icons/info-hover.svg"
-                          alt=""
-                          width={20}
-                          height={20}
-                          className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/infoprev:opacity-100"
-                          decoding="async"
-                          aria-hidden
-                        />
-                      </>
+                      <img draggable={false}
+                        src="/icons/info.svg"
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/infoprev:opacity-100"
+                        decoding="async"
+                        aria-hidden
+                      />
                     )}
                   </span>
                 </button>
@@ -6287,11 +6089,11 @@ export default function App() {
                     <span className="relative block h-[20px] w-[20px] shrink-0">
                       {isLibraryToolbarLocked ? (
                         <img draggable={false}
-                          src="/icons/edit-library-disabled.svg"
+                          src="/icons/edit-library.svg"
                           alt=""
                           width={20}
                           height={20}
-                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
                           decoding="async"
                           aria-hidden
                         />
@@ -6303,18 +6105,7 @@ export default function App() {
                             width={20}
                             height={20}
                             className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                              isEditing ? 'opacity-0' : 'opacity-100 group-hover/editlib:opacity-0'
-                            }`}
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/edit-library-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-                              isEditing ? 'opacity-0' : 'opacity-0 group-hover/editlib:opacity-100'
+                              isEditing ? 'opacity-0' : 'opacity-40 group-hover/editlib:opacity-100'
                             }`}
                             decoding="async"
                             aria-hidden
@@ -6361,35 +6152,24 @@ export default function App() {
                     <span className="relative block h-[20px] w-[20px] shrink-0">
                       {isAddMovieToolbarDisabled ? (
                         <img draggable={false}
-                          src="/icons/add-movie-disabled.svg"
+                          src="/icons/add-movie.svg"
                           alt=""
                           width={20}
                           height={20}
-                          className="pointer-events-none h-[20px] w-[20px] shrink-0"
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
                           decoding="async"
                           aria-hidden
                         />
                       ) : (
-                        <>
-                          <img draggable={false}
-                            src="/icons/add-movie.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-100 transition-opacity group-hover/addmov:opacity-0"
-                            decoding="async"
-                            aria-hidden
-                          />
-                          <img draggable={false}
-                            src="/icons/add-movie-hover.svg"
-                            alt=""
-                            width={20}
-                            height={20}
-                            className="pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] opacity-0 transition-opacity group-hover/addmov:opacity-100"
-                            decoding="async"
-                            aria-hidden
-                          />
-                        </>
+                        <img draggable={false}
+                          src="/icons/add-movie.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/addmov:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
                       )}
                     </span>
                   </button>
@@ -6930,22 +6710,13 @@ export default function App() {
                 className="pointer-events-auto group/edittrailer inline-flex h-9 cursor-pointer items-center gap-2 rounded-full bg-white/10 px-4 py-0 text-[12px] font-bold tracking-widest text-white/60 transition-colors hover:bg-white/20 hover:text-white"
                 title="Edit Trailer URL"
               >
-                <span className="relative block h-4 w-4 shrink-0">
+                <span className="block h-4 w-4 shrink-0">
                   <img draggable={false}
                     src="/icons/edit-trailer-url.svg"
                     alt=""
                     width={16}
                     height={16}
-                    className="pointer-events-none absolute left-0 top-0 h-4 w-4 select-none transition-opacity duration-150 ease-out opacity-100 group-hover/edittrailer:opacity-0"
-                    decoding="async"
-                    aria-hidden
-                  />
-                  <img draggable={false}
-                    src="/icons/edit-trailer-url-hover.svg"
-                    alt=""
-                    width={16}
-                    height={16}
-                    className="pointer-events-none absolute left-0 top-0 h-4 w-4 select-none transition-opacity duration-150 ease-out opacity-0 group-hover/edittrailer:opacity-100"
+                    className="pointer-events-none h-4 w-4 select-none opacity-40 transition-opacity duration-150 ease-out group-hover/edittrailer:opacity-100"
                     decoding="async"
                     aria-hidden
                   />
@@ -8036,7 +7807,7 @@ function PosterGenreIconWithTooltip({
       onMouseLeave={handleLeave}
     >
       <img draggable={false}
-        src={`/icons/${slug}-hover.svg`}
+        src={`/icons/${slug}.svg`}
         alt=""
         width={iconSizePx}
         height={iconSizePx}
@@ -9404,22 +9175,13 @@ function MovieCard({
             }}
             className="group/posterzoom pointer-events-auto absolute z-30 flex cursor-pointer items-center justify-center p-0 opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <span className="relative inline-flex h-6 w-6 shrink-0">
+            <span className="inline-flex h-6 w-6 shrink-0">
               <img draggable={false}
                 src="/icons/zoom-in.svg"
                 alt=""
                 width={24}
                 height={24}
-                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-[calc(50%+4px)] -translate-y-1/2 object-contain opacity-100 transition-opacity group-hover/posterzoom:opacity-0"
-                decoding="async"
-                aria-hidden
-              />
-              <img draggable={false}
-                src="/icons/zoom-in-hover.svg"
-                alt=""
-                width={24}
-                height={24}
-                className="pointer-events-none absolute left-1/2 top-1/2 h-6 w-6 -translate-x-[calc(50%+4px)] -translate-y-1/2 object-contain opacity-0 transition-opacity group-hover/posterzoom:opacity-100"
+                className="pointer-events-none h-6 w-6 -translate-x-1 object-contain opacity-80 transition-opacity group-hover/posterzoom:opacity-100"
                 decoding="async"
                 aria-hidden
               />

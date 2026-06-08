@@ -45,27 +45,15 @@ export default function GenreSidebarItem({
           active ? 'font-bold text-white' : 'font-medium text-white/70 group-hover/genreitem:text-white'
         }`}
       >
-        <span className="relative mr-[10px] h-[20px] w-[20px] shrink-0">
+        <span className="mr-[10px] h-[20px] w-[20px] shrink-0">
           <img
             draggable={false}
             src={`/icons/${iconSlug}.svg`}
             alt=""
             width={20}
             height={20}
-            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-              active ? 'opacity-0' : 'opacity-100 group-hover/genreitem:opacity-0'
-            }`}
-            decoding="async"
-            aria-hidden
-          />
-          <img
-            draggable={false}
-            src={`/icons/${iconSlug}-hover.svg`}
-            alt=""
-            width={20}
-            height={20}
-            className={`pointer-events-none absolute left-0 top-0 h-[20px] w-[20px] transition-opacity ${
-              active ? 'opacity-100' : 'opacity-0 group-hover/genreitem:opacity-100'
+            className={`pointer-events-none h-[20px] w-[20px] transition-opacity ${
+              active ? 'opacity-100' : 'opacity-40 group-hover/genreitem:opacity-100'
             }`}
             decoding="async"
             aria-hidden
@@ -88,11 +76,13 @@ export default function GenreSidebarItem({
       >
         <img
           draggable={false}
-          src={handleHovered || isDragging ? '/icons/drag-handel-hover.svg' : '/icons/drag-handel.svg'}
+          src="/icons/drag-handel.svg"
           alt=""
           width={16}
           height={16}
-          className="pointer-events-none h-4 w-4 object-contain"
+          className={`pointer-events-none h-4 w-4 object-contain transition-opacity ${
+            handleHovered || isDragging ? 'opacity-100' : 'opacity-40'
+          }`}
           decoding="async"
           aria-hidden
         />
