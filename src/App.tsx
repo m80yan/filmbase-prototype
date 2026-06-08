@@ -3339,7 +3339,7 @@ export default function App() {
       <motion.li
         key={genre}
         data-genre-index={index}
-        className="w-[200px]"
+        className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}
         transition={genreDragFromIndex === null ? { duration: 0 } : { duration: 0.18, ease: 'easeOut' }}
         style={
           isDragged && genreDragPointerY !== null
@@ -4399,6 +4399,13 @@ export default function App() {
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
+  const isBackgroundInert =
+    isTrailerOverlayInMain ||
+    isPosterPreviewOpen ||
+    isInfoMode ||
+    isFilmDnaOpen ||
+    isAddModalOpen ||
+    isEditTrailerModalOpen;
   /**
    * 预告片播放或 Add Movie 弹窗打开时锁定主工具栏（Grid/List、海报尺寸、编辑/新增），
    * 用户需先完成浮层内任务或关闭弹窗。
@@ -4733,7 +4740,7 @@ export default function App() {
 
   /** 顶部 chrome 区域拖拽窗口（非全屏 `open`）。 */
   const canDragFilmbaseChrome =
-    windowMode === 'open' && !isFullscreenLayout && !trafficChromeBusy;
+    windowMode === 'open' && !isFullscreenLayout && !trafficChromeBusy && !isBackgroundInert;
 
   /** 右下角调整外壳尺寸（非全屏、非嵌入 iframe；与拖拽可用性一致）。 */
   const canResizeFilmbaseShell = canDragFilmbaseChrome && !detectEmbeddedInIframe();
@@ -4963,18 +4970,21 @@ export default function App() {
       <div
         className={`absolute left-0 top-0 z-[200] flex cursor-default items-center gap-3 pl-4 pr-2 ${
           isFullscreenLayout ? 'h-14 min-h-[52px] pb-2 pt-2' : 'h-10'
-        }`}
+        } ${isBackgroundInert ? 'pointer-events-none' : ''}`}
+        inert={isBackgroundInert ? true : undefined}
         onMouseEnter={() => {
-          if (isFullscreenLayout) setFullscreenTrafficReveal(true);
+          if (isFullscreenLayout && !isBackgroundInert) setFullscreenTrafficReveal(true);
         }}
         onMouseLeave={() => {
-          if (isFullscreenLayout) setFullscreenTrafficReveal(false);
+          if (isFullscreenLayout && !isBackgroundInert) setFullscreenTrafficReveal(false);
         }}
-        onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
+        onPointerDownCapture={isBackgroundInert ? undefined : onShellPointerDownCloseScopedOverlays}
       >
         <div
           className={`flex items-center gap-2 transition-opacity duration-150 ease-out ${
-            isFullscreenLayout && !fullscreenTrafficReveal ? 'pointer-events-none opacity-0' : 'opacity-100'
+            isFullscreenLayout && !fullscreenTrafficReveal
+              ? 'pointer-events-none opacity-0'
+              : 'opacity-100'
           }`}
         >
           <TrafficLightButton
@@ -4982,8 +4992,9 @@ export default function App() {
             defaultSrc="/icons/traffic-close.svg"
             hoverSrc="/icons/traffic-close-hover.svg"
             pressedSrc="/icons/traffic-close-pressed.svg"
+            disabledSrc={isBackgroundInert ? '/icons/traffic-light-inactive.svg' : undefined}
             onClick={handleTrafficClose}
-            disabled={trafficLightsDisabled}
+            disabled={trafficLightsDisabled || isBackgroundInert}
           />
           <TrafficLightButton
             label="Minimize window"
@@ -4991,18 +5002,23 @@ export default function App() {
             hoverSrc="/icons/traffic-minimize-hover.svg"
             pressedSrc="/icons/traffic-minimize-pressed.svg"
             disabledSrc={
-              windowMode === 'fullscreen' ? '/icons/traffic-minimize-disabled.svg' : undefined
+              isBackgroundInert
+                ? '/icons/traffic-light-inactive.svg'
+                : windowMode === 'fullscreen'
+                  ? '/icons/traffic-minimize-disabled.svg'
+                  : undefined
             }
             onClick={handleTrafficMinimize}
-            disabled={trafficLightsDisabled || windowMode === 'fullscreen'}
+            disabled={trafficLightsDisabled || windowMode === 'fullscreen' || isBackgroundInert}
           />
           <TrafficLightButton
             label={isFullscreenLayout ? 'Exit fullscreen' : 'Fullscreen window'}
             defaultSrc="/icons/traffic-fullscreen.svg"
             hoverSrc="/icons/traffic-fullscreen-hover.svg"
             pressedSrc="/icons/traffic-fullscreen-pressed.svg"
+            disabledSrc={isBackgroundInert ? '/icons/traffic-light-inactive.svg' : undefined}
             onClick={handleTrafficFullscreen}
-            disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null}
+            disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null || isBackgroundInert}
           />
         </div>
         <button
@@ -5010,7 +5026,7 @@ export default function App() {
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className={`group/togglesidebar relative cursor-default p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 ${
             isFullscreenLayout ? '' : 'transition-colors'
-          }`}
+          } ${isBackgroundInert ? 'opacity-[0.375]' : ''}`}
           title="Toggle Sidebar"
           aria-label="Toggle sidebar"
           style={
@@ -5049,9 +5065,10 @@ export default function App() {
       {/* Sidebar */}
 	      <aside
           className={`${isSidebarOpen ? 'w-[232px] border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
-            isPosterPreviewChromeLocked ? 'opacity-50 transition-opacity' : ''
+            isBackgroundInert ? 'pointer-events-none cursor-default' : ''
           }`}
-          onPointerDownCapture={onShellPointerDownCloseScopedOverlays}
+          inert={isBackgroundInert ? true : undefined}
+          onPointerDownCapture={isBackgroundInert ? undefined : onShellPointerDownCloseScopedOverlays}
         >
         {/* Spacer for Window Controls (Axis A) */}
         <div className="h-10 flex-shrink-0 w-full" />
@@ -5065,7 +5082,9 @@ export default function App() {
               alt=""
               width={14}
               height={14}
-              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-100"
+              className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
+                isBackgroundInert ? 'opacity-[0.15]' : 'opacity-100'
+              }`}
               aria-hidden
             />
             <input 
@@ -5079,7 +5098,9 @@ export default function App() {
             {searchQuery && (
               <ClearSearchButton
                 iconSize={14}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20"
+                className={`absolute right-2.5 top-1/2 -translate-y-1/2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/20 ${
+                  isBackgroundInert ? 'opacity-[0.2]' : ''
+                }`}
                 onClear={() => {
                   setSearchQuery('');
                   searchInputRef.current?.focus();
@@ -5111,7 +5132,7 @@ export default function App() {
               >
                 <span>Genre</span>
                 <motion.div
-                  className="shrink-0"
+                  className={`shrink-0 ${isBackgroundInert ? 'opacity-[0.375]' : ''}`}
                   animate={{ rotate: isSidebarDynamicFilterExpanded('genre') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
@@ -5161,7 +5182,7 @@ export default function App() {
                       </ul>
                     </li>
                   ) : null}
-                  <li className="w-[200px]">
+                  <li className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
                     {areGenreExtraRowsMounted ? (
                       <button
                         type="button"
@@ -5217,7 +5238,7 @@ export default function App() {
               >
                 <span>Year</span>
                 <motion.div
-                  className="shrink-0"
+                  className={`shrink-0 ${isBackgroundInert ? 'opacity-[0.375]' : ''}`}
                   animate={{ rotate: isSidebarDynamicFilterExpanded('year') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
@@ -5248,7 +5269,7 @@ export default function App() {
                             ? 'short-before'
                             : 'normal';
                     return (
-                    <li key={year} className="w-[200px]">
+                    <li key={year} className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
                       <SidebarYearTimelineFilterRow
                         label={year}
                         count={yearMovieCounts.get(year) ?? 0}
@@ -5277,7 +5298,7 @@ export default function App() {
               >
                 <span>My Rating</span>
                 <motion.div
-                  className="shrink-0"
+                  className={`shrink-0 ${isBackgroundInert ? 'opacity-[0.375]' : ''}`}
                   animate={{ rotate: isSidebarDynamicFilterExpanded('ratings') ? 90 : 0 }}
                   transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
                 >
@@ -5295,7 +5316,7 @@ export default function App() {
               >
                 <ul className="space-y-0.5 w-[200px]">
                   {ratings.map((rating) => (
-                    <li key={rating} className="w-[200px]">
+                    <li key={rating} className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
                       <SidebarMyRatingFilterRow
                         rating={rating}
                         count={ratingMovieCounts.get(rating) ?? 0}
@@ -5315,11 +5336,11 @@ export default function App() {
           <button
             type="button"
             onClick={resetFilters}
-            className={`group/allfilms flex h-9 w-full items-center rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+            className={`group/allfilms flex h-9 w-full items-center rounded-lg text-[11px] font-bold tracking-wider transition-colors ${
               isAllFilmsDefaultView
                 ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
-            }`}
+            } ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}
           >
             <span
               className="grid h-full w-[200px] min-w-0 items-center"
@@ -5376,13 +5397,13 @@ export default function App() {
               setSearchQuery('');
               setIsRecentlyAddedFilter(true);
             }}
-            className={`group/recent flex h-9 w-full items-center rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
+            className={`group/recent flex h-9 w-full items-center rounded-lg text-[11px] font-bold tracking-wider transition-colors ${
               isRecentlyAddedDisabled
                 ? 'cursor-default text-white/15'
                 : isRecentlyAddedFilter
                 ? 'text-white'
                 : 'text-white/60 hover:bg-white/5'
-            }`}
+            } ${isBackgroundInert && !isRecentlyAddedDisabled ? 'opacity-[0.2]' : ''}`}
           >
             <span
               className="grid h-full w-[200px] min-w-0 items-center"
@@ -5444,40 +5465,18 @@ export default function App() {
           </button>
         </div>
 
-        {/**
-         * 等待 Apply / Cancel 或 Info Mode 时遮住整个 sidebar：阻断 hover/click，显示禁止光标和原生 tooltip。
-         * 不影响左上角 `Toggle Sidebar`（在 aside 之外、`z-[200]`），用户仍可折叠以更好预览海报。
-         */}
-        {isPosterPreviewChromeLocked ? (
-          <div
-            className="absolute inset-0 z-30 cursor-not-allowed"
-            title={
-              isAwaitingPosterApplyConfirm
-                ? 'Use Apply or Cancel below to finish poster upload'
-                : isFilmDnaOpen
-                  ? 'Press ESC to exit Film DNA'
-                  : 'Press ESC to exit info'
-            }
-            aria-hidden
-            onPointerDownCapture={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onClickCapture={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          />
-        ) : null}
       </aside>
 
       {/* Main Content：顶栏与主列表分区滚动，海报预览 overlay 仅盖住列表区 */}
       <main className="relative flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden h-full">
         {/* Unified Header & Toolbar */}
         <div
-          className="relative z-[60] flex-shrink-0 bg-[#121212]/70 backdrop-blur-xl"
+          className={`relative z-[60] flex-shrink-0 bg-[#121212]/70 backdrop-blur-xl ${
+            isBackgroundInert && !isPosterPreviewOpen ? 'pointer-events-none cursor-default' : ''
+          }`}
+          inert={isBackgroundInert && !isPosterPreviewOpen ? true : undefined}
           onPointerDownCapture={
-            isPosterPreviewOpen ? undefined : onShellPointerDownCloseScopedOverlays
+            isBackgroundInert ? undefined : onShellPointerDownCloseScopedOverlays
           }
         >
           {/**
@@ -6432,11 +6431,12 @@ export default function App() {
         >
           <div
             ref={!isListViewRowsScrollSplit ? mainLibraryScrollRef : undefined}
-            className={
+            inert={isBackgroundInert ? true : undefined}
+            className={`${
               isListViewRowsScrollSplit
                 ? 'flex h-full min-h-0 flex-col overflow-hidden overflow-x-hidden'
                 : `filmbase-scrollbar h-full min-h-0 overflow-x-hidden [scrollbar-gutter:stable] ${isMainLibraryScrollOverflowLocked ? 'overflow-hidden' : 'overflow-y-auto'}`
-            }
+            } ${isBackgroundInert ? 'pointer-events-none cursor-default' : ''}`}
           >
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
         <div
@@ -6846,11 +6846,14 @@ export default function App() {
         {selectedMovie && modalMode === 'trailer' && (
           <motion.div
             key={`trailer-overlay-${selectedMovie.id}`}
+            inert={isEditTrailerModalOpen ? true : undefined}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={MAIN_MODAL_OVERLAY_TRANSITION}
-            className="absolute inset-0 z-[104] flex h-full min-h-0 items-center justify-center overflow-hidden p-4 md:p-8"
+            className={`absolute inset-0 z-[104] flex h-full min-h-0 items-center justify-center overflow-hidden p-4 md:p-8 ${
+              isEditTrailerModalOpen ? 'pointer-events-none cursor-default' : ''
+            }`}
           >
             {/** 预告片叠层：纯视觉压暗与模糊，不命中指针。 */}
             <div
@@ -6859,7 +6862,7 @@ export default function App() {
             />
             {/** 预告片叠层：空白处点按关闭，并阻断穿透滚动。 */}
             <div
-              className="absolute inset-0 z-[1] cursor-pointer"
+              className="absolute inset-0 z-[1] cursor-default"
               onClick={(e) => {
                 if (e.target !== e.currentTarget) return;
                 setSelectedMovie(null);
@@ -7374,7 +7377,7 @@ export default function App() {
               }
               addMovieBackdropCloseArmedRef.current = false;
             }}
-            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -7787,7 +7790,7 @@ export default function App() {
               }
               editTrailerBackdropCloseArmedRef.current = false;
             }}
-            className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
