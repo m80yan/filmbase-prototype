@@ -6729,7 +6729,7 @@ export default function App() {
           >
             {/** 预告片叠层：纯视觉压暗与模糊，不命中指针。 */}
             <div
-              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-md"
+              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-[6px]"
               aria-hidden
             />
             {/** 预告片叠层：空白处点按关闭，并阻断穿透滚动。 */}
@@ -6833,7 +6833,7 @@ export default function App() {
           >
             {/** 海报预览：纯视觉压暗与模糊，不命中指针。 */}
             <div
-              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-md"
+              className="pointer-events-none absolute inset-0 z-0 bg-black/35 backdrop-blur-[6px]"
               aria-hidden
             />
             {/** 海报预览：空白处点按关闭；滚轮/触摸仅在此层拦截穿透滚动。 */}
@@ -7287,7 +7287,7 @@ export default function App() {
               }
               addMovieBackdropCloseArmedRef.current = false;
             }}
-            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/45 p-4 backdrop-blur-[6px] md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -7637,7 +7637,7 @@ export default function App() {
               }
               deleteMovieBackdropCloseArmedRef.current = false;
             }}
-            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/45 p-4 backdrop-blur-[6px] md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -7704,7 +7704,7 @@ export default function App() {
               }
               editTrailerBackdropCloseArmedRef.current = false;
             }}
-            className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/35 p-4 backdrop-blur-md md:p-8"
+            className="absolute inset-0 z-[107] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/25 p-4 md:p-8"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
