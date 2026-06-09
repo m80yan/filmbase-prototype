@@ -5087,7 +5087,7 @@ export default function App() {
               width={14}
               height={14}
               className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
-                isBackgroundInert ? 'opacity-[0.15]' : 'opacity-100'
+                isBackgroundInert ? 'opacity-10' : 'opacity-40'
               }`}
               aria-hidden
             />
@@ -5097,7 +5097,9 @@ export default function App() {
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-focus-primary w-full bg-black/20 border border-white/10 rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all placeholder:text-white/20 text-white shadow-inner"
+              className={`input-focus-primary w-full bg-black/20 border border-white/10 rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner ${
+                isBackgroundInert ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
+              }`}
             />
             {searchQuery && (
               <ClearSearchButton
@@ -7169,7 +7171,9 @@ export default function App() {
                       alt=""
                       width={16}
                       height={16}
-                      className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none opacity-100"
+                      className={`pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none ${
+                        isAdding ? 'opacity-10' : 'opacity-40'
+                      }`}
                       decoding="async"
                       aria-hidden
                     />
@@ -7234,7 +7238,9 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className={`input-focus-primary w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors placeholder:text-white/20 disabled:opacity-50 ${
+                      className={`input-focus-primary w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors disabled:focus:border-white/10 ${
+                        isAdding ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
+                      } ${
                         newMovieTitle ? 'pr-10' : 'pr-3'
                       }`}
                     />
