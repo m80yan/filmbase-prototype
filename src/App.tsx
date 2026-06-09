@@ -770,8 +770,18 @@ function getPreviewDisplayScaleFromSlider(
  */
 const POSTER_PREVIEW_LAYOUT_PAD_PX = 0;
 
-/** 网格 → 全屏预览 hero 动画：起点/终点视口矩形（px）。 */
+/** 海报来源 → 全屏预览 hero 动画：矩形（px）。 */
 type PreviewHeroRect = { left: number; top: number; width: number; height: number };
+
+type PreviewSourceHeroRequest = {
+  sourceViewportRect: PreviewHeroRect;
+  naturalSize: { w: number; h: number };
+};
+
+type PreviewSourceHeroGeometry = {
+  sourceLocalRect: PreviewHeroRect;
+  targetLocalRect: PreviewHeroRect;
+};
 
 /**
  * @param rect `DOMRect` / `DOMRectReadOnly`
@@ -1891,6 +1901,12 @@ export default function App() {
   /** 入场 CSS transition 是否已启动（双 rAF 后置 true）。 */
   const [posterPreviewEnterRun, setPosterPreviewEnterRun] = useState(false);
   const posterPreviewEnterFinishOnceRef = useRef(false);
+  const [previewSourceHeroRequest, setPreviewSourceHeroRequest] =
+    useState<PreviewSourceHeroRequest | null>(null);
+  const [previewSourceHeroGeometry, setPreviewSourceHeroGeometry] =
+    useState<PreviewSourceHeroGeometry | null>(null);
+  const [activePreviewSourceKey, setActivePreviewSourceKey] =
+    useState<string | null>(null);
   const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [previewPan, setPreviewPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPreviewDragging, setIsPreviewDragging] = useState(false);
@@ -1913,6 +1929,8 @@ export default function App() {
   const previewPointerOverImgRef = useRef(false);
   /** 主内容滚动区（海报预览 overlay 仅覆盖此区域，用于量测可用宽高）。 */
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
+  /** Preview 海报实际定位框；hero 的 source / target 均换算到此框的本地坐标。 */
+  const posterPreviewFrameRef = useRef<HTMLDivElement>(null);
   /** 供 pointer 拖拽时读取最新布局（避免闭包陈旧）。 */
   const posterPreviewLayoutRef = useRef<{
     maxW: number;
@@ -2747,6 +2765,9 @@ export default function App() {
     setIsPreviewDragging(false);
     setIsPosterPreviewEnterAnimating(false);
     setPosterPreviewEnterRun(false);
+    setPreviewSourceHeroRequest(null);
+    setPreviewSourceHeroGeometry(null);
+    setActivePreviewSourceKey(null);
     posterPreviewEnterFinishOnceRef.current = false;
     previewDragRef.current = {
       pointerId: null,
@@ -2766,6 +2787,7 @@ export default function App() {
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       if (isPosterPreviewOpen) {
+        if (isPosterPreviewEnterAnimating) return;
         if (isInfoMode || isFilmDnaOpen) return;
         const awaiting =
           isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying;
@@ -2779,6 +2801,7 @@ export default function App() {
     },
     [
       isPosterPreviewOpen,
+      isPosterPreviewEnterAnimating,
       isInfoMode,
       isFilmDnaOpen,
       isScopedPosterUploadOpen,
@@ -2795,6 +2818,7 @@ export default function App() {
     if (!isPosterPreviewOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (isPosterPreviewEnterAnimating) return;
       if (isFilmDnaOpen) {
         e.preventDefault();
         exitFilmDnaMode();
@@ -2819,6 +2843,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     isPosterPreviewOpen,
+    isPosterPreviewEnterAnimating,
     isFilmDnaOpen,
     isInfoMode,
     isScopedPosterUploadOpen,
@@ -2862,6 +2887,7 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.key !== 'z' && e.key !== 'Z') return;
+      if (isPosterPreviewEnterAnimating) return;
       if (isInfoMode || isFilmDnaOpen) return;
       const ae = document.activeElement;
       if (
@@ -2901,7 +2927,7 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown);
       previewPointerOverImgRef.current = false;
     };
-  }, [isPosterPreviewOpen, isInfoMode, isFilmDnaOpen]);
+  }, [isPosterPreviewOpen, isPosterPreviewEnterAnimating, isInfoMode, isFilmDnaOpen]);
 
   /** 主区内预告片 overlay 打开时 ESC 关闭（Edit Trailer URL 弹窗占用 ESC 时跳过）。 */
   useEffect(() => {
@@ -2931,22 +2957,27 @@ export default function App() {
   }, [isEditTrailerModalOpen, isEditingTrailer]);
 
   /**
-   * 从海报区域 DOM 取 `getBoundingClientRect()` 再打开预览（列表/网格共用 hero）。
+   * 从海报区域 DOM 取 `getBoundingClientRect()` 再打开预览。
    *
    * @param movie 当前影片
    * @param element 列表缩略图外壳或网格海报外壳等
+   * @param enableSourceHero 是否启用可见海报矩形到 Fit 的共享动画
    */
-  const openPosterPreviewFromElement = (movie: Movie, element: Element | null | undefined) => {
-    const rect = element?.getBoundingClientRect() ?? null;
+  const openPosterPreviewFromElement = (
+    movie: Movie,
+    element: Element | null | undefined,
+    enableSourceHero = false,
+  ) => {
     const img =
       element instanceof HTMLImageElement
         ? element
-        : (element?.querySelector?.('img') as HTMLImageElement | null);
+        : (element?.querySelector?.('img[alt]:not([alt=""])') as HTMLImageElement | null);
+    const rect = (img ?? element)?.getBoundingClientRect() ?? null;
     let naturalHint: { w: number; h: number } | null = null;
     if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
       naturalHint = { w: img.naturalWidth, h: img.naturalHeight };
     }
-    openPosterPreview(movie, rect, naturalHint);
+    openPosterPreview(movie, rect, naturalHint, enableSourceHero);
   };
 
   /**
@@ -2954,11 +2985,13 @@ export default function App() {
    * 传入有效 `heroFromRect` 时播放 hero 后再露出完整预览层内容。
    *
    * @param naturalHint 点击处海报 `naturalWidth/Height`；缺失时用 `heroFromRect` 宽高比推算。
+   * @param enableSourceHero 使用真实海报矩形到冻结 Fit 矩形的动画
    */
   const openPosterPreview = (
     movie: Movie,
     heroFromRect?: DOMRect | null,
     naturalHint?: { w: number; h: number } | null,
+    enableSourceHero = false,
   ) => {
     posterPreviewEnterFinishOnceRef.current = false;
     const hasHeroVp =
@@ -2977,15 +3010,48 @@ export default function App() {
             }
           : null;
     const hasEnterAnim = Boolean(hasHeroVp && resolvedNatural);
+    let sourceHeroRequest: PreviewSourceHeroRequest | null = null;
+    let initialSliderPercent: number | null = null;
+    const hostRect = mainPreviewHostRef.current?.getBoundingClientRect();
+    if (
+      enableSourceHero &&
+      hasHeroVp &&
+      heroFromRect &&
+      naturalHint
+    ) {
+      sourceHeroRequest = {
+        sourceViewportRect: {
+          left: heroFromRect.left,
+          top: heroFromRect.top,
+          width: heroFromRect.width,
+          height: heroFromRect.height,
+        },
+        naturalSize: naturalHint,
+      };
+      if (hostRect && hostRect.width >= 40 && hostRect.height >= 40) {
+        const frame = computePreviewPosterFrameDims(
+          hostRect,
+          naturalHint.w,
+          naturalHint.h,
+          100,
+          POSTER_PREVIEW_LAYOUT_PAD_PX,
+        );
+        initialSliderPercent = getPreviewSliderMinPercent(frame.sFill);
+      }
+    }
+    setPreviewSourceHeroRequest(sourceHeroRequest);
+    setPreviewSourceHeroGeometry(null);
+    setActivePreviewSourceKey(sourceHeroRequest ? movie.id : null);
 
     if (hasEnterAnim && resolvedNatural) {
       setPosterPreviewEnterRun(false);
       setIsPosterPreviewEnterAnimating(true);
       setPreviewNaturalSize(resolvedNatural);
       setPreviewPan({ x: 0, y: 0 });
-      const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
-      const hostRect = mainPreviewHostRef.current?.getBoundingClientRect();
-      if (hostRect && hostRect.width >= 40 && hostRect.height >= 40) {
+      if (initialSliderPercent != null) {
+        setPreviewSliderPercent(initialSliderPercent);
+      } else if (hostRect && hostRect.width >= 40 && hostRect.height >= 40) {
+        const pad = POSTER_PREVIEW_LAYOUT_PAD_PX;
         const maxW = Math.max(80, hostRect.width - pad * 2);
         const maxH = Math.max(80, hostRect.height - pad * 2);
         const sFill = getPreviewFillScale(resolvedNatural.w, resolvedNatural.h, maxW, maxH);
@@ -3012,15 +3078,40 @@ export default function App() {
     posterPreviewEnterFinishOnceRef.current = true;
     setIsPosterPreviewEnterAnimating(false);
     setPosterPreviewEnterRun(false);
+    setPreviewSourceHeroRequest(null);
+    setPreviewSourceHeroGeometry(null);
+    setActivePreviewSourceKey(null);
   }, []);
 
   /**
-   * 预览布局就绪后在容器内启动 fade+scale（双 rAF），避免与首帧 layout 竞态。
+   * Preview frame 挂载后先把 viewport source 换算为 frame-local FLIP 几何，再双 rAF 启动 transition。
    */
   useLayoutEffect(() => {
     if (!isPosterPreviewEnterAnimating || !previewNaturalSize) return;
     if (posterPreviewEnterRun) return;
-    if (!posterPreviewLayoutRef.current) return;
+    const layout = posterPreviewLayoutRef.current;
+    if (!layout) return;
+
+    if (previewSourceHeroRequest && !previewSourceHeroGeometry) {
+      const frameRect = posterPreviewFrameRef.current?.getBoundingClientRect();
+      if (!frameRect || frameRect.width < 1 || frameRect.height < 1) return;
+      const source = previewSourceHeroRequest.sourceViewportRect;
+      setPreviewSourceHeroGeometry({
+        sourceLocalRect: {
+          left: source.left - frameRect.left,
+          top: source.top - frameRect.top,
+          width: source.width,
+          height: source.height,
+        },
+        targetLocalRect: {
+          left: (frameRect.width - layout.dispW) / 2,
+          top: (frameRect.height - layout.dispH) / 2,
+          width: layout.dispW,
+          height: layout.dispH,
+        },
+      });
+      return;
+    }
 
     let cancelled = false;
     let innerId = 0;
@@ -3037,6 +3128,8 @@ export default function App() {
   }, [
     isPosterPreviewEnterAnimating,
     previewNaturalSize,
+    previewSourceHeroRequest,
+    previewSourceHeroGeometry,
     previewLayoutTick,
     floatingShellSizePx.w,
     floatingShellSizePx.h,
@@ -4393,13 +4486,13 @@ export default function App() {
 
   /** Info / Film DNA 或与待 Apply 一致：侧栏遮罩、顶栏 Back/缩放/上传、背景点按关闭等同锁态。 */
   const isPosterPreviewChromeLocked =
-    isAwaitingPosterApplyConfirm || isPosterPreviewSubModeActive;
+    isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isPosterPreviewSubModeActive;
 
   /** 锁定或 min=max 时禁用滑块与 ±；Info / Film DNA 模式下亦禁用。 */
   const isPreviewZoomSliderDisabled =
     isPreviewZoomSliderLocked || isPreviewZoomSliderNoRange;
   const isPosterPreviewZoomControlsDisabled =
-    isPreviewZoomSliderDisabled || isPosterPreviewSubModeActive;
+    isPosterPreviewEnterAnimating || isPreviewZoomSliderDisabled || isPosterPreviewSubModeActive;
 
   /** 主内容区内全屏浮层：海报预览或预告片（与侧栏/顶栏分离）。 */
   const isTrailerOverlayInMain = Boolean(selectedMovie && modalMode === 'trailer');
@@ -4744,7 +4837,7 @@ export default function App() {
 
   /** 顶部 chrome 区域拖拽窗口（非全屏 `open`）。 */
   const canDragFilmbaseChrome =
-    windowMode === 'open' && !isFullscreenLayout && !trafficChromeBusy && !isBackgroundInert;
+    windowMode === 'open' && !isFullscreenLayout && !trafficChromeBusy;
 
   /** 右下角调整外壳尺寸（非全屏、非嵌入 iframe；与拖拽可用性一致）。 */
   const canResizeFilmbaseShell = canDragFilmbaseChrome && !detectEmbeddedInIframe();
@@ -5519,6 +5612,7 @@ export default function App() {
                   <button
                     type="button"
                     disabled={
+                      isPosterPreviewEnterAnimating ||
                       isAwaitingPosterApplyConfirm ||
                       !posterPreviewMovie.title?.trim() ||
                       (isFilmDnaOpen && filmDnaStatus === 'loading')
@@ -5534,6 +5628,7 @@ export default function App() {
                     aria-label={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
                     aria-pressed={isFilmDnaOpen}
                     className={`group/filmdna relative rounded-md p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isPosterPreviewEnterAnimating ||
                       isAwaitingPosterApplyConfirm ||
                       !posterPreviewMovie.title?.trim() ||
                       (isFilmDnaOpen && filmDnaStatus === 'loading')
@@ -5544,7 +5639,8 @@ export default function App() {
                     }`}
                   >
                     <span className="relative block h-[20px] w-[20px] shrink-0">
-                      {isAwaitingPosterApplyConfirm ||
+                      {isPosterPreviewEnterAnimating ||
+                      isAwaitingPosterApplyConfirm ||
                       !posterPreviewMovie.title?.trim() ||
                       (isFilmDnaOpen && filmDnaStatus === 'loading') ? (
                         <img
@@ -5584,7 +5680,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    disabled={isAwaitingPosterApplyConfirm || isFilmDnaOpen}
+                    disabled={isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isFilmDnaOpen}
                     onPointerDownCapture={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -5595,7 +5691,7 @@ export default function App() {
                     aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
                     aria-pressed={isInfoMode}
                     className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
-                      isAwaitingPosterApplyConfirm || isFilmDnaOpen
+                      isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isFilmDnaOpen
                         ? 'text-white/25'
                         : isInfoMode
                           ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
@@ -5603,7 +5699,7 @@ export default function App() {
                     }`}
                   >
                     <span className="relative block h-[20px] w-[20px] shrink-0">
-                      {isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
+                      {isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
                         <img draggable={false}
                           src="/icons/info.svg"
                           alt=""
@@ -6491,7 +6587,10 @@ export default function App() {
                     setSelectedMovie(movie);
                     setModalMode('poster');
                   }}
-                  onOpenPosterPreview={(el) => openPosterPreviewFromElement(movie, el)}
+                  isPreviewEnterSourceActive={activePreviewSourceKey === movie.id}
+                  onOpenPosterPreview={(el, enableSourceHero) =>
+                    openPosterPreviewFromElement(movie, el, enableSourceHero)
+                  }
                   onRefreshPosterSignedUrl={refreshPosterSignedUrlOnce}
                 />
               ))}
@@ -6578,7 +6677,10 @@ export default function App() {
                     setSelectedMovie(movie);
                     setModalMode('poster');
                   }}
-                  onOpenPosterPreview={(el) => openPosterPreviewFromElement(movie, el)}
+                  isPreviewEnterSourceActive={activePreviewSourceKey === movie.id}
+                  onOpenPosterPreview={(el, enableSourceHero) =>
+                    openPosterPreviewFromElement(movie, el, enableSourceHero)
+                  }
                   onRefreshPosterSignedUrl={refreshPosterSignedUrlOnce}
                 />
               ))}
@@ -6726,7 +6828,7 @@ export default function App() {
           <motion.div
             ref={posterPreviewOverlayRef}
             tabIndex={-1}
-            initial={{ opacity: 0 }}
+            initial={previewSourceHeroRequest ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-[105] flex h-full min-h-0 items-center justify-center overflow-hidden outline-none focus:outline-none focus-visible:outline-none"
@@ -6741,6 +6843,7 @@ export default function App() {
               className="absolute inset-0 z-[1]"
               onClick={(e) => {
                 if (e.target !== e.currentTarget) return;
+                if (isPosterPreviewEnterAnimating) return;
                 if (isAwaitingPosterApplyConfirm || isPosterPreviewSubModeActive) return;
                 closePosterPreview();
               }}
@@ -6753,6 +6856,7 @@ export default function App() {
             />
             <div className="pointer-events-none relative z-[2] box-border flex h-full min-h-0 w-full max-w-full items-center justify-center px-4 sm:px-6">
               <div
+                ref={posterPreviewFrameRef}
                 className="pointer-events-none relative shrink-0 overflow-hidden"
                 style={
                   posterPreviewLayout
@@ -6768,6 +6872,7 @@ export default function App() {
                       : { width: 'min(100%, 560px)', height: 'min(85dvh, 920px)' }
                 }
                 onWheel={(e) => {
+                  if (isPosterPreviewEnterAnimating) return;
                   if (isPosterPreviewSubModeActive) return;
                   const L = posterPreviewLayoutRef.current;
                   if (!L?.needsPan) return;
@@ -6797,8 +6902,42 @@ export default function App() {
                     onPointerLeave={() => {
                       previewPointerOverImgRef.current = false;
                     }}
-                    className={`max-h-none max-w-none select-none object-contain${isPosterPreviewSubModeActive ? ' pointer-events-none' : ' pointer-events-auto'}`}
+                    className={`max-h-none max-w-none select-none object-contain${isPosterPreviewEnterAnimating || isPosterPreviewSubModeActive ? ' pointer-events-none' : ' pointer-events-auto'}`}
                     style={(() => {
+                      if (
+                        previewSourceHeroRequest &&
+                        !previewSourceHeroGeometry &&
+                        isPosterPreviewEnterAnimating
+                      ) {
+                        return { opacity: 0, pointerEvents: 'none' as const };
+                      }
+                      if (previewSourceHeroGeometry && isPosterPreviewEnterAnimating) {
+                        const { sourceLocalRect, targetLocalRect } = previewSourceHeroGeometry;
+                        const invertX = sourceLocalRect.left - targetLocalRect.left;
+                        const invertY = sourceLocalRect.top - targetLocalRect.top;
+                        const invertScaleX = sourceLocalRect.width / targetLocalRect.width;
+                        const invertScaleY = sourceLocalRect.height / targetLocalRect.height;
+                        return {
+                          position: 'absolute' as const,
+                          left: targetLocalRect.left,
+                          top: targetLocalRect.top,
+                          width: targetLocalRect.width,
+                          height: targetLocalRect.height,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          objectFit: 'cover' as const,
+                          opacity: 1,
+                          transform: posterPreviewEnterRun
+                            ? 'none'
+                            : `translate(${invertX}px, ${invertY}px) scale(${invertScaleX}, ${invertScaleY})`,
+                          transformOrigin: 'top left',
+                          transition: posterPreviewEnterRun
+                            ? `transform ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}`
+                            : 'none',
+                          willChange: 'transform',
+                          cursor: 'default',
+                        };
+                      }
                       const enter = getPosterPreviewEnterVisual(
                         isPosterPreviewEnterAnimating,
                         posterPreviewEnterRun,
@@ -6868,15 +7007,23 @@ export default function App() {
                     })()}
                     onTransitionEnd={(e) => {
                       if (!isPosterPreviewEnterAnimating) return;
+                      if (!posterPreviewEnterRun) return;
                       if (e.target !== e.currentTarget) return;
-                      if (e.propertyName !== 'opacity' && e.propertyName !== 'transform') return;
+                      if (
+                        e.propertyName !== 'opacity' &&
+                        e.propertyName !== 'transform' &&
+                        e.propertyName !== 'left' &&
+                        e.propertyName !== 'top' &&
+                        e.propertyName !== 'width' &&
+                        e.propertyName !== 'height'
+                      ) return;
                       finishPosterPreviewEnter();
                     }}
                     onLoad={(e) => {
-                      if (isPosterPreviewEnterAnimating) return;
                       const el = e.currentTarget;
                       const loadedSrc = el.currentSrc?.trim() ?? '';
                       if (loadedSrc) setPreviewPosterLiveSrc(loadedSrc);
+                      if (isPosterPreviewEnterAnimating && previewNaturalSize) return;
                       const nw = el.naturalWidth;
                       const nh = el.naturalHeight;
                       if (nw <= 0 || nh <= 0) return;
@@ -6896,6 +7043,7 @@ export default function App() {
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (isPosterPreviewEnterAnimating) return;
                       if (isPosterPreviewSubModeActive) return;
                       if (previewDragRef.current.moved) {
                         previewDragRef.current.moved = false;
@@ -6940,6 +7088,7 @@ export default function App() {
                       setPreviewPan({ x: nextPanX, y: nextPanY });
                     }}
                     onPointerDown={(e) => {
+                      if (isPosterPreviewEnterAnimating) return;
                       if (isPosterPreviewSubModeActive) return;
                       const L = posterPreviewLayoutRef.current;
                       if (!L?.needsPan) return;
@@ -7869,8 +8018,13 @@ interface MovieCardProps {
   onRatingChange: (rating: number) => void;
   onPlayTrailer: () => void;
   onShowPoster: () => void;
-  /** 全屏大图预览（列表点海报 / 网格 hover 预览热区）；传入海报外壳元素以启用 hero。 */
-  onOpenPosterPreview: (posterSourceElement: HTMLElement | null) => void;
+  /** 当前卡片/缩略图是否为正在进入 Preview 的来源。 */
+  isPreviewEnterSourceActive: boolean;
+  /** 全屏大图预览（列表点海报 / 网格 hover 预览热区）。 */
+  onOpenPosterPreview: (
+    posterSourceElement: HTMLElement | null,
+    enableSourceHero: boolean,
+  ) => void;
   /**
    * Storage 海报专用：当 signed URL 过期导致 `img` 加载失败时，尝试为该 `poster_storage_path`
    * 重新签名一次并更新该片的 `posterUrl`。
@@ -8215,6 +8369,7 @@ function MovieCard({
   onRatingChange,
   onPlayTrailer,
   onShowPoster,
+  isPreviewEnterSourceActive,
   onOpenPosterPreview,
   onRefreshPosterSignedUrl,
   registerLibraryItemEl,
@@ -8731,7 +8886,7 @@ function MovieCard({
                 ? undefined
                 : (e) => {
                     e.stopPropagation();
-                    onOpenPosterPreview(listPosterShellRef.current);
+                    onOpenPosterPreview(listPosterShellRef.current, true);
                   }
             }
           >
@@ -9031,7 +9186,12 @@ function MovieCard({
         ) : null}
         {/* Hover Metadata Overlay */}
         <div
-          onClick={() => onOpenPosterPreview(gridPosterShellRef.current)}
+          onClick={() => onOpenPosterPreview(gridPosterShellRef.current, true)}
+          style={
+            isPreviewEnterSourceActive
+              ? { opacity: 0, pointerEvents: 'none' }
+              : undefined
+          }
           className={`absolute inset-0 z-20 flex flex-col justify-end bg-black/75 p-4 opacity-0 transition-opacity space-y-2 ${
             isEditing
               ? 'pointer-events-none'
@@ -9156,7 +9316,7 @@ function MovieCard({
             aria-label="Open film details"
             onClick={(e) => {
               e.stopPropagation();
-              onOpenPosterPreview(gridPosterShellRef.current);
+              onOpenPosterPreview(gridPosterShellRef.current, true);
             }}
             style={{
               width: GRID_POSTER_PREVIEW_HIT_PX,
