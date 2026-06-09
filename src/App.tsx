@@ -3354,7 +3354,6 @@ export default function App() {
       >
         <GenreSidebarItem
           label={genre}
-          count={genreMovieCounts.get(genre) ?? 0}
           active={selectedGenres.includes(genre)}
           onClick={() => {
             setIsRecentlyAddedFilter(false);
@@ -4024,6 +4023,9 @@ export default function App() {
     setSearchQuery('');
     setIsRecentlyAddedFilter(false);
   };
+
+  const activeFilterCount =
+    selectedGenres.length + selectedYears.length + selectedRatings.length;
 
   const filteredMovies = useMemo(() => {
     const filtered = movies.filter(movie => {
@@ -5112,8 +5114,23 @@ export default function App() {
           </div>
         </div>
         <div
+          className={`flex h-6 min-w-[232px] flex-shrink-0 items-center justify-between px-6 text-[11px] font-medium text-white/40 ${
+            isBackgroundInert ? 'opacity-[0.2]' : ''
+          }`}
+        >
+          {activeFilterCount > 0 ? (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="ml-auto text-white/40 transition-colors hover:text-white/80"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+        <div
           ref={sidebarScrollRef}
-          className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 mt-6 pb-2 min-w-[232px] [scrollbar-gutter:stable]"
+          className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable]"
         >
           <nav className="space-y-2">
             <motion.div
@@ -5130,7 +5147,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Genre</span>
                 <motion.div
@@ -5236,7 +5253,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Year</span>
                 <motion.div
@@ -5296,7 +5313,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>My Rating</span>
                 <motion.div
@@ -5460,6 +5477,11 @@ export default function App() {
 
           {/* Toolbar：海报预览打开时切换为预览模式控件；左右槽固定宽度使 slider 水平位置不变 */}
           <div className="relative flex h-12 shrink-0 items-center justify-between px-8 [box-shadow:0px_2px_0px_0px_rgba(23,23,23,1)]">
+          {!isPosterPreviewOpen && activeFilterCount > 0 ? (
+            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums">
+              {`${filteredMovies.length} ${filteredMovies.length === 1 ? 'film' : 'films'} found / ${activeFilterCount} ${activeFilterCount === 1 ? 'filter' : 'filters'}`}
+            </p>
+          ) : null}
           <div className="relative z-10 flex shrink-0 items-center gap-8">
             {isPosterPreviewOpen ? (
               <>
@@ -8116,7 +8138,6 @@ function SidebarYearTimelineFilterRow({
           }`}
         />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {active ? <span className="absolute right-[35px] shrink-0">{count}</span> : null}
       </button>
     </div>
   );
@@ -8174,11 +8195,6 @@ function SidebarMyRatingFilterRow({
           {hoverUpper}
         </span>
       </div>
-      {active ? (
-        <span className="absolute right-[35px] top-1/2 flex w-4 shrink-0 -translate-y-1/2 justify-end text-right leading-none transition-[right] duration-150 ease-out group-hover/sidebarrow:right-2 group-hover/sidebarrow:justify-center group-hover/sidebarrow:text-center">
-          {count}
-        </span>
-      ) : null}
     </button>
   );
 }
