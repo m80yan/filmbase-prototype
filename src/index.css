@@ -130,7 +130,8 @@
 }
 
 .sidebar-gradient {
-  background: #1f1f1f;
+  --film-sidebar-bg: #1F1F1F;
+  background: var(--film-sidebar-bg);
 }
 
 .genre-show-more,

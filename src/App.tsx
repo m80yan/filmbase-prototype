@@ -5130,7 +5130,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[#1F1F1F] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Genre</span>
                 <motion.div
@@ -5236,7 +5236,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[#1F1F1F] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Year</span>
                 <motion.div
@@ -5296,7 +5296,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[#1F1F1F] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 items-center justify-between w-full pl-2.5 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>My Rating</span>
                 <motion.div
@@ -5492,8 +5492,128 @@ export default function App() {
                       />
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    disabled={
+                      isAwaitingPosterApplyConfirm ||
+                      !posterPreviewMovie.title?.trim() ||
+                      (isFilmDnaOpen && filmDnaStatus === 'loading')
+                    }
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!posterPreviewMovie.title?.trim()) return;
+                      if (isFilmDnaOpen && filmDnaStatus === 'loading') return;
+                      toggleFilmDnaMode(posterPreviewMovie);
+                    }}
+                    title={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
+                    aria-label={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
+                    aria-pressed={isFilmDnaOpen}
+                    className={`group/filmdna relative rounded-md p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isAwaitingPosterApplyConfirm ||
+                      !posterPreviewMovie.title?.trim() ||
+                      (isFilmDnaOpen && filmDnaStatus === 'loading')
+                        ? 'text-white/25'
+                        : isFilmDnaOpen
+                          ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                          : 'text-white/40 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <span className="relative block h-[20px] w-[20px] shrink-0">
+                      {isAwaitingPosterApplyConfirm ||
+                      !posterPreviewMovie.title?.trim() ||
+                      (isFilmDnaOpen && filmDnaStatus === 'loading') ? (
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : isFilmDnaOpen ? (
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna-active.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/filmdna:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <img
+                          draggable={false}
+                          src="/icons/film-dna.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/filmdna:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isAwaitingPosterApplyConfirm || isFilmDnaOpen}
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isFilmDnaOpen) exitFilmDnaMode();
+                      setIsInfoMode((v) => !v);
+                    }}
+                    title={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    aria-pressed={isInfoMode}
+                    className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
+                      isAwaitingPosterApplyConfirm || isFilmDnaOpen
+                        ? 'text-white/25'
+                        : isInfoMode
+                          ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
+                          : 'text-white/40 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <span className="relative block h-[20px] w-[20px] shrink-0">
+                      {isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
+                        <img draggable={false}
+                          src="/icons/info.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : isInfoMode ? (
+                        <img draggable={false}
+                          src="/icons/info-active.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/infoprev:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      ) : (
+                        <img draggable={false}
+                          src="/icons/info.svg"
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/infoprev:opacity-100"
+                          decoding="async"
+                          aria-hidden
+                        />
+                      )}
+                    </span>
+                  </button>
                 </div>
-                <div className="flex min-w-0 items-center gap-3">
+                <div className="-ml-[22px] flex min-w-0 items-center gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -5581,7 +5701,7 @@ export default function App() {
                         height={POSTER_SIZE_SLIDER_THUMB_PX}
                         className="pointer-events-none absolute top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 select-none"
                         style={{
-                          left: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${previewZoomSliderNorm})`,
+                          left: `${previewZoomSliderNorm * 100}%`,
                         }}
                         decoding="async"
                         aria-hidden
@@ -5857,126 +5977,6 @@ export default function App() {
                   (Boolean(pendingPosterUrl) || Boolean(posterUploadError) || isPosterApplying);
                 return (
                 <>
-                <button
-                  type="button"
-                  disabled={
-                    isAwaitingPosterApplyConfirm ||
-                    !posterPreviewMovie.title?.trim() ||
-                    (isFilmDnaOpen && filmDnaStatus === 'loading')
-                  }
-                  onPointerDownCapture={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!posterPreviewMovie.title?.trim()) return;
-                    if (isFilmDnaOpen && filmDnaStatus === 'loading') return;
-                    toggleFilmDnaMode(posterPreviewMovie);
-                  }}
-                  title={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
-                  aria-label={isFilmDnaOpen ? 'Exit Film DNA mode' : 'Film DNA'}
-                  aria-pressed={isFilmDnaOpen}
-                  className={`group/filmdna relative rounded-md p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
-                    isAwaitingPosterApplyConfirm ||
-                    !posterPreviewMovie.title?.trim() ||
-                    (isFilmDnaOpen && filmDnaStatus === 'loading')
-                      ? 'text-white/25'
-                      : isFilmDnaOpen
-                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
-                        : 'text-white/40 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <span className="relative block h-[20px] w-[20px] shrink-0">
-                    {isAwaitingPosterApplyConfirm ||
-                    !posterPreviewMovie.title?.trim() ||
-                    (isFilmDnaOpen && filmDnaStatus === 'loading') ? (
-                      <img
-                        draggable={false}
-                        src="/icons/film-dna.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : isFilmDnaOpen ? (
-                      <img
-                        draggable={false}
-                        src="/icons/film-dna-active.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/filmdna:opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <img
-                        draggable={false}
-                        src="/icons/film-dna.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/filmdna:opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    )}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isAwaitingPosterApplyConfirm || isFilmDnaOpen}
-                  onPointerDownCapture={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isFilmDnaOpen) exitFilmDnaMode();
-                    setIsInfoMode((v) => !v);
-                  }}
-                  title={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                  aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                  aria-pressed={isInfoMode}
-                  className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
-                    isAwaitingPosterApplyConfirm || isFilmDnaOpen
-                      ? 'text-white/25'
-                      : isInfoMode
-                        ? 'bg-[#EA9794] text-black hover:bg-[#E08A87]'
-                        : 'text-white/40 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <span className="relative block h-[20px] w-[20px] shrink-0">
-                    {isAwaitingPosterApplyConfirm || isFilmDnaOpen ? (
-                      <img draggable={false}
-                        src="/icons/info.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] shrink-0 opacity-15"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : isInfoMode ? (
-                      <img draggable={false}
-                        src="/icons/info-active.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] opacity-75 transition-opacity group-hover/infoprev:opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    ) : (
-                      <img draggable={false}
-                        src="/icons/info.svg"
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="pointer-events-none h-[20px] w-[20px] opacity-40 transition-opacity group-hover/infoprev:opacity-100"
-                        decoding="async"
-                        aria-hidden
-                      />
-                    )}
-                  </span>
-                </button>
                 <button
                   type="button"
                   disabled={isPosterPreviewChromeLocked}
@@ -8756,7 +8756,7 @@ function MovieCard({
                 e.stopPropagation();
                 onPlayTrailer();
               }}
-              className="cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl transition-all"
+              className="cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap z-10 shadow-xl transition-all active:translate-y-[2px]"
             >
               Play Trailer
             </button>
@@ -9122,7 +9122,7 @@ function MovieCard({
               e.stopPropagation();
               onPlayTrailer();
             }}
-            className="w-full cursor-pointer py-2.5 mt-2 rounded-full bg-white/80 hover:bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-xl"
+            className="w-full cursor-pointer py-2.5 mt-2 rounded-full bg-white/80 hover:bg-white text-black font-bold text-[12px] tracking-widest transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-xl active:translate-y-[2px]"
           >
             Play Trailer
           </button>
@@ -9150,7 +9150,7 @@ function MovieCard({
                 alt=""
                 width={24}
                 height={24}
-                className="pointer-events-none h-6 w-6 -translate-x-1 object-contain opacity-80 transition-opacity group-hover/posterzoom:opacity-100"
+                className="pointer-events-none h-6 w-6 -translate-x-1 object-contain opacity-80 transition-opacity group-hover/posterzoom:opacity-100 group-active/posterzoom:opacity-80"
                 decoding="async"
                 aria-hidden
               />
