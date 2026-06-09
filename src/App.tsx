@@ -4503,6 +4503,7 @@ export default function App() {
     isFilmDnaOpen ||
     isAddModalOpen ||
     isEditTrailerModalOpen;
+  const isDestructiveConfirmationOpen = Boolean(deleteMovieConfirm);
   /**
    * 预告片播放或 Add Movie 弹窗打开时锁定主工具栏（Grid/List、海报尺寸、编辑/新增），
    * 用户需先完成浮层内任务或关闭弹窗。
@@ -5067,13 +5068,12 @@ export default function App() {
       <div
         className={`absolute left-0 top-0 z-[200] flex cursor-default items-center gap-3 pl-4 pr-2 ${
           isFullscreenLayout ? 'h-14 min-h-[52px] pb-2 pt-2' : 'h-10'
-        } ${isBackgroundInert ? 'pointer-events-none' : ''}`}
-        inert={isBackgroundInert ? true : undefined}
+        }`}
         onMouseEnter={() => {
-          if (isFullscreenLayout && !isBackgroundInert) setFullscreenTrafficReveal(true);
+          if (isFullscreenLayout) setFullscreenTrafficReveal(true);
         }}
         onMouseLeave={() => {
-          if (isFullscreenLayout && !isBackgroundInert) setFullscreenTrafficReveal(false);
+          if (isFullscreenLayout) setFullscreenTrafficReveal(false);
         }}
         onPointerDownCapture={isBackgroundInert ? undefined : onShellPointerDownCloseScopedOverlays}
       >
@@ -5089,9 +5089,11 @@ export default function App() {
             defaultSrc="/icons/traffic-close.svg"
             hoverSrc="/icons/traffic-close-hover.svg"
             pressedSrc="/icons/traffic-close-pressed.svg"
-            disabledSrc={isBackgroundInert ? '/icons/traffic-light-inactive.svg' : undefined}
+            disabledSrc={
+              isDestructiveConfirmationOpen ? '/icons/traffic-light-inactive.svg' : undefined
+            }
             onClick={handleTrafficClose}
-            disabled={trafficLightsDisabled || isBackgroundInert}
+            disabled={trafficLightsDisabled || isDestructiveConfirmationOpen}
           />
           <TrafficLightButton
             label="Minimize window"
@@ -5099,23 +5101,18 @@ export default function App() {
             hoverSrc="/icons/traffic-minimize-hover.svg"
             pressedSrc="/icons/traffic-minimize-pressed.svg"
             disabledSrc={
-              isBackgroundInert
-                ? '/icons/traffic-light-inactive.svg'
-                : windowMode === 'fullscreen'
-                  ? '/icons/traffic-minimize-disabled.svg'
-                  : undefined
+              windowMode === 'fullscreen' ? '/icons/traffic-minimize-disabled.svg' : undefined
             }
             onClick={handleTrafficMinimize}
-            disabled={trafficLightsDisabled || windowMode === 'fullscreen' || isBackgroundInert}
+            disabled={trafficLightsDisabled || windowMode === 'fullscreen'}
           />
           <TrafficLightButton
             label={isFullscreenLayout ? 'Exit fullscreen' : 'Fullscreen window'}
             defaultSrc="/icons/traffic-fullscreen.svg"
             hoverSrc="/icons/traffic-fullscreen-hover.svg"
             pressedSrc="/icons/traffic-fullscreen-pressed.svg"
-            disabledSrc={isBackgroundInert ? '/icons/traffic-light-inactive.svg' : undefined}
             onClick={handleTrafficFullscreen}
-            disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null || isBackgroundInert}
+            disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null}
           />
         </div>
         <button
@@ -5123,7 +5120,8 @@ export default function App() {
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className={`group/togglesidebar relative cursor-default p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 ${
             isFullscreenLayout ? '' : 'transition-colors'
-          } ${isBackgroundInert ? 'opacity-[0.375]' : ''}`}
+          } ${isBackgroundInert ? 'pointer-events-none opacity-[0.375]' : ''}`}
+          disabled={isBackgroundInert}
           title="Toggle Sidebar"
           aria-label="Toggle sidebar"
           style={
