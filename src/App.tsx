@@ -1124,7 +1124,7 @@ const SIDEBAR_FILTER_SECTION_REVEAL_MS = 210;
 /**
  * List 表头叠层高度（`py-4` + `min-h-5` 列标题行，px），与行滚动区 `padding-top` 一致。
  */
-const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 52;
+const LIST_VIEW_TABLE_HEADER_HEIGHT_PX = 36;
 
 /** 视图切换时：已滚动才尝试锚点映射（低于此 `scrollTop` 视为未滚动）。 */
 const VIEW_SWITCH_SCROLL_THRESHOLD_PX = 8;
@@ -3432,7 +3432,7 @@ export default function App() {
       <motion.li
         key={genre}
         data-genre-index={index}
-        className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}
+        className="w-[200px]"
         transition={genreDragFromIndex === null ? { duration: 0 } : { duration: 0.18, ease: 'easeOut' }}
         style={
           isDragged && genreDragPointerY !== null
@@ -3455,6 +3455,7 @@ export default function App() {
           iconSlug={genreLabelToIconSlug(genre)}
           onHandlePointerDown={onGenreHandlePointerDown(index)}
           isDragging={genreDragFromIndex === index}
+          isInert={isBackgroundInert}
         />
       </motion.li>
     );
@@ -5178,7 +5179,7 @@ export default function App() {
               width={14}
               height={14}
               className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
-                isBackgroundInert ? 'opacity-10' : 'opacity-40'
+                isBackgroundInert ? 'opacity-15' : 'opacity-40'
               }`}
               aria-hidden
             />
@@ -5331,7 +5332,7 @@ export default function App() {
                             height={10}
                           />
                         </span>
-                        <span>{`Show all ${genres.length}`}</span>
+                        <span>{`Show ${extraGenres.length} more`}</span>
                       </button>
                     )}
                   </li>
@@ -5381,12 +5382,13 @@ export default function App() {
                             ? 'short-before'
                             : 'normal';
                     return (
-                    <li key={year} className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
+                    <li key={year} className="w-[200px]">
                       <SidebarYearTimelineFilterRow
                         label={year}
                         count={yearMovieCounts.get(year) ?? 0}
                         active={active}
                         hovered={hoveredYearIndex === index}
+                        isInert={isBackgroundInert}
                         connectorState={index < years.length - 1 ? connectorState : null}
                         onClick={() => toggleFilter(selectedYears, year, setSelectedYears)}
                         onMouseEnter={() => setHoveredYearIndex(index)}
@@ -5428,11 +5430,12 @@ export default function App() {
               >
                 <ul className="space-y-0.5 w-[200px]">
                   {ratings.map((rating) => (
-                    <li key={rating} className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
+                    <li key={rating} className="w-[200px]">
                       <SidebarMyRatingFilterRow
                         rating={rating}
                         count={ratingMovieCounts.get(rating) ?? 0}
                         active={selectedRatings.includes(rating)}
+                        isInert={isBackgroundInert}
                         onClick={() => toggleFilter(selectedRatings, rating, setSelectedRatings)}
                       />
                     </li>
@@ -5583,7 +5586,7 @@ export default function App() {
                     type="button"
                     disabled={isPosterPreviewChromeLocked}
                     onClick={() => closePosterPreview()}
-                    className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/80"
+                    className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/80"
                     title={
                       isPosterPreviewChromeLocked
                         ? isAwaitingPosterApplyConfirm
@@ -5601,7 +5604,11 @@ export default function App() {
                         alt=""
                         width={18}
                         height={18}
-                        className="pointer-events-none h-[18px] w-[18px] opacity-40 transition-opacity group-hover/backprev:opacity-100"
+                        className={`pointer-events-none h-[18px] w-[18px] transition-opacity ${
+                          isPosterPreviewChromeLocked
+                            ? 'opacity-15'
+                            : 'opacity-40 group-hover/backprev:opacity-100'
+                        }`}
                         decoding="async"
                         aria-hidden
                       />
@@ -5786,9 +5793,7 @@ export default function App() {
                       }}
                     >
                       <div
-                        className={`pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15 transition-opacity ${
-                          isPosterPreviewZoomControlsDisabled ? 'opacity-15' : 'opacity-100'
-                        }`}
+                        className="pointer-events-none absolute left-0 top-1/2 w-full -translate-y-1/2 bg-white/15"
                         style={{
                           height: POSTER_SIZE_SLIDER_TRACK_H_PX,
                           borderRadius: POSTER_SIZE_SLIDER_TRACK_H_PX / 2,
@@ -5796,8 +5801,8 @@ export default function App() {
                         aria-hidden
                       />
                       <div
-                        className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 bg-white/40 transition-opacity ${
-                          isPosterPreviewZoomControlsDisabled ? 'opacity-15' : 'opacity-100'
+                        className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 transition-colors ${
+                          isPosterPreviewZoomControlsDisabled ? 'bg-white/15' : 'bg-white/40'
                         }`}
                         style={{
                           width: `calc(${POSTER_SIZE_SLIDER_TRACK_H_PX / 2}px + (100% - ${POSTER_SIZE_SLIDER_TRACK_H_PX}px) * ${previewZoomSliderNorm})`,
@@ -5991,16 +5996,18 @@ export default function App() {
                     }}
                   >
                     <div
-                      className={`pointer-events-none absolute left-0 top-1/2 flex w-full -translate-y-1/2 transition-opacity ${
-                        isPosterSizeControlDisabled ? 'opacity-15' : 'opacity-100'
-                      }`}
+                      className="pointer-events-none absolute left-0 top-1/2 flex w-full -translate-y-1/2"
                       style={{ gap: GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX }}
                       aria-hidden
                     >
                       {Array.from({ length: posterSizeSliderSegmentCount }, (_, segmentIndex) => (
                         <span
                           key={segmentIndex}
-                          className={segmentIndex < posterSizeLevelIndex ? 'bg-white/40' : 'bg-white/15'}
+                          className={
+                            isPosterSizeControlDisabled || segmentIndex >= posterSizeLevelIndex
+                              ? 'bg-white/15 transition-colors'
+                              : 'bg-white/40 transition-colors'
+                          }
                           style={{
                             width: posterSizeSliderSegmentWidthPx,
                             height: POSTER_SIZE_SLIDER_TRACK_H_PX,
@@ -6355,7 +6362,7 @@ export default function App() {
                 >
                   <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 py-4 backdrop-blur-md">
               <div
-                className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold uppercase tracking-widest text-white/40 items-center`}
+                className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
               >
                 {isEditing && <div className="min-h-5" aria-hidden />}
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
@@ -6366,9 +6373,7 @@ export default function App() {
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
                     className={`flex min-h-5 items-center gap-1.5 leading-5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
                   >
-                    <span>
-                      {sortMode.startsWith('title') ? 'TITLE' : sortMode.startsWith('duration') ? 'TITLE / DUR' : 'TITLE'}
-                    </span>
+                    <span>Title</span>
                     <ChevronDown size={10} className={`transition-transform duration-300 ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
 
@@ -6541,7 +6546,7 @@ export default function App() {
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
                   className={`flex min-h-5 items-center gap-1.5 justify-start pr-8 leading-5 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
                 >
-                  <span className="text-[12px] font-bold uppercase tracking-widest whitespace-nowrap leading-5">MY RATING</span>
+                  <span className="text-[12px] font-bold tracking-widest whitespace-nowrap leading-5">My Rating</span>
                   <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
                 </button>
               </div>
@@ -7295,7 +7300,7 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] p-6 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">
                 Add New Movie
@@ -7385,7 +7390,7 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className={`input-focus-primary w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors disabled:focus:border-white/10 ${
+                      className={`input-focus-primary w-full h-10 bg-black/20 border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors disabled:focus:border-white/10 ${
                         isAdding ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
                       } ${
                         newMovieTitle ? 'pr-10' : 'pr-3'
@@ -7589,14 +7594,14 @@ export default function App() {
 
               <div className="flex items-center justify-end gap-3 mt-8">
                 <button onClick={closeAddMovieModal} disabled={isAdding}
-                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                  className="h-9 px-5 rounded-[12px] text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAddMovie}
                   disabled={isAdding || !newMovieUrl.trim()}
-                  className={`h-9 px-6 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`h-9 px-6 rounded-[12px] text-sm font-medium transition-all flex items-center gap-2 ${
                     isAdding || !newMovieUrl.trim()
                       ? 'bg-white/10 text-white/40 cursor-not-allowed'
                       : 'bg-white/80 text-black hover:bg-white shadow-xl'
@@ -7645,7 +7650,7 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] p-6 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete movie</h2>
               <p className="text-sm leading-relaxed text-white/70">
@@ -7657,7 +7662,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setDeleteMovieConfirm(null)}
-                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                  className="h-9 px-5 rounded-[12px] text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors"
                 >
                   Cancel
                 </button>
@@ -7668,7 +7673,7 @@ export default function App() {
                     setDeleteMovieConfirm(null);
                     handleDeleteMovie(m);
                   }}
-                  className="h-9 px-6 rounded-full text-sm font-medium bg-[#EA9794]/45 text-black hover:bg-[#EA9794] hover:text-black transition-colors shadow-xl"
+                  className="h-9 px-6 rounded-[12px] text-sm font-medium bg-[#EA9794]/45 text-black hover:bg-[#EA9794] hover:text-black transition-colors shadow-xl"
                 >
                   Delete
                 </button>
@@ -7712,7 +7717,7 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[46px] px-6 pt-6 pb-5 shadow-2xl"
+              className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] px-6 pt-6 pb-5 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-4 tracking-tight">Edit Trailer URL</h2>
 
@@ -7753,7 +7758,7 @@ export default function App() {
                     setEditTrailerError('');
                   }}
                   disabled={isEditingTrailer}
-                  className="h-9 px-5 rounded-full text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                  className="h-9 px-5 rounded-[12px] text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -7761,7 +7766,7 @@ export default function App() {
                   type="button"
                   onClick={() => void handleApplyEditTrailerUrl()}
                   disabled={isEditingTrailer || !editTrailerUrlInput.trim()}
-                  className={`h-9 px-6 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`h-9 px-6 rounded-[12px] text-sm font-medium transition-all flex items-center gap-2 ${
                     isEditingTrailer || !editTrailerUrlInput.trim()
                       ? 'bg-white/10 text-white/40 cursor-not-allowed'
                       : 'bg-white/80 text-black hover:bg-white shadow-xl'
@@ -8248,6 +8253,7 @@ function SidebarYearTimelineFilterRow({
   count,
   active,
   hovered,
+  isInert,
   connectorState,
   onClick,
   onMouseEnter,
@@ -8257,6 +8263,7 @@ function SidebarYearTimelineFilterRow({
   count: number;
   active: boolean;
   hovered: boolean;
+  isInert: boolean;
   connectorState: SidebarYearTimelineConnectorState | null;
   onClick: () => void;
   onMouseEnter: () => void;
@@ -8267,7 +8274,9 @@ function SidebarYearTimelineFilterRow({
       {connectorState ? (
         <span
           aria-hidden
-          className={`pointer-events-none absolute left-[21px] top-[27px] z-0 w-0.5 bg-white/20 transition-[height,top,opacity] duration-150 ease-out ${
+          className={`pointer-events-none absolute left-[21px] top-[27px] z-0 w-0.5 transition-[height,top,opacity] duration-150 ease-out ${
+            isInert ? 'bg-white/15' : 'bg-white/20'
+          } ${
             connectorState === 'normal'
               ? 'h-5 opacity-100'
               : connectorState === 'short-before'
@@ -8284,7 +8293,9 @@ function SidebarYearTimelineFilterRow({
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         className={`relative z-10 flex h-9 w-full items-center rounded-md pl-[42px] pr-2.5 py-0 text-left text-[13px] transition-colors ${
-          active
+          isInert
+            ? `${active ? 'bg-[#EB9692]/20 font-bold' : 'font-medium'} text-white/15`
+            : active
             ? 'bg-[#EB9692]/20 font-bold text-white'
             : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
         }`}
@@ -8292,7 +8303,7 @@ function SidebarYearTimelineFilterRow({
         <span
           aria-hidden
           className={`absolute left-[18px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors duration-150 ease-out ${
-            active || hovered ? 'bg-white' : 'bg-white/40'
+            isInert ? 'bg-white/15' : active || hovered ? 'bg-white' : 'bg-white/40'
           }`}
         />
         <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -8311,11 +8322,13 @@ function SidebarMyRatingFilterRow({
   rating,
   count,
   active,
+  isInert,
   onClick,
 }: {
   rating: number;
   count: number;
   active: boolean;
+  isInert: boolean;
   onClick: () => void;
 }) {
   const aria =
@@ -8332,7 +8345,9 @@ function SidebarMyRatingFilterRow({
       onClick={onClick}
       aria-label={aria}
       className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors ${
-        active
+        isInert
+          ? `${active ? 'bg-[#EB9692]/20 font-bold' : ''} text-white/15`
+          : active
           ? 'bg-[#EB9692]/20 font-bold text-white'
           : 'text-white/70 hover:bg-white/5 hover:text-white'
       }`}
@@ -8341,14 +8356,28 @@ function SidebarMyRatingFilterRow({
         <span className="ml-[4.5px] mr-[10px] flex shrink-0 items-center gap-0.5" aria-hidden>
           {rating === 0
             ? [0, 1, 2, 3, 4].map((i) => (
-                <Star key={i} size={11} fill="none" stroke="#D4AF37" className="opacity-30" />
+                <Star
+                  key={i}
+                  size={11}
+                  fill="none"
+                  stroke="#D4AF37"
+                  className={isInert ? 'opacity-15' : 'opacity-30'}
+                />
               ))
             : Array.from({ length: rating }, (_, i) => (
-                <Star key={i} size={11} fill="#EB9692" stroke="#EB9692" />
+                <Star
+                  key={i}
+                  size={11}
+                  fill="#EB9692"
+                  stroke="#EB9692"
+                  className={isInert ? 'opacity-15' : undefined}
+                />
               ))}
         </span>
         <span
-          className="min-w-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-bold uppercase leading-none tracking-[0.1em] text-[#D4AF37] opacity-0 transition-[max-width,opacity] duration-150 ease-out group-hover/sidebarrow:max-w-[200px] group-hover/sidebarrow:opacity-100"
+          className={`min-w-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-bold uppercase leading-none tracking-[0.1em] opacity-0 transition-[max-width,opacity] duration-150 ease-out group-hover/sidebarrow:max-w-[200px] group-hover/sidebarrow:opacity-100 ${
+            isInert ? 'text-white/15' : 'text-[#D4AF37]'
+          }`}
         >
           {hoverUpper}
         </span>

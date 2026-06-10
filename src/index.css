@@ -82,7 +82,7 @@
    * IMDb / 预告片 URL 等模态内文本框：统一默认与焦点边框（中性白边，无粉色 ring）。
    */
   .input-modal-url-field {
-    @apply w-full h-10 bg-[#1D1D1D] border border-white/10 rounded-[22px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/20 focus:placeholder-transparent disabled:opacity-50 disabled:focus:border-white/10;
+    @apply w-full h-10 bg-black/20 border border-white/10 rounded-[12px] px-3 text-white text-sm focus:outline-none focus:border-white/20 transition-colors placeholder:text-white/20 focus:placeholder-transparent disabled:opacity-50 disabled:focus:border-white/10;
   }
 
 }

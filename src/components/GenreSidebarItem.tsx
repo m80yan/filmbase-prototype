@@ -13,6 +13,7 @@ export type GenreSidebarItemProps = {
   onClick: () => void;
   onHandlePointerDown: (e: React.PointerEvent<HTMLSpanElement>) => void;
   isDragging: boolean;
+  isInert: boolean;
 };
 
 /**
@@ -26,13 +27,14 @@ export default function GenreSidebarItem({
   onClick,
   onHandlePointerDown,
   isDragging,
+  isInert,
 }: GenreSidebarItemProps) {
   const [handleHovered, setHandleHovered] = useState(false);
 
   return (
     <div
       className={`group/genreitem grid h-9 w-[200px] min-w-0 items-center rounded-md transition-colors ${
-        isDragging ? 'opacity-50' : ''
+        isDragging && !isInert ? 'opacity-50' : ''
       } ${active ? 'bg-[#EB9692]/20' : 'hover:bg-white/5'}`}
       style={{
         gridTemplateColumns: `minmax(0, 1fr) ${GENRE_SIDEBAR_HANDLE_HIT_AREA_PX}px ${GENRE_SIDEBAR_SCROLLBAR_GUTTER}`,
@@ -42,7 +44,11 @@ export default function GenreSidebarItem({
         type="button"
         onClick={onClick}
         className={`col-start-1 flex h-full min-w-0 items-center pl-3 pr-0 py-0 text-left text-[13px] transition-colors ${
-          active ? 'font-bold text-white' : 'font-medium text-white/70 group-hover/genreitem:text-white'
+          isInert
+            ? `${active ? 'font-bold' : 'font-medium'} text-white/15`
+            : active
+              ? 'font-bold text-white'
+              : 'font-medium text-white/70 group-hover/genreitem:text-white'
         }`}
       >
         <span className="mr-[10px] h-[20px] w-[20px] shrink-0">
@@ -53,7 +59,11 @@ export default function GenreSidebarItem({
             width={20}
             height={20}
             className={`pointer-events-none h-[20px] w-[20px] transition-opacity ${
-              active ? 'opacity-100' : 'opacity-40 group-hover/genreitem:opacity-100'
+              isInert
+                ? 'opacity-15'
+                : active
+                  ? 'opacity-100'
+                  : 'opacity-40 group-hover/genreitem:opacity-100'
             }`}
             decoding="async"
             aria-hidden
