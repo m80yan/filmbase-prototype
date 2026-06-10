@@ -26,6 +26,81 @@ The system contains:
 - Connection Lines
 - Center Poster
 
+## Current Implementation Problem
+
+The current Film DNA behavior is treated too much like live generation.
+
+Observed issues:
+- node generation is slow
+- repeated opens can produce different relationship nodes
+- the same movie can receive different Film DNA graphs across sessions or clicks
+- graph content is not stable enough to feel like library data
+
+This feature should feel curated and repeatable. A user should not wonder whether the same movie will have a different DNA map tomorrow.
+
+## Product Behavior Direction
+
+Film DNA should be a stable cinematic relationship record, not a fresh AI response on every open.
+
+Target behavior:
+
+1. User opens Film DNA for the current preview movie.
+2. App checks Supabase for an existing persisted Film DNA graph for that center movie.
+3. If a ready graph exists, render the persisted graph immediately.
+4. If no ready graph exists, generate it once.
+5. Normalize the generated graph.
+6. Save the normalized graph to Supabase.
+7. Render the saved graph.
+8. Future opens should read the stored graph and should not regenerate by default.
+
+Architecture principle:
+
+```txt
+OpenAI API = creation path
+Supabase persisted graph = source of truth
+```
+
+Film DNA relationship data is generated through the OpenAI API, but OpenAI output should not be treated as stable product data by itself.
+
+The app should call OpenAI only when no persisted ready graph exists for the center movie.
+
+This direction is intended to solve:
+- slow node generation
+- unstable relationship sets
+- different results for the same movie across clicks
+- inconsistent poster enrichment
+- unpredictable graph layout data
+
+Do not add a visible regenerate or refresh button unless explicitly requested.
+
+## OpenAI Generation Role
+
+Film DNA relationship data is generated using the OpenAI API.
+
+OpenAI output is probabilistic and should be treated as draft graph data.
+
+Product rule:
+- OpenAI generates the first draft of a Film DNA graph.
+- The app normalizes the generated result.
+- Supabase stores the normalized graph.
+- The stored graph becomes the repeatable source of truth.
+
+The UI should not regenerate a different OpenAI result on every normal open.
+
+Security rule:
+- do not expose `OPENAI_API_KEY` to browser/client code
+- do not store OpenAI API keys in frontend files
+- prefer an existing Supabase Edge Function or trusted server-side path for calls that require `OPENAI_API_KEY`
+
+Before changing OpenAI generation, inspect:
+- where the OpenAI API is currently called
+- whether the call is inside a Supabase Edge Function
+- which OpenAI model is used
+- what prompt or schema is sent
+- how JSON output is parsed
+- how failures are handled
+- whether poster enrichment happens before or after OpenAI generation
+
 ## Layer Hierarchy
 
 lightbox
@@ -200,12 +275,57 @@ If the Film DNA canvas exceeds the lightbox viewport:
 
 ## Data Rules
 
+### OpenAI Output Rule
+
+OpenAI output must be normalized before it becomes app data.
+
+Do not directly render raw OpenAI output without validation.
+
+Do not persist raw untrusted OpenAI response text as the stable graph record.
+
+Persist the normalized graph shape that the UI expects.
+
+### Persistence Rule
+
+Film DNA graph data should be persisted.
+
+Default lookup flow:
+
+```txt
+open Film DNA
+→ query persisted graph by stable center movie key
+→ render ready graph if found
+→ otherwise generate once
+→ normalize
+→ save
+→ render saved result
+```
+
+The persisted graph should be the default source of truth after the first successful generation.
+
+The implementation must inspect the current movie object before choosing the final cache key.
+
+Possible stable keys:
+- IMDb ID, if reliably available
+- internal movie ID, if more stable in the app
+- title + year fallback only if no stronger ID exists
+
+Do not assume the final cache key without checking the current implementation.
+
 ### Node Count
 
 Influence: max 3  
 Legacy: max 3  
 Series Previous: max 1  
 Series Next: max 1
+
+Influence and Legacy should be 0–3 nodes each.
+
+Do not force exactly 3 nodes.
+
+Strong relationship quality is more important than visual symmetry.
+
+If a strong relationship does not exist, render fewer nodes and omit the corresponding line.
 
 ### Ordering
 
@@ -229,6 +349,51 @@ If a node does not exist:
 
 If poster data is unavailable:
 - render text-only node
+
+### Relationship Quality Rules
+
+Influence means earlier works that clearly shaped, inspired, preceded, or strongly relate to the center film.
+
+Legacy means later works that were clearly influenced by, descended from, or strongly connected to the center film.
+
+Rules:
+- prefer clear film-level relationships over loose genre similarity
+- avoid generic recommendations
+- avoid duplicate titles, years, or IMDb IDs
+- avoid filler nodes added only to fill visual slots
+- fewer strong nodes are better than a full but weak graph
+- low-confidence nodes should not be displayed if confidence exists
+
+Expected node shape:
+
+```ts
+type FilmDnaNode = {
+  title: string
+  year: number
+  imdbId?: string
+  posterUrl?: string
+  relationshipLabel?: string
+  relationshipReason?: string
+  confidence?: "high" | "medium" | "low"
+}
+```
+
+### Normalization Rules
+
+Before rendering or saving generated Film DNA output:
+
+- ensure influence nodes are an array
+- ensure legacy nodes are an array
+- cap influence nodes to 0–3
+- cap legacy nodes to 0–3
+- remove duplicate nodes across both sides
+- remove invalid nodes without title or year
+- remove low-confidence filler if confidence exists
+- preserve `posterUrl` when available
+- preserve `relationshipLabel` when available
+- preserve `relationshipReason` when available
+
+Normalization should happen before persistence so stored graph data stays stable and clean.
 
 ## Influence Node CSS
 
@@ -623,8 +788,53 @@ Note:
 - Although the visual line is vertical, use the exported SVG viewBox size for rendering to preserve the start circle and end triangle.
 - If positioning by the visual centerline, render this SVG with `left = x - 5.5px` so the 11px-wide SVG remains centered on x: 603.
 
+## Claude Code Investigation Checklist
+
+Before implementing persistence, inspect the current code and identify:
+
+- where Film DNA mode is entered from Preview Mode
+- where the graph generation call is triggered
+- whether generation is called from `App.tsx`, a helper, or a Supabase Edge Function
+- where the OpenAI API is called
+- where `OPENAI_API_KEY` is stored or read
+- which OpenAI model is currently used
+- what prompt/schema asks OpenAI to return
+- how OpenAI JSON output is parsed and validated
+- the current Film DNA graph state shape
+- the current movie object shape
+- the most stable movie cache key available
+- the existing Supabase client/helper pattern
+- the current loading and error states
+- the current poster enrichment path
+- whether relationship nodes already receive `posterUrl`
+
+Do not implement from this spec alone if the current code has a different field name or helper pattern.
+
+## Non-goals
+
+This persistence work should not change:
+
+- Film DNA visual layout
+- node coordinates
+- line SVGs
+- hover behavior
+- Preview Mode shell
+- Info Mode behavior
+- Library behavior
+- Sidebar behavior
+- Trailer behavior
+- Add Movie behavior
+
+The goal is data stability and load speed, not a visual redesign.
+
 ## React Implementation Notes
 
+- Keep persistence as a data behavior, not a visual redesign.
+- On Film DNA open, read persisted graph data before triggering generation.
+- Do not regenerate on every normal open once a ready graph exists.
+- Reuse existing loading and error patterns where possible.
+- Avoid broad refactors of `App.tsx`.
+- Prefer existing Supabase helper patterns before adding new data access code.
 - Keep Film DNA as a mode inside poster preview, parallel to Info Mode.
 - Do not add a separate Film DNA close button or title bar.
 - Use the Film DNA toolbar icon and ESC to exit Film DNA mode.
@@ -632,3 +842,74 @@ Note:
 - The toolbar and sidebar should not be dragged with the Film DNA canvas.
 - Related nodes without poster data should render as text-only nodes.
 - Center Node must use the current preview poster image.
+
+
+## Supabase Persistence Proposal
+
+This is a proposed schema direction, not a confirmed migration. Claude Code should inspect the current Supabase conventions before creating or editing migration files.
+
+Recommended table name:
+
+```sql
+filmbase_film_dna_graphs
+```
+
+Recommended columns:
+
+```sql
+id uuid primary key default gen_random_uuid(),
+center_movie_id text,
+center_imdb_id text,
+center_title text not null,
+center_year int,
+influences jsonb not null default '[]'::jsonb,
+legacy jsonb not null default '[]'::jsonb,
+status text not null default 'ready',
+model text, -- OpenAI model used to generate the graph, when available
+version int not null default 1,
+created_at timestamptz not null default now(),
+updated_at timestamptz not null default now()
+```
+
+The table should store normalized graph data, not raw OpenAI response text.
+
+Uniqueness should prevent duplicate graphs for the same center movie.
+
+Prefer unique by `center_imdb_id` if that field is reliable.
+
+If the app uses an internal movie ID more consistently, prefer `center_movie_id`.
+
+The implementation must inspect the current movie shape before finalizing the unique constraint.
+
+## Known Implementation Risk
+
+Previous Film DNA poster behavior used different poster fields:
+
+- Center Node uses the current preview poster / center poster path.
+- Relationship nodes require `posterUrl`.
+
+When changing generation, persistence, or enrichment, inspect current mapping for:
+
+- center node poster field
+- influence node poster field
+- legacy node poster field
+
+Do not assume poster fields are consistent without checking the current code.
+
+## Expected Implementation Report
+
+After implementation, report:
+
+- files changed
+- database migration or SQL required
+- chosen Film DNA cache key and why
+- OpenAI call path and model, if touched
+- how cached lookup works
+- how first-time generation works
+- how duplicate generation is avoided or reduced
+- how generated output is normalized
+- whether `npm run build` passed
+- whether `git diff --check` passed
+- remaining risks or manual Supabase steps
+
+Do not commit unless explicitly asked.

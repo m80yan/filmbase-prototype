@@ -275,6 +275,200 @@ iOS implication:
 - Persist `poster_storage_path`.
 - Refresh signed URLs when they expire or when image loading fails.
 
+
+## Film DNA Graph Persistence
+
+Status: proposed / pending implementation.
+
+Film DNA should persist generated relationship graphs so the same center movie does not regenerate a different graph every time it is opened.
+
+Target table:
+
+```text
+filmbase_film_dna_graphs
+```
+
+Purpose:
+
+- store one stable Film DNA graph per center movie
+- load an existing ready graph before triggering generation
+- make OpenAI generation a first-time creation path, not the source of truth
+- keep graph layout data predictable across sessions
+
+### Proposed Columns
+
+Recommended table shape:
+
+```sql
+id uuid primary key default gen_random_uuid(),
+center_movie_id text,
+center_imdb_id text,
+center_title text not null,
+center_year int,
+influences jsonb not null default '[]'::jsonb,
+legacy jsonb not null default '[]'::jsonb,
+status text not null default 'ready',
+model text, -- OpenAI model used to generate the graph, when available
+version int not null default 1,
+created_at timestamptz not null default now(),
+updated_at timestamptz not null default now()
+```
+
+The table should store normalized graph data, not raw OpenAI response text.
+
+`model` should record the OpenAI model used to generate the graph when available. This helps debug future graph differences after model or prompt changes.
+
+Recommended status values:
+
+```text
+ready
+generating
+failed
+```
+
+`influences` and `legacy` should remain `jsonb` for now. Do not split Film DNA nodes into a separate graph/node table unless there is a later product need for graph-wide querying or manual curation tooling.
+
+### OpenAI Generation Notes
+
+Film DNA relationship data is generated through the OpenAI API.
+
+OpenAI output is probabilistic and should be treated as draft graph data until it is normalized and persisted.
+
+Target behavior:
+
+```text
+no ready persisted graph
+→ call OpenAI through the existing trusted generation path
+→ parse and validate output
+→ normalize to the app graph shape
+→ save normalized graph row
+→ future reads use Supabase, not another OpenAI call
+```
+
+Security constraints:
+- do not expose `OPENAI_API_KEY` to browser/client code
+- do not store OpenAI API keys in frontend files
+- do not commit `.env` files or secrets
+- prefer a Supabase Edge Function or trusted server-side path for calls that require `OPENAI_API_KEY`
+
+Before implementation, inspect:
+- where the OpenAI API is currently called
+- whether the call is inside a Supabase Edge Function
+- which OpenAI model is used
+- what prompt or schema is sent
+- how JSON output is parsed and validated
+- how failures are handled
+- whether poster enrichment happens before or after OpenAI generation
+
+### Film DNA Cache Key
+
+The implementation must inspect the current movie object before choosing the final cache key.
+
+Preferred order:
+
+1. `center_imdb_id` if IMDb ID is reliably available and normalized.
+2. `center_movie_id` if the app's internal movie ID is more stable.
+3. `center_title + center_year` only as a fallback.
+
+Do not finalize the unique constraint before checking the current movie data shape.
+
+Possible IMDb-based unique index:
+
+```sql
+create unique index if not exists filmbase_film_dna_graphs_center_imdb_id_key
+on filmbase_film_dna_graphs (center_imdb_id)
+where center_imdb_id is not null;
+```
+
+Possible internal-ID-based unique index:
+
+```sql
+create unique index if not exists filmbase_film_dna_graphs_center_movie_id_key
+on filmbase_film_dna_graphs (center_movie_id)
+where center_movie_id is not null;
+```
+
+If neither ID is reliable, use a title/year fallback only after confirming normalization rules for title casing, punctuation, and year.
+
+### Film DNA Node JSON Shape
+
+Expected node shape inside `influences` and `legacy`:
+
+```ts
+type FilmDnaNode = {
+  title: string
+  year: number
+  imdbId?: string
+  posterUrl?: string
+  relationshipLabel?: string
+  relationshipReason?: string
+  confidence?: "high" | "medium" | "low"
+}
+```
+
+Normalization before save:
+
+- ensure `influences` is an array
+- ensure `legacy` is an array
+- cap influence nodes to 0–3
+- cap legacy nodes to 0–3
+- remove duplicates across both sides
+- remove invalid nodes without title or year
+- remove low-confidence filler if confidence exists
+- preserve `posterUrl` when available
+- preserve `relationshipLabel` when available
+- preserve `relationshipReason` when available
+
+Normalization should happen before persistence so stored graph data stays stable and clean.
+
+### Film DNA RLS Direction
+
+Film DNA graph data is app-level generated library data, not a personal poster override or rating.
+
+Claude Code should inspect current RLS conventions before adding policies.
+
+Expected direction:
+
+- allow app users to read ready Film DNA graphs
+- avoid broad public update permissions
+- prefer writes through a trusted path if generation is handled by an Edge Function or service role
+- if client-side insert/upsert is used for the current web prototype, keep the policy as narrow as the existing project pattern allows
+
+Do not add unrestricted public write access unless the current hosted project already intentionally uses that model for shared web data.
+
+### Film DNA Access Pattern
+
+Target read/write flow:
+
+```text
+open Film DNA
+→ query filmbase_film_dna_graphs by stable center movie key
+→ if status = ready, render stored graph
+→ if missing, call OpenAI once through the existing trusted generation path
+→ parse and normalize generated result
+→ insert/upsert persisted graph
+→ render saved graph
+```
+
+Avoid regenerating on every normal open once a ready graph exists.
+
+A `generating` status can be used to reduce duplicate concurrent generation, but the first implementation may use a simpler read-before-generate flow if it preserves normal cached behavior.
+
+### Film DNA Open Unknowns
+
+To resolve before implementation:
+
+- Which movie field is the stable key: `movie_id`, `id`, `imdbId`, `imdb_id`, or another field.
+- Whether Film DNA generation currently happens in `App.tsx`, a helper, or a Supabase Edge Function.
+- Where the OpenAI API is currently called.
+- Where `OPENAI_API_KEY` is stored or read.
+- Which OpenAI model is currently used.
+- What prompt or schema asks OpenAI to return.
+- How OpenAI JSON output is parsed and validated.
+- Whether the generated relationship nodes already include `posterUrl`.
+- Whether the app should persist failed generation attempts with `status = 'failed'`.
+- Whether `updated_at` should be maintained by trigger or explicit update code.
+
 ## Edge Functions Referenced By Client
 
 ### `search-movies`
@@ -389,6 +583,15 @@ Unknown:
 
 ## Open Unknowns To Resolve
 
+- Exact SQL schema for proposed `filmbase_film_dna_graphs` table.
+- Stable Film DNA cache key: IMDb ID, internal movie ID, or title/year fallback.
+- Whether Film DNA graph writes should happen client-side or through a trusted Edge Function path.
+- OpenAI call path for Film DNA generation.
+- OpenAI model used for Film DNA generation.
+- Whether OpenAI generation and Supabase persistence should live together in the same trusted path.
+- Whether raw OpenAI output is currently stored anywhere, and if so whether it should be removed or replaced by normalized graph rows.
+- RLS policy model for reading and writing persisted Film DNA graphs.
+- Whether `updated_at` for Film DNA graphs should use a database trigger or explicit app updates.
 - Exact SQL schema for both movie tables.
 - RLS policies for table and Storage access.
 - Whether anonymous auth remains the iOS MVP auth model.

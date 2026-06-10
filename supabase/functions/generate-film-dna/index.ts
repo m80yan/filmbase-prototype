@@ -755,6 +755,13 @@ async function applyTmdbSeriesToTree(
     })),
   });
 
+  // Tag center with its resolved TMDb movie ID so that filterSeriesNodesDuplicatingCenter
+  // can use signal 1 (same TMDb ID) to remove Y-axis nodes that resolve to the same film.
+  const treeWithCenterId: FilmDnaTree =
+    detection.movieId && !tree.center.tmdbMovieId
+      ? { ...tree, center: { ...tree.center, tmdbMovieId: detection.movieId } }
+      : tree;
+
   if (!detection.matchedInCollection) {
     logFilmDnaDiag("pre-tmdb-reconcile-no-collection", {
       left: tree.left.length,
@@ -763,7 +770,7 @@ async function applyTmdbSeriesToTree(
     const noTmdb = applySeriesSummaryScope(
       applySignificanceScope(
         applySeriesLineageFlags(
-          reconcileSeriesAndLegacy(tree, "post-tmdb-no-collection"),
+          reconcileSeriesAndLegacy(treeWithCenterId, "post-tmdb-no-collection"),
         ),
       ),
     );
@@ -774,17 +781,20 @@ async function applyTmdbSeriesToTree(
     return noTmdb;
   }
 
-  const next: FilmDnaTree = { ...tree };
+  const next: FilmDnaTree = { ...treeWithCenterId };
   if (detection.seriesPrevious.length) {
     next.seriesPrevious = mergeGptSeriesSlot(
       detection.seriesPrevious,
-      tree.seriesPrevious,
+      treeWithCenterId.seriesPrevious,
     );
   } else {
     delete next.seriesPrevious;
   }
   if (detection.seriesNext.length) {
-    next.seriesNext = mergeGptSeriesSlot(detection.seriesNext, tree.seriesNext);
+    next.seriesNext = mergeGptSeriesSlot(
+      detection.seriesNext,
+      treeWithCenterId.seriesNext,
+    );
   } else {
     delete next.seriesNext;
   }
@@ -1108,7 +1118,31 @@ const NON_CANONICAL_LINEAGE_RE =
   /\b(remake|re-?adaptation|readaptation|reboot|new adaptation|same source material|same story|different era|prior (film|version|adaptation)|earlier (film|version|adaptation)|tv version|stage version|based on the same|another adaptation)\b/i;
 
 /**
+ * Keywords that justify a same-title Y-axis node as a distinct version or
+ * installment — not a metadata duplicate of the center film.
+ *
+ * "series" and "entry" cover the standard SERIES_PREV_NOTE / SERIES_NEXT_NOTE
+ * phrasing ("Previous/Next entry in the same series.") so that TMDb-detected
+ * collection members are never incorrectly filtered by signal 3.
+ */
+const SERIES_DUPLICATE_VERSION_JUSTIFICATION_RE =
+  /\b(remake|re-?adaptation|readaptation|reboot|adaptation|adapted|sequel|prequel|follow-?up|next installment|previous installment|prior installment|next entry|previous entry|prior entry|series|alternate version|alternate cut|director'?s? cut|extended version|source material|same source|earlier version|earlier film|earlier adaptation|prior version|prior film|different era|tv version|stage version)\b/i;
+
+/**
+ * Positive signal that two adjacent Y-axis entries are in true series continuity
+ * (sequel, prequel, franchise installment) and should draw a connecting line.
+ * Covers TMDb collection notes ("Previous/Next entry in the same series.") and
+ * model-generated notes for numbered parts, sequels, prequels, follow-ups.
+ */
+const CANONICAL_SERIES_RE =
+  /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b/i;
+
+/**
  * 推断系列链上、下相邻节点是否应绘制垂直连线（无显式 API 字段时）。
+ *
+ * Returns true only when a positive canonical-series signal is present.
+ * Defaults to false so that character references, cultural predecessors, and
+ * other ambiguous Y-axis relationships do not draw connectors.
  *
  * @param upper 链中上方节点
  * @param lower 链中下方节点
@@ -1120,7 +1154,99 @@ function inferLineageConnectedAbove(
   if (filmNodesMatchTitle(upper, lower)) return false;
   const combined = `${upper.note} ${lower.note} ${upper.title} ${lower.title}`;
   if (NON_CANONICAL_LINEAGE_RE.test(combined)) return false;
-  return true;
+  // Exclude upper.note from the canonical test: it may be the machine-generated
+  // TMDb constant SERIES_PREV_NOTE / SERIES_NEXT_NOTE which self-matches
+  // CANONICAL_SERIES_RE and would produce a false positive for non-sequel cases.
+  const canonicalTest = `${lower.note} ${upper.title} ${lower.title}`;
+  if (CANONICAL_SERIES_RE.test(canonicalTest)) return true;
+  return false;
+}
+
+/**
+ * Returns true if a Y-axis (seriesPrevious/seriesNext) node is a duplicate of
+ * the center — same movie with bad metadata rather than a legitimate lineage
+ * entry. Three signals, any one sufficient:
+ *
+ *  1. Same TMDb movie ID (definitive — both rows resolve to one film record).
+ *  2. Same normalized title AND same non-empty posterUrl (same image proves the
+ *     same underlying TMDb record was used, e.g. poster for year 1965 resolving
+ *     to the 1971 film when no 1965 entry exists in TMDb).
+ *  3. Same normalized title AND the node note/summary contains none of the
+ *     keywords that justify a distinct version (remake, adaptation, sequel,
+ *     prequel, series entry, etc.) — see SERIES_DUPLICATE_VERSION_JUSTIFICATION_RE.
+ */
+function isSeriesNodeDuplicateOfCenter(
+  node: FilmDnaNode,
+  center: FilmDnaNode,
+): boolean {
+  // Signal 1: definitive TMDb ID match.
+  if (
+    typeof node.tmdbMovieId === "number" &&
+    node.tmdbMovieId > 0 &&
+    typeof center.tmdbMovieId === "number" &&
+    center.tmdbMovieId > 0 &&
+    node.tmdbMovieId === center.tmdbMovieId
+  ) {
+    return true;
+  }
+
+  if (!filmNodesMatchTitle(node, center)) return false;
+
+  // Signal 2: same title + same non-empty posterUrl (different films always differ).
+  const nodePoster = node.posterUrl?.trim() ?? "";
+  const centerPoster = center.posterUrl?.trim() ?? "";
+  if (nodePoster && centerPoster && nodePoster === centerPoster) {
+    return true;
+  }
+
+  // Signal 3: same title + no version/lineage justification in note text.
+  const noteText = [
+    node.note,
+    node.relationshipSummaryTitle ?? "",
+    ...(node.relationshipBullets ?? []),
+  ].join(" ");
+  if (!SERIES_DUPLICATE_VERSION_JUSTIFICATION_RE.test(noteText)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Removes Y-axis (seriesPrevious/seriesNext) nodes that appear to be the same
+ * movie as the center — metadata duplicates rather than legitimate lineage entries.
+ *
+ * Must run after enrichFilmDnaTreePosters and ensureSeriesNodesSummaries so that
+ * tmdbMovieId and posterUrl are fully populated on series nodes before the check.
+ */
+function filterSeriesNodesDuplicatingCenter(tree: FilmDnaTree): FilmDnaTree {
+  if (!tree.seriesPrevious?.length && !tree.seriesNext?.length) return tree;
+
+  const sp = tree.seriesPrevious?.filter(
+    (n) => !isSeriesNodeDuplicateOfCenter(n, tree.center),
+  );
+  const sn = tree.seriesNext?.filter(
+    (n) => !isSeriesNodeDuplicateOfCenter(n, tree.center),
+  );
+
+  const spRemoved = (tree.seriesPrevious?.length ?? 0) - (sp?.length ?? 0);
+  const snRemoved = (tree.seriesNext?.length ?? 0) - (sn?.length ?? 0);
+
+  if (spRemoved === 0 && snRemoved === 0) return tree;
+
+  console.log(`${LOG_PREFIX} filterSeriesNodesDuplicatingCenter removed`, {
+    seriesPrevious: spRemoved,
+    seriesNext: snRemoved,
+    centerTmdbMovieId: tree.center.tmdbMovieId ?? null,
+  });
+
+  return {
+    center: tree.center,
+    left: tree.left,
+    right: tree.right,
+    ...(sp?.length ? { seriesPrevious: sp } : {}),
+    ...(sn?.length ? { seriesNext: sn } : {}),
+  };
 }
 
 /**
@@ -1719,7 +1845,7 @@ Slot semantics:
 - right (Legacy): films this work helped shape afterward in cinema (successors in film language, genre, or documented reception). NOT same-franchise sequels or direct story continuations.
 
 A valid Influence or Legacy link MUST satisfy at least ONE of:
-- widely recognized cinematic influence (critics, historians, or industry consensus)
+- widely recognized cinematic influence (critics, historians, or industry consensus — including within the relevant national cinema, festival circuit, or film movement tradition; not limited to mainstream or Hollywood-centric English-language consensus)
 - direct homage, reference, or cited inspiration
 - same franchise or continuation (use seriesPrevious/seriesNext instead when applicable)
 - same director evolving earlier ideas across films
@@ -1734,23 +1860,32 @@ NEVER base a link only on:
 - both being dialogue-heavy, psychological, ensemble, or "smart"
 - both being critically acclaimed prestige dramas
 - loose "both are about X" without craft/lineage evidence
+- same genre without naming the specific craft element inherited
+- similar tone, mood, or atmosphere without naming the cinematic technique
+- both being "dark", "dystopian", "cult", or "stylized" without craft specificity
+
+Relationship dimensions — left[] and right[] are not limited to story or source-material lineage. All four dimensions are valid and equally weighted:
+1. Story / narrative lineage: plot structure inheritance, source-material tradition, genre premise, narrative architecture.
+2. Visual / aesthetic language: composition, production design, color palette, costume iconography, image vocabulary.
+3. Formal / cinematic technique: editing rhythm, cinematography style, lensing, sound design, music usage and ironic placement, action or violence staging.
+4. Cultural / genre impact: archetype codification, genre-convention establishment, widely recognized cinematic references, cinema-language inheritance discernible in later films within the same tradition or movement.
 
 Prioritize candidates in this order:
-1. historically accepted influence
-2. film-language evolution (mise-en-scène, editing, sound, genre grammar)
-3. genre lineage
-4. director or writer influence
-5. cinematic technique inheritance
-6. relevant movement/lineage (cyberpunk, noir, sci-fi, courtroom drama, etc.)
+1. Documented influence (interview, essay, retrospective, or director-stated citation — any dimension)
+2. Widely taught or recognized lineage (film-school canon, critic consensus — any dimension)
+3. Formal / visual inheritance (mise-en-scène grammar, editing language, cinematography lineage, sound design tradition)
+4. Genre or archetype lineage (codification of a visual or narrative grammar later films inherit)
+5. Director or writer creative thread across their own filmography
+6. Cultural grammar establishment (an image language, archetype, or convention this film created or crystallized)
 
 Confidence filter (strict):
-- If a relationship feels weak, debatable, or merely associative, OMIT it.
-- Quality matters more than quantity—but do not stop too early when more defensible links exist.
-- left[] and right[] may each contain 0–3 entries. Aim for 2–3 strong nodes per side when you can defend each one.
-- For well-known films with rich documented lineages, try to provide up to 3 influence nodes (left) and up to 3 legacy nodes (right) when widely recognized relationships exist.
-- Do not pad with weak, speculative, or debatable links to reach three. Never invent filler.
-- If only one strong link exists on a side, output one. If additional widely recognized craft or lineage ties exist beyond the first, include them (up to three)—do not stop at one node when those ties are defensible.
-- Each note must name the specific connection (technique, lineage, homage, director thread)—not vague praise.
+- left[] and right[] may each contain 0–3 entries. Before concluding fewer than 3 defensible nodes exist on a side, explicitly search all four relationship dimensions (story lineage, visual/aesthetic language, formal/cinematic technique, cultural/genre impact). For well-known films, each dimension often yields at least one strong candidate.
+- For well-known films with rich documented lineages, try to provide up to 3 influence nodes (left) and up to 3 legacy nodes (right) when widely recognized relationships exist. Do not stop at 1 or 2 when additional defensible craft or lineage ties are well-established.
+- If only one strong link exists on a side, output one. If additional widely recognized craft or lineage ties exist beyond the first—across any dimension—include them (up to three).
+- Quality before quantity: omit any link that is weak, debatable, speculative, or merely associative. Do not pad with generic connections to reach three. Never invent filler.
+- Each note must name the specific cinematic element (technique, visual grammar, narrative structure, archetype, genre lineage, homage)—not vague praise or bare genre labels.
+- For films released within the last 3 years: right[] (Legacy) may legitimately be 0–1 entries — do not force Legacy nodes that are not yet defensible. Concentrate effort on left[] (Influence) instead.
+- For non-Hollywood, festival, or national-cinema films: documented artistic lineage, movement membership (e.g. Romanian New Wave, French New Wave, Italian Neorealism, Iranian cinema, Taiwanese New Wave), national cinema context, or genre tradition are valid Influence signals even when English-language citation records are sparse. Use the director's known cinematic inheritance and the film's movement context as evidence.
 
 Chronology (HARD — never violate):
 - Influence (left): ONLY films or series installments released BEFORE the center title's year.
@@ -1778,9 +1913,16 @@ Series slots:
 - Never put the same story title as center in left[] or right[]; use seriesPrevious/seriesNext for that property's other versions.
 - Franchise films with different titles (e.g. numbered sequels) belong on the vertical axis, NOT in left/right unless they are also valid craft Influence/Legacy (rare—prefer one slot).
 - lineageConnectedAbove (required on every seriesPrevious[] and seriesNext[] entry, and on center when it has seriesPrevious): boolean.
-  - true ONLY when this entry is a canonical sequel/prequel/story continuation directly above it in the vertical chain (draw connecting line).
-  - false for remakes, re-adaptations, reboots, or same source material in a different era (e.g. All Quiet on the Western Front 1930 above 2022)—still list on the axis, NO line.
-  - Example: center = All Quiet (2022), seriesPrevious = [{ title: "All Quiet on the Western Front", year: 1930, lineageConnectedAbove: false, ... }].
+  - true ONLY when this entry is a canonical sequel, prequel, numbered franchise installment, or direct narrative story continuation in the same continuity (draw connecting line).
+  - false for ALL of the following — still list on the axis, NO line:
+    - remakes, re-adaptations, reboots, or same source material in a different era
+    - same screenplay or source material in different hands
+    - earlier work sharing only a character name, character concept, or title reference without shared narrative continuity
+    - cultural predecessor or thematic precursor the center film references but does not continue as a story
+    - earlier related work without direct narrative lineage
+  - When in doubt, use false. Only use true when the narrative thread is unambiguously continuous.
+  - Example 1: center = All Quiet on the Western Front (2022), seriesPrevious = [{ title: "All Quiet on the Western Front", year: 1930, lineageConnectedAbove: false, ... }] — same source, different era, no connector.
+  - Example 2: center = Do Not Expect Too Much from the End of the World (2023), seriesPrevious = [{ title: "Angela Goes On", year: 1982, lineageConnectedAbove: false, ... }] — shared character name and cultural reference, not a narrative continuation, no connector.
 
 When several films share the same documented craft lineage (e.g. courtroom/jury tradition, cyberpunk visual line), include the strongest documented examples up to three per side—still omitting weak prestige-only pairings; do not stop after one if two or three are widely taught or cited.
 
@@ -1820,6 +1962,15 @@ relationshipBullets writing style (Criterion / museum essay / film criticism):
   - Ritualized masculine violence
   - Mechanical body horror
   - Mythic revenge structure
+  - Handheld realism in combat staging
+  - Ironic classical score against violence
+  - Long-take choreographic action grammar
+  - Fragmented non-linear memory structure
+  - Neon urban cyberpunk image language
+  - Procedural slow-burn narrative architecture
+  - Antihero moral ambiguity without redemption
+  - Desaturated palette for psychological dread
+  - Widescreen symmetrical composition language
 - BAD bullet examples (reject this register):
   - use of stylized sets and lighting
   - exploration of psychological themes
@@ -1836,7 +1987,7 @@ relationshipBullets writing style (Criterion / museum essay / film criticism):
 General:
 - center must be the subject film (use the provided title and year when known).
 - Never duplicate a film across left, right, seriesPrevious, and seriesNext.
-- Each note: one short phrase, max 12 words, no URLs, no citations, no footnotes.
+- Each note: one short phrase, max 12 words naming the specific cinematic element — not the genre alone. Cross-dimension examples: "Ironic classical-score placement against violence", "Symmetrical production design in dystopian space", "Handheld realism influencing war cinema", "Antihero archetype codification in genre cinema", "Fragmented non-linear memory structure". No URLs, no citations, no footnotes.
 - Use English for notes and summaries. Real film titles only. Do not include posterUrl fields.
 - seriesPrevious/seriesNext: note + lineageConnectedAbove + sameSourceVertical + optional plotSummary/boxOffice; no relationshipSummary fields.
 - NEVER put significanceBullets, plotSummary, or boxOffice on center, left[], or right[].
@@ -2081,6 +2232,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    result = filterSeriesNodesDuplicatingCenter(result);
     result = applySeriesSummaryScope(result);
 
     logFilmDnaDiag("final-response", {

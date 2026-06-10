@@ -242,18 +242,25 @@ type ConnectionRoute = {
   target: StageCoord;
   targetEdge: PosterEdge;
   routing: ConnectionRouting;
+  straight?: boolean;
 };
 
 
 /**
  * Influence/Legacy（多节点布局）：水平出 → 垂直弯 → 水平进（侧向连接）。
+ * When `straight` is true (single visible node on that side), render a direct
+ * straight line from source to the approach point instead of the bent polyline.
  */
 function buildInfluenceLegacyPolyline(
   source: StageCoord,
   target: StageCoord,
   targetEdge: PosterEdge,
+  straight?: boolean,
 ): string {
   const approach = approachPointBeforeArrow(target, targetEdge);
+  if (straight) {
+    return `M ${source.x} ${source.y} L ${approach.x} ${approach.y}`;
+  }
   const midX = (source.x + approach.x) / 2;
   return `M ${source.x} ${source.y} H ${midX} V ${approach.y} H ${approach.x}`;
 }
@@ -289,6 +296,7 @@ function buildConnectionPolyline(route: ConnectionRoute): string {
     route.source,
     route.target,
     route.targetEdge,
+    route.straight,
   );
 }
 
@@ -407,8 +415,26 @@ function filmNodesMatchForSeriesDedup(
   return true;
 }
 
+/** Machine-generated note injected by TMDb collection detection (edge function). */
+const SERIES_PREV_NOTE = "Previous entry in the same series.";
+const SERIES_NEXT_NOTE = "Next entry in the same series.";
+
+/**
+ * Positive signal that two adjacent Y-axis entries are in true series continuity
+ * (sequel, prequel, franchise installment) and should draw a connecting line.
+ * Model-generated notes for numbered parts, sequels, prequels, follow-ups.
+ * NOTE: SERIES_PREV_NOTE / SERIES_NEXT_NOTE are intentionally excluded from the
+ * canonical test to prevent self-validation of machine-generated TMDb text.
+ */
+const CANONICAL_SERIES_RE =
+  /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b/i;
+
 /**
  * 推断系列链相邻节点是否应绘制垂直连线（无显式 API 字段时）。
+ *
+ * Returns true only when a positive canonical-series signal is present in
+ * lower.note or the titles. upper.note is excluded because it may be the
+ * machine-generated TMDb constant which would self-match CANONICAL_SERIES_RE.
  *
  * @param upper 链中上方节点
  * @param lower 链中下方节点
@@ -420,11 +446,20 @@ function inferLineageConnectedAbove(
   if (filmNodesMatchTitle(upper, lower)) return false;
   const combined = `${upper.note} ${lower.note} ${upper.title} ${lower.title}`;
   if (NON_CANONICAL_LINEAGE_RE.test(combined)) return false;
-  return true;
+  // upper.note excluded: may be SERIES_PREV_NOTE / SERIES_NEXT_NOTE which
+  // self-matches CANONICAL_SERIES_RE and produces false positives.
+  const canonicalTest = `${lower.note} ${upper.title} ${lower.title}`;
+  if (CANONICAL_SERIES_RE.test(canonicalTest)) return true;
+  return false;
 }
 
 /**
  * 是否绘制系列链上、下相邻海报之间的垂直连线/箭头。
+ *
+ * explicit false => no connector.
+ * explicit true => trusted for GPT-generated nodes; re-validated via inference
+ * for TMDb-machine-note nodes (SERIES_PREV_NOTE / SERIES_NEXT_NOTE) because
+ * the stored true may have been computed by an older permissive inference pass.
  *
  * @param upper 上方节点
  * @param lower 下方节点
@@ -434,7 +469,13 @@ function shouldDrawSeriesLineAbove(
   lower: FilmDnaNode,
 ): boolean {
   if (typeof lower.lineageConnectedAbove === 'boolean') {
-    return lower.lineageConnectedAbove;
+    if (!lower.lineageConnectedAbove) return false;
+    // Re-validate TMDb-machine-note nodes: their stored true may have been set
+    // by old inference that defaulted to true rather than requiring a signal.
+    if (upper.note === SERIES_PREV_NOTE || upper.note === SERIES_NEXT_NOTE) {
+      return inferLineageConnectedAbove(upper, lower);
+    }
+    return true;
   }
   return inferLineageConnectedAbove(upper, lower);
 }
@@ -596,6 +637,8 @@ type FilmDnaConnectionLinesProps = {
   /** center 在系列链中的索引（= seriesPrevious 数量）。 */
   seriesCenterChainIndex: number;
   hover: HoverTarget | null;
+  influenceCount: number;
+  legacyCount: number;
 };
 
 /**
@@ -606,6 +649,8 @@ function FilmDnaConnectionLines({
   seriesSpecs,
   seriesCenterChainIndex,
   hover,
+  influenceCount,
+  legacyCount,
 }: FilmDnaConnectionLinesProps) {
   return (
     <svg
@@ -626,7 +671,10 @@ function FilmDnaConnectionLines({
         )
           ? 1
           : 0.25;
-        const polyline = buildConnectionPolyline(route);
+        const straight =
+          (lineKey.startsWith('influence') && influenceCount === 1) ||
+          (lineKey.startsWith('legacy') && legacyCount === 1);
+        const polyline = buildConnectionPolyline({ ...route, straight });
         return (
           <g key={lineKey} fill="white" opacity={opacity}>
             <path
@@ -1744,6 +1792,8 @@ function FilmDnaGraph({
               seriesSpecs={seriesConnectionSpecs}
               seriesCenterChainIndex={seriesCenterChainIndex}
               hover={hover}
+              influenceCount={influenceNodes.length}
+              legacyCount={legacyNodes.length}
             />
           </motion.div>
 

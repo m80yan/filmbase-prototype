@@ -16,6 +16,7 @@ import { MOCK_MOVIES } from './constants';
 import { Movie, MovieCastDetail } from './types';
 import { getSupabaseClient, signInAnonymously } from './lib/supabaseClient';
 import { invokeGenerateFilmDna } from './lib/generateFilmDna';
+import { loadFilmDnaGraph, saveFilmDnaGraph } from './lib/filmDnaGraphStore';
 import FilmDnaPanel from './components/FilmDnaOverlay';
 import type { FilmDnaTree } from './types/filmDna';
 import {
@@ -2695,6 +2696,15 @@ export default function App() {
     setFilmDnaError('');
     void (async () => {
       try {
+        // Check for a persisted graph before calling OpenAI.
+        const cached = await loadFilmDnaGraph(supabase, movie.id);
+        if (ac.signal.aborted) return;
+        if (cached) {
+          setFilmDnaTree(cached);
+          setFilmDnaStatus('ready');
+          return;
+        }
+
         const tree = await invokeGenerateFilmDna(
           supabase,
           {
@@ -2719,6 +2729,8 @@ export default function App() {
         if (ac.signal.aborted) return;
         setFilmDnaTree(tree);
         setFilmDnaStatus('ready');
+        // Persist the hydrated graph — non-blocking, failure must not affect render.
+        void saveFilmDnaGraph(supabase, movie.id, movie.title, movie.year, tree);
       } catch (err) {
         if (ac.signal.aborted) return;
         setFilmDnaStatus('error');

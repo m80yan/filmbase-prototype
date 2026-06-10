@@ -148,9 +148,41 @@ Always recompute geometry after resize.
 
 # Film DNA Skills
 
-## GPT output instability
+## Film DNA persistence direction
 
-Film DNA generation is probabilistic.
+Film DNA should not behave like a fresh AI answer every time the user opens it.
+
+Target architecture:
+- generate once
+- normalize once
+- persist to Supabase
+- read persisted data on future opens
+
+Product rule:
+- OpenAI generation is a creation path
+- Supabase persisted Film DNA graph data is the source of truth
+
+This avoids:
+- slow repeated generation
+- unstable node sets across clicks
+- different graphs for the same center movie
+- inconsistent poster enrichment
+- unpredictable graph layout data
+
+Default behavior:
+1. Open Film DNA for a center movie.
+2. Check Supabase for an existing ready graph.
+3. If found, render the stored graph immediately.
+4. If not found, call OpenAI once through the existing trusted generation path.
+5. Normalize the generated graph.
+6. Save it to Supabase.
+7. Render the saved graph.
+
+Do not add a visible regenerate or refresh control unless explicitly requested.
+
+## OpenAI output instability
+
+Film DNA generation uses the OpenAI API. OpenAI output is probabilistic and should be treated as draft graph data until normalized and persisted.
 
 Never assume:
 - valid JSON
@@ -158,9 +190,81 @@ Never assume:
 - complete node structures
 - valid poster fields
 
-Always normalize AI output before rendering.
+Always normalize OpenAI output before rendering or saving.
+
+Normalization must:
+- cap influence nodes to 0–3
+- cap legacy nodes to 0–3
+- remove duplicate nodes across both sides
+- remove invalid nodes without title or year
+- remove low-confidence filler when confidence exists
+- preserve posterUrl when available
+- preserve relationshipLabel when available
+- preserve relationshipReason when available
+
+Do not persist raw OpenAI response text as the stable graph record.
+Persist the normalized graph shape the UI expects.
+
+## OpenAI API handling
+
+Film DNA relationship data is generated through the OpenAI API.
+
+Security rules:
+- do not expose `OPENAI_API_KEY` to browser/client code
+- do not store OpenAI API keys in frontend files
+- do not commit `.env` files or secrets
+- prefer an existing Supabase Edge Function or trusted server-side path for OpenAI calls
+
+Before changing Film DNA generation, inspect:
+- where OpenAI is called
+- where `OPENAI_API_KEY` is stored or read
+- which OpenAI model is used
+- what prompt or schema asks OpenAI to return
+- how OpenAI JSON output is parsed and validated
+- whether poster enrichment happens before or after OpenAI generation
+
+Implementation rule:
+
+```txt
+OpenAI API = generation path
+Supabase persisted graph = source of truth
+```
+
+Do not solve Film DNA stability with React-only cache. The result must survive refreshes and future sessions.
 
 ---
+
+## Film DNA node quality
+
+Each side of the center node should contain 0–3 nodes.
+
+Influence side:
+- earlier works that clearly shaped, inspired, preceded, or strongly relate to the center film
+
+Legacy side:
+- later works that were clearly influenced by, descended from, or strongly connected to the center film
+
+Rules:
+- do not force exactly 3 nodes
+- do not pad weak or generic recommendations
+- strong relationship quality is more important than visual symmetry
+- avoid duplicate titles, years, or IMDb IDs
+- prefer clear film-level relationships over loose genre similarity
+- fewer strong nodes are better than a full but weak graph
+
+Expected node shape:
+
+```ts
+type FilmDnaNode = {
+  title: string
+  year: number
+  imdbId?: string
+  posterUrl?: string
+  relationshipLabel?: string
+  relationshipReason?: string
+  confidence?: "high" | "medium" | "low"
+}
+```
 
 ## Poster reconciliation
 
@@ -171,6 +275,13 @@ Center node uses:
 - centerPosterUrl
 
 Do not mix these fields.
+
+When changing Film DNA persistence, generation, or enrichment, inspect current mapping for:
+- center node poster field
+- influence node poster field
+- legacy node poster field
+
+Do not assume poster fields are consistent without checking the current implementation.
 
 ---
 
@@ -190,6 +301,18 @@ Avoid:
 ---
 
 # Data Consistency Skills
+
+## Persisted data should be the source of truth
+
+For features that need stable repeatable output, prefer persisted Supabase data over repeated OpenAI generation.
+
+Examples:
+- Film DNA graphs
+- curated movie metadata
+- poster overrides
+- trailer overrides
+
+Repeated OpenAI generation is acceptable only as a first-time creation path, repair path, or explicitly requested regeneration path.
 
 ## movie.posterUrl is UI-facing
 
@@ -230,6 +353,20 @@ Always:
 ---
 
 # AI Workflow Skills
+
+## Investigation before implementation
+
+Before editing FilmBase code, a coding agent should first identify:
+- the exact trigger path
+- the relevant state shape
+- existing helper functions
+- existing Supabase access pattern
+- existing OpenAI call path, if the task touches Film DNA generation
+- existing OpenAI model and prompt/schema, if the task touches Film DNA generation
+- existing loading and error states
+- existing fallback behavior
+
+Do not implement from assumptions when a current pattern already exists.
 
 ## Use Ask mode before Agent mode
 
