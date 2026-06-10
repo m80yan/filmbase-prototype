@@ -8453,7 +8453,7 @@ function MovieCard({
 
   useLayoutEffect(() => {
     setPosterNaturalLoaded(movie.posterUrl.trim().length === 0);
-  }, [movie.posterUrl, movie.id, movie.isMetadataPending]);
+  }, [movie.posterUrl, movie.id, movie.isMetadataPending, posterListIndex]);
 
   useEffect(() => {
     // posterUrl 刷新（重签成功）或切换到新电影时：清掉失败态并允许一次新的 onError→重签。
@@ -8916,7 +8916,7 @@ function MovieCard({
             {showPosterSlotLoading ? <LibraryPosterFrameLoadingGlyph /> : null}
             {movie.posterUrl.trim().length > 0 && !posterFailed ? (
               <img draggable={false}
-                key={`poster-${movie.id}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
+                key={`poster-${movie.id}-${posterListIndex}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
                 src={movie.posterUrl}
                 alt={movie.title}
                 className="relative z-0 h-full w-full object-cover select-none"
@@ -9182,7 +9182,7 @@ function MovieCard({
         {showPosterSlotLoading ? <LibraryPosterFrameLoadingGlyph /> : null}
         {movie.posterUrl.trim().length > 0 && !posterFailed ? (
           <img draggable={false}
-            key={`poster-${movie.id}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
+            key={`poster-${movie.id}-${posterListIndex}-${movie.isMetadataPending ? 'p' : 'r'}-${movie.posterUrl}`}
             src={movie.posterUrl}
             alt={movie.title}
             className="pointer-events-none relative z-0 h-full w-full object-cover select-none"
