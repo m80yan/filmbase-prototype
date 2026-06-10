@@ -5185,8 +5185,10 @@ export default function App() {
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`input-focus-primary w-full bg-black/20 border border-white/10 rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner ${
+              className={`w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner focus:border-[#E99896] focus:ring-0 focus:outline-none ${
+
                 isBackgroundInert ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
+              
               }`}
             />
             {searchQuery && (
@@ -7292,9 +7294,9 @@ export default function App() {
             className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-default items-center justify-center overflow-hidden bg-black/45 p-4 backdrop-blur-[6px] md:p-8"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
@@ -7387,11 +7389,7 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className={`input-focus-primary w-full h-10 bg-black/20 border border-white/10 rounded-[22px] pl-10 text-white text-sm font-medium transition-colors disabled:focus:border-white/10 ${
-                        isAdding ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
-                      } ${
-                        newMovieTitle ? 'pr-10' : 'pr-3'
-                      }`}
+                      className="w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner placeholder:text-white/20 focus:border-[#E99896] focus:ring-0 focus:outline-none"
                     />
                     {newMovieTitle ? (
                       <ClearSearchButton
@@ -7568,7 +7566,7 @@ export default function App() {
                       }}
                       disabled={isAdding}
                       readOnly={isImdbEntered}
-                      className={`input-modal-url-field ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`input-modal-url-field !bg-black/30 !border-transparent focus:!border-white/40 ${isImdbEntered ? 'opacity-50 cursor-not-allowed' : ''}`}
                     />
                   </motion.div>
                 )}
@@ -7584,7 +7582,7 @@ export default function App() {
                     value={newMovieTrailerUrl}
                     onChange={(e) => setNewMovieTrailerUrl(e.target.value)}
                     disabled={isAdding}
-                    className="input-modal-url-field"
+                    className="input-modal-url-field !bg-black/30 !border-transparent focus:!border-white/40"
                   />
                 </div>
               </div>
@@ -7642,9 +7640,9 @@ export default function App() {
             className="absolute inset-0 z-[106] flex h-full min-h-0 cursor-pointer items-center justify-center overflow-hidden bg-black/45 p-4 backdrop-blur-[6px] md:p-8"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
               transition={MAIN_MODAL_PANEL_TRANSITION}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
@@ -7742,7 +7740,7 @@ export default function App() {
                     }
                   }}
                   disabled={isEditingTrailer}
-                  className="edit-trailer-url-input input-modal-url-field"
+                  className="edit-trailer-url-input input-modal-url-field !bg-black/30 !border-transparent focus:!border-white/40"
                   autoFocus
                 />
               </div>
@@ -8903,7 +8901,7 @@ function MovieCard({
             ref={listPosterShellRef}
             title={isEditing ? undefined : 'Open details'}
             aria-label={isEditing ? undefined : 'Open film details'}
-            className={`relative w-[100px] h-[150px] transition-transform duration-300 ease-out origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit translate-x-[44px]' : 'cursor-pointer group-hover:scale-115'}`}
+            className={`relative w-[100px] h-[150px] overflow-hidden transition-all duration-150 ease-out origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit translate-x-[44px] rounded-[8px] group-hover:rounded-none' : 'cursor-pointer group-hover:scale-115 rounded-none'}`}
             onClick={
               isEditing
                 ? undefined
@@ -9139,11 +9137,11 @@ function MovieCard({
     >
       <div
         ref={gridPosterShellRef}
-        className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-transform duration-300 ease-out origin-bottom border-none ${
+        className={`relative aspect-[2/3] overflow-hidden mb-3 shadow-2xl transition-all duration-150 ease-out origin-bottom border-none ${
           showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''
         } ${
           isEditing
-            ? 'group/posteredit rounded-xl group-hover/posteredit:rounded-none group-hover:rounded-none'
+            ? 'group/posteredit rounded-[16px] group-hover/posteredit:rounded-none group-hover:rounded-none'
             : 'rounded-none group-hover:rounded-none'
         } ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}
       >
