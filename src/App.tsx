@@ -5224,7 +5224,9 @@ export default function App() {
         </div>
         <div
           ref={sidebarScrollRef}
-          className="filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable]"
+          className={`filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable] ${
+            isPosterPreviewOpen ? 'filmbase-sidebar-scrollbar-preview-hidden' : ''
+          }`}
         >
           <nav className="space-y-2">
             <motion.div

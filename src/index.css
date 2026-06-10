@@ -254,6 +254,15 @@
   background-clip: content-box;
 }
 
+.filmbase-scrollbar.filmbase-sidebar-scrollbar-preview-hidden {
+  scrollbar-color: transparent transparent;
+}
+
+.filmbase-scrollbar.filmbase-sidebar-scrollbar-preview-hidden::-webkit-scrollbar-thumb,
+.filmbase-scrollbar.filmbase-sidebar-scrollbar-preview-hidden::-webkit-scrollbar-thumb:hover {
+  background: transparent;
+}
+
 /**
  * 浮层/弹窗内滚动：更低对比，融入深色 overlay / 弹窗背景（非侧栏/主库）。
  */
