@@ -1244,7 +1244,7 @@ function scrollLibraryItemNearTop(
  */
 function listViewTableGridClassName(isEditing: boolean): string {
   return isEditing
-    ? 'grid grid-cols-[12px_132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
+    ? 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
     : 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8';
 }
 
@@ -6366,12 +6366,11 @@ export default function App() {
               <div
                 className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
               >
-                {isEditing && <div className="min-h-5" aria-hidden />}
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
-                  <span className="block w-[100px] max-w-full text-center">Poster</span>
+                  <span className={`block w-[100px] max-w-full text-center transition-transform duration-300 ease-out ${isEditing ? 'translate-x-[44px]' : ''}`}>Poster</span>
                 </div>
-                <div className="relative pl-10">
-                  <button 
+                <div className={`relative pl-10 transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
+                  <button
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
                     className={`flex min-h-5 items-center gap-1.5 leading-5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
                   >
@@ -8901,7 +8900,6 @@ function MovieCard({
               />
             </button>
           </div>
-          <div aria-hidden />
           </>
         )}
         <div className="flex shrink-0 self-stretch items-center justify-center overflow-visible pl-8">
@@ -8909,7 +8907,7 @@ function MovieCard({
             ref={listPosterShellRef}
             title={isEditing ? undefined : 'Open details'}
             aria-label={isEditing ? undefined : 'Open film details'}
-            className={`relative w-[100px] h-[150px] transition-transform duration-300 origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit' : 'cursor-pointer group-hover:scale-115'}`}
+            className={`relative w-[100px] h-[150px] transition-transform duration-300 ease-out origin-center shadow-lg ${showPosterSlotLoading ? 'bg-[#1F1F1F]' : ''} ${isEditing ? 'cursor-default group/posteredit translate-x-[44px]' : 'cursor-pointer group-hover:scale-115'}`}
             onClick={
               isEditing
                 ? undefined
@@ -8950,7 +8948,7 @@ function MovieCard({
           </div>
         </div>
         
-        <div className="relative flex min-h-0 min-w-0 flex-col self-stretch pl-0">
+        <div className={`relative flex min-h-0 min-w-0 flex-col self-stretch pl-0 transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
           {/** Play Trailer：悬停显示于片名上方；顶距列顶与 genre 底距列底同为 `LIST_TITLE_CONTENT_EDGE_INSET_PX` */}
           <div
             className="pointer-events-none absolute left-0 right-0 z-[3] flex items-start justify-start opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
