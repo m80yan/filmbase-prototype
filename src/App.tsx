@@ -1238,15 +1238,11 @@ function scrollLibraryItemNearTop(
 
 /**
  * List View 表头与列表行共用的 grid 列布局（单一定义源，避免表头/行错位）。
- * 列序：编辑删除 | 海报 | 片名（含 hover Play Trailer）| 导演 | 主演 | IMDb | RT | 我的评分。
- *
- * @param isEditing 是否编辑库模式（多一列删除控件）
+ * 列序：海报 | 片名（含 hover Play Trailer）| 导演 | 主演 | IMDb | RT | 我的评分。
+ * Normal mode and Delete Mode share the same grid. Delete Mode offsets Poster/Title
+ * locally (translate-x / margin-left) instead of adding a delete grid column.
  */
-function listViewTableGridClassName(isEditing: boolean): string {
-  return isEditing
-    ? 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8'
-    : 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8';
-}
+const LIST_VIEW_TABLE_GRID_CLASS = 'grid grid-cols-[132px_5.23fr_2.48fr_2.5fr_54px_54px_104px] gap-x-8';
 
 /**
  * 非全屏外层：投影 + 深色外边框。内白凹边由内层 `.filmbase-inner-window-stroke` 绘制，避免被子树 `#050505` 背景盖住。
@@ -6364,7 +6360,7 @@ export default function App() {
                 >
                   <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 py-4 backdrop-blur-md">
               <div
-                className={`filmbase-list-view-header-grid ${listViewTableGridClassName(isEditing)} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
+                className={`filmbase-list-view-header-grid ${LIST_VIEW_TABLE_GRID_CLASS} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
               >
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
                   <span className={`block w-[100px] max-w-full text-center transition-transform duration-300 ease-out ${isEditing ? 'translate-x-[44px]' : ''}`}>Poster</span>
@@ -8869,7 +8865,7 @@ function MovieCard({
         initial={{ opacity: 1, x: -16 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 1, x: 16 }}
-        className={`group relative hover:z-10 overflow-visible ${listViewTableGridClassName(isEditing)} items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-default w-full transition-[background-color] duration-200 ease-out`}
+        className={`group relative hover:z-10 overflow-visible ${LIST_VIEW_TABLE_GRID_CLASS} items-stretch px-0 h-[172px] rounded-none border-b border-[rgba(41,41,41,0.5)] hover:bg-white/5 cursor-default w-full transition-[background-color] duration-200 ease-out`}
         style={{ flexDirection: 'column' }}
         onMouseEnter={() => setIsListStarringMarqueeHover(true)}
         onMouseLeave={() => {
