@@ -23,6 +23,10 @@ type FilmDnaPanelProps = {
   isExiting?: boolean;
   /** Scale factor for the enter/exit morph: how many times larger than the DNA node the preview poster appears. */
   enterScale?: number;
+  /** Called when the user clicks Play Trailer on the center node. */
+  onPlayCenterTrailer?: () => void;
+  /** Called when the user clicks Play Trailer on a non-center node. */
+  onPlayNodeTrailer?: (node: FilmDnaNode) => void;
 };
 
 /** 侧栏最多展示的节点数。 */
@@ -1461,6 +1465,8 @@ type FilmDnaNodeCardProps = {
   onHover: (target: HoverTarget | null) => void;
   /** 海报矩形左上角（虚拟舞台坐标，连线锚点）。 */
   posterPos: StagePoint;
+  /** Called when user clicks Play Trailer. Center: always-visible. Non-center: hover-only. */
+  onPlayTrailer?: () => void;
 };
 
 /**
@@ -1475,6 +1481,7 @@ function FilmDnaNodeCard({
   hoverTarget,
   onHover,
   posterPos,
+  onPlayTrailer,
 }: FilmDnaNodeCardProps) {
   const year = formatFilmDnaYear(node.year);
   const dimmed = !isCenter && !highlighted;
@@ -1531,6 +1538,29 @@ function FilmDnaNodeCard({
           className={`${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
         />
       ) : null}
+      {isCenter && onPlayTrailer ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
+          className="mt-2 cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+        >
+          Play Trailer
+        </button>
+      ) : null}
+      {!isCenter && onPlayTrailer ? (
+        <div
+          className="pointer-events-none absolute opacity-0 group-hover/poster:pointer-events-auto group-hover/poster:opacity-100 transition-opacity"
+          style={{ left: POSTER_W, top: 0, paddingLeft: 20 }}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
+            className="cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+          >
+            Play Trailer
+          </button>
+        </div>
+      ) : null}
     </motion.article>
   );
 }
@@ -1543,6 +1573,8 @@ type FilmDnaGraphProps = {
   status: 'loading' | 'ready' | 'error';
   isExiting: boolean;
   enterScale: number;
+  onPlayCenterTrailer?: () => void;
+  onPlayNodeTrailer?: (node: FilmDnaNode) => void;
 };
 
 /**
@@ -1556,6 +1588,8 @@ function FilmDnaGraph({
   status,
   isExiting,
   enterScale,
+  onPlayCenterTrailer,
+  onPlayNodeTrailer,
 }: FilmDnaGraphProps) {
   const seriesPrevious = (tree.seriesPrevious ?? []).slice(
     0,
@@ -1871,6 +1905,7 @@ function FilmDnaGraph({
               highlighted
               onHover={setHover}
               posterPos={{ left: 0, top: 0 }}
+              onPlayTrailer={onPlayCenterTrailer}
             />
           </motion.div>
 
@@ -1966,6 +2001,7 @@ function FilmDnaGraph({
                     onHover={setHover}
                     posterUrl={node.posterUrl}
                     posterPos={nodeFrameToPosterAnchor(getEffectiveInfluencePos(index))}
+                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
                   />
                 ))}
 
@@ -1981,6 +2017,7 @@ function FilmDnaGraph({
                     onHover={setHover}
                     posterUrl={node.posterUrl}
                     posterPos={nodeFrameToPosterAnchor(getEffectiveLegacyPos(index))}
+                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
                   />
                 ))}
 
@@ -1997,6 +2034,7 @@ function FilmDnaGraph({
                     })}
                     onHover={setHover}
                     posterPos={seriesPreviousPositions[index]}
+                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
                   />
                 ))}
 
@@ -2013,6 +2051,7 @@ function FilmDnaGraph({
                     })}
                     onHover={setHover}
                     posterPos={seriesNextPositions[index]}
+                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
                   />
                 ))}
               </motion.div>
@@ -2036,6 +2075,8 @@ export default function FilmDnaPanel({
   centerYear,
   isExiting = false,
   enterScale = 5,
+  onPlayCenterTrailer,
+  onPlayNodeTrailer,
 }: FilmDnaPanelProps) {
   const showGraph = status === 'loading' || status === 'ready';
 
@@ -2044,6 +2085,13 @@ export default function FilmDnaPanel({
       className="absolute inset-0 flex min-h-0 w-full flex-col"
       aria-busy={status === 'loading'}
     >
+      {/* Dark translucent background — matches Film Info mode, fades out on exit */}
+      <motion.div
+        className="pointer-events-none absolute inset-0 bg-black/85"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: isExiting ? 0 : 1 }}
+        transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
+      />
       {status === 'error' ? (
         <motion.div
           className="flex min-h-full w-full flex-col items-center justify-center px-4 py-8 sm:px-8"
@@ -2067,6 +2115,8 @@ export default function FilmDnaPanel({
           status={status}
           isExiting={isExiting}
           enterScale={enterScale}
+          onPlayCenterTrailer={onPlayCenterTrailer}
+          onPlayNodeTrailer={onPlayNodeTrailer}
         />
       ) : null}
     </div>

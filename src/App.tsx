@@ -17,6 +17,7 @@ import { Movie, MovieCastDetail } from './types';
 import { getSupabaseClient, signInAnonymously } from './lib/supabaseClient';
 import { invokeGenerateFilmDna } from './lib/generateFilmDna';
 import { loadFilmDnaGraph, saveFilmDnaGraph } from './lib/filmDnaGraphStore';
+import { hydrateFilmDnaTreeFromLibrary } from './lib/filmDnaPosterHydration';
 import FilmDnaPanel from './components/FilmDnaOverlay';
 import type { FilmDnaTree } from './types/filmDna';
 import {
@@ -2703,6 +2704,25 @@ export default function App() {
     }, 400);
   }, [isFilmDnaOpen, isFilmDnaExiting]);
 
+  const onPlayCenterTrailer = useCallback(() => {
+    if (!posterPreviewMovie) return;
+    setSelectedMovie(posterPreviewMovie);
+    setModalMode('trailer');
+  }, [posterPreviewMovie]);
+
+  const onPlayNodeTrailer = useCallback((node: import('./types/filmDna').FilmDnaNode) => {
+    const normalizedTitle = node.title.toLowerCase().trim();
+    const match = moviesRef.current.find(
+      (m) =>
+        m.title.toLowerCase().trim() === normalizedTitle &&
+        (node.year == null || m.year === node.year),
+    );
+    if (match) {
+      setSelectedMovie(match);
+      setModalMode('trailer');
+    }
+  }, []);
+
   /**
    * 进入 Film DNA 模式并调用 `generate-film-dna`（与 Info 互斥，由调用方先 `setIsInfoMode(false)`）。
    *
@@ -2739,7 +2759,17 @@ export default function App() {
         const cached = await loadFilmDnaGraph(supabase, movie.id);
         if (ac.signal.aborted) return;
         if (cached) {
-          setFilmDnaTree(cached);
+          const hydratedCached = hydrateFilmDnaTreeFromLibrary(
+            cached,
+            moviesRef.current.map((m) => ({
+              id: m.id,
+              title: m.title,
+              year: m.year,
+              posterUrl: m.posterUrl,
+              posterStoragePath: m.posterStoragePath,
+            })),
+          );
+          setFilmDnaTree(hydratedCached);
           setFilmDnaStatus('ready');
           return;
         }
@@ -2761,6 +2791,7 @@ export default function App() {
               title: m.title,
               year: m.year,
               posterUrl: m.posterUrl,
+              posterStoragePath: m.posterStoragePath,
             })),
             signal: ac.signal,
           },
@@ -7212,11 +7243,10 @@ export default function App() {
                     <div
                       role="region"
                       aria-label="Film DNA"
-                      className="filmbase-selectable-text pointer-events-auto absolute inset-0 z-[25]"
+                      className="pointer-events-auto absolute inset-0 z-[25]"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
                     >
-                      <div className="pointer-events-none absolute inset-0 bg-black/85" />
                       <FilmDnaPanel
                         status={
                           filmDnaStatus === 'idle' ? 'loading' : filmDnaStatus
@@ -7234,6 +7264,8 @@ export default function App() {
                         centerYear={posterPreviewMovie.year}
                         isExiting={isFilmDnaExiting}
                         enterScale={filmDnaEnterScale}
+                        onPlayCenterTrailer={onPlayCenterTrailer}
+                        onPlayNodeTrailer={onPlayNodeTrailer}
                       />
                     </div>
                   ) : isInfoMode ? (

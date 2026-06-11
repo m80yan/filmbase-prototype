@@ -7,6 +7,8 @@ export type FilmDnaLibraryMovie = {
   title: string;
   year: number;
   posterUrl: string;
+  /** 存在时表示该片使用用户上传海报（Storage 路径），优先级高于 TMDB/节点自带海报。 */
+  posterStoragePath?: string;
 };
 
 const POSTER_FIELD_KEYS = ['posterUrl', 'poster_url', 'poster', 'imageUrl'] as const;
@@ -62,6 +64,8 @@ export function withNormalizedPosterUrl(node: FilmDnaNode): FilmDnaNode {
 export type LibraryPosterLookup = {
   byIdentity: Map<string, string>;
   byImdbId: Map<string, string>;
+  /** 仅包含有用户上传海报（posterStoragePath 存在）的条目，优先级高于节点自带 posterUrl。 */
+  uploadOnly: Map<string, string>;
 };
 
 /**
@@ -74,6 +78,7 @@ export function buildLibraryPosterLookup(
 ): LibraryPosterLookup {
   const byIdentity = new Map<string, string>();
   const byImdbId = new Map<string, string>();
+  const uploadOnly = new Map<string, string>();
 
   for (const movie of movies) {
     const url = movie.posterUrl?.trim();
@@ -82,6 +87,9 @@ export function buildLibraryPosterLookup(
     const titleKey = normalizeFilmTitleKey(movie.title);
     if (titleKey && Number.isFinite(movie.year) && movie.year > 0) {
       byIdentity.set(`${titleKey}|${movie.year}`, url);
+      if (movie.posterStoragePath) {
+        uploadOnly.set(`${titleKey}|${movie.year}`, url);
+      }
     }
 
     const imdb = movie.id.trim().toLowerCase();
@@ -90,7 +98,7 @@ export function buildLibraryPosterLookup(
     }
   }
 
-  return { byIdentity, byImdbId };
+  return { byIdentity, byImdbId, uploadOnly };
 }
 
 /**
@@ -133,8 +141,20 @@ function hydrateFilmDnaNode(
   lookup?: LibraryPosterLookup,
 ): FilmDnaNode {
   const normalized = withNormalizedPosterUrl(node);
+
+  // Priority 1: user-uploaded poster from library (overrides TMDB/node posterUrl).
+  if (lookup?.uploadOnly.size) {
+    const titleKey = normalizeFilmTitleKey(normalized.title);
+    if (titleKey && typeof normalized.year === 'number' && normalized.year > 0) {
+      const uploaded = lookup.uploadOnly.get(`${titleKey}|${normalized.year}`);
+      if (uploaded) return { ...normalized, posterUrl: uploaded };
+    }
+  }
+
+  // Priority 2: node's own posterUrl (TMDB/backend).
   if (normalized.posterUrl?.trim()) return normalized;
 
+  // Priority 3: any library poster (fallback when node has no posterUrl).
   if (lookup) {
     const fromLibrary = lookupLibraryPosterUrl(normalized, lookup);
     if (fromLibrary) {
