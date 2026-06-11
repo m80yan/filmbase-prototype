@@ -4022,7 +4022,7 @@ export default function App() {
     void (async () => {
       try {
         const newMovie = await enrichAndUpsertNewMovie(imdbId, userTrailerSnapshot);
-        setMovies((prev) => prev.map((m) => (m.id === imdbId ? { ...newMovie } : m)));
+        setMovies((prev) => [newMovie, ...prev.filter((m) => m.id !== imdbId)]);
       } catch (err) {
         console.error('fast add enrich failed:', err);
         setMovies((prev) => prev.filter((m) => m.id !== imdbId));
