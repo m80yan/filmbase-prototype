@@ -2036,8 +2036,8 @@ function buildUserPrompt(body: FilmDnaRequestBody): string {
 // ---------------------------------------------------------------------------
 
 type InfluenceEdgeRow = {
-  source_tmdb_id: number;
-  target_tmdb_id: number;
+  source_tmdb_id: number | null;
+  target_tmdb_id: number | null;
   source_title: string;
   source_year: number | null;
   source_poster_url: string | null;
@@ -2049,12 +2049,13 @@ type InfluenceEdgeRow = {
   relationship_bullets: string[] | null;
   confidence: "ai";
   ai_model: string;
+  generated_from_movie_id: string | null;
 };
 
 /**
  * Build Phase-1 influence edge rows from a finalised FilmDnaTree.
- * Only emits rows when BOTH source and target carry a confirmed TMDB ID —
- * skipping title-only nodes avoids creating low-quality duplicates.
+ * Requires usable titles for both source and target; TMDB IDs are populated
+ * when available but are not required — title-only rows are valid.
  *
  * Direction rule (mirrors render semantics):
  *   left[]  nodes influenced the center  → source = node,   target = center
@@ -2065,15 +2066,16 @@ function buildInfluenceEdgeRows(
   model: string,
 ): InfluenceEdgeRow[] {
   const { center } = tree;
-  if (!center.tmdbMovieId) return [];
+  if (!center.title?.trim()) return [];
 
+  const centerTmdb = center.tmdbMovieId ?? null;
   const rows: InfluenceEdgeRow[] = [];
 
   for (const node of tree.left) {
-    if (!node.tmdbMovieId) continue;
+    if (!node.title?.trim()) continue;
     rows.push({
-      source_tmdb_id: node.tmdbMovieId,
-      target_tmdb_id: center.tmdbMovieId,
+      source_tmdb_id: node.tmdbMovieId ?? null,
+      target_tmdb_id: centerTmdb,
       source_title: node.title,
       source_year: typeof node.year === "number" ? node.year : null,
       source_poster_url: node.posterUrl?.trim() || null,
@@ -2088,14 +2090,15 @@ function buildInfluenceEdgeRows(
           : null,
       confidence: "ai",
       ai_model: model,
+      generated_from_movie_id: null,
     });
   }
 
   for (const node of tree.right) {
-    if (!node.tmdbMovieId) continue;
+    if (!node.title?.trim()) continue;
     rows.push({
-      source_tmdb_id: center.tmdbMovieId,
-      target_tmdb_id: node.tmdbMovieId,
+      source_tmdb_id: centerTmdb,
+      target_tmdb_id: node.tmdbMovieId ?? null,
       source_title: center.title,
       source_year: typeof center.year === "number" ? center.year : null,
       source_poster_url: center.posterUrl?.trim() || null,
@@ -2110,6 +2113,7 @@ function buildInfluenceEdgeRows(
           : null,
       confidence: "ai",
       ai_model: model,
+      generated_from_movie_id: null,
     });
   }
 
@@ -2126,6 +2130,7 @@ async function persistInfluenceEdges(
   supabaseUrl: string,
   serviceKey: string,
 ): Promise<void> {
+  console.log(`${LOG_PREFIX} [edges] persist called`, { rowCount: rows.length });
   if (rows.length === 0) return;
   const resp = await fetch(
     `${supabaseUrl}/rest/v1/film_dna_relationship_edges`,
@@ -2140,8 +2145,13 @@ async function persistInfluenceEdges(
       body: JSON.stringify(rows),
     },
   );
+  console.log(`${LOG_PREFIX} [edges] PostgREST response`, {
+    status: resp.status,
+    ok: resp.ok,
+  });
   if (!resp.ok) {
     const text = await resp.text();
+    console.warn(`${LOG_PREFIX} [edges] PostgREST error body`, text.slice(0, 500));
     throw new Error(`edge write ${resp.status}: ${text.slice(0, 300)}`);
   }
 }
@@ -2376,28 +2386,58 @@ Deno.serve(async (req) => {
       seriesNextCount: result.seriesNext?.length ?? 0,
     });
 
-    // Write influence edges after the response is sent — never blocks generation.
-    // EdgeRuntime.waitUntil keeps the function alive until the task resolves.
+    // ---------------------------------------------------------------------------
+    // Phase 1 edge persistence — TEMPORARY DEBUG MODE
+    // awaited so all logs flush before the response is returned.
+    // Restore to EdgeRuntime.waitUntil once persistence is confirmed working.
+    // ---------------------------------------------------------------------------
     {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
-      if (supabaseUrl && serviceKey) {
+
+      const leftNoTmdb = result.left.filter((n) => !n.tmdbMovieId).length;
+      const rightNoTmdb = result.right.filter((n) => !n.tmdbMovieId).length;
+      const leftNoTitle = result.left.filter((n) => !n.title?.trim()).length;
+      const rightNoTitle = result.right.filter((n) => !n.title?.trim()).length;
+
+      console.log(`${LOG_PREFIX} [edges] start`, {
+        hasSupabaseUrl: Boolean(supabaseUrl),
+        hasServiceKey: Boolean(serviceKey),
+        centerTitle: result.center.title,
+        centerYear: result.center.year,
+        centerTmdbId: result.center.tmdbMovieId ?? null,
+        leftCount: result.left.length,
+        rightCount: result.right.length,
+        leftNoTmdb,
+        rightNoTmdb,
+        leftSkippedNoTitle: leftNoTitle,
+        rightSkippedNoTitle: rightNoTitle,
+      });
+
+      if (!supabaseUrl || !serviceKey) {
+        console.warn(`${LOG_PREFIX} [edges] skipped — missing env vars`);
+      } else {
         const edgeRows = buildInfluenceEdgeRows(result, OPENAI_MODEL);
-        if (edgeRows.length > 0) {
-          const edgeTask = persistInfluenceEdges(edgeRows, supabaseUrl, serviceKey)
-            .then(() => {
-              console.log(
-                `${LOG_PREFIX} wrote ${edgeRows.length} influence edge(s)`,
-              );
-            })
-            .catch((edgeErr) => {
-              console.warn(
-                `${LOG_PREFIX} influence edge write failed (non-critical)`,
-                edgeErr,
-              );
-            });
-          // deno-lint-ignore no-explicit-any
-          (globalThis as any).EdgeRuntime?.waitUntil?.(edgeTask);
+        console.log(`${LOG_PREFIX} [edges] built`, { rowCount: edgeRows.length });
+
+        if (edgeRows.length === 0) {
+          console.warn(
+            `${LOG_PREFIX} [edges] 0 rows — center or all nodes missing tmdbMovieId`,
+          );
+        } else {
+          // TEMPORARY DEBUG: direct await so logs are captured before function returns.
+          // Restore to EdgeRuntime.waitUntil once confirmed working.
+          try {
+            await persistInfluenceEdges(edgeRows, supabaseUrl, serviceKey);
+            console.log(
+              `${LOG_PREFIX} [edges] wrote ${edgeRows.length} influence edge(s)`,
+            );
+          } catch (edgeErr) {
+            console.warn(
+              `${LOG_PREFIX} [edges] write failed (non-critical)`,
+              edgeErr,
+            );
+          }
         }
       }
     }
