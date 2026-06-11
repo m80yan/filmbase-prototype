@@ -19,6 +19,10 @@ type FilmDnaPanelProps = {
   centerPosterUrl: string;
   centerTitle: string;
   centerYear?: number | null;
+  /** True while the exit animation is playing (toggle or ESC path). */
+  isExiting?: boolean;
+  /** Scale factor for the enter/exit morph: how many times larger than the DNA node the preview poster appears. */
+  enterScale?: number;
 };
 
 /** 侧栏最多展示的节点数。 */
@@ -517,6 +521,14 @@ function buildFilmDnaConnectionSpecs(): FilmDnaConnectionSpec[] {
 
 const FILM_DNA_INFLUENCE_LEGACY_SPECS = buildFilmDnaConnectionSpecs();
 
+const EMPTY_FILM_DNA_TREE: FilmDnaTree = {
+  center: { title: '', year: null, note: '' },
+  left: [],
+  right: [],
+  seriesPrevious: [],
+  seriesNext: [],
+};
+
 /**
  * 构建有序系列链：`[...seriesPrevious, center, ...seriesNext]`（上映日升序，与垂直布局一致）。
  *
@@ -632,6 +644,7 @@ function layoutSeriesNextPositions(count: number): StagePoint[] {
 }
 
 type FilmDnaConnectionLinesProps = {
+  influenceLegacySpecs: FilmDnaConnectionSpec[];
   influenceLegacyPresence: Record<LineKey, boolean>;
   seriesSpecs: FilmDnaConnectionSpec[];
   /** center 在系列链中的索引（= seriesPrevious 数量）。 */
@@ -645,6 +658,7 @@ type FilmDnaConnectionLinesProps = {
  * 全舞台 SVG：由海报锚点生成正交连线；viewBox 固定 1080×871，系列节点/线可溢出。
  */
 function FilmDnaConnectionLines({
+  influenceLegacySpecs,
   influenceLegacyPresence,
   seriesSpecs,
   seriesCenterChainIndex,
@@ -661,7 +675,7 @@ function FilmDnaConnectionLines({
       style={{ overflow: 'visible' }}
       aria-hidden
     >
-      {FILM_DNA_INFLUENCE_LEGACY_SPECS.map(({ lineKey, route }) => {
+      {influenceLegacySpecs.map(({ lineKey, route }) => {
         if (!influenceLegacyPresence[lineKey]) return null;
         const opacity = isLineHighlighted(
           hover,
@@ -1526,6 +1540,9 @@ type FilmDnaGraphProps = {
   centerPosterUrl: string;
   centerTitle: string;
   centerYear: number | null | undefined;
+  status: 'loading' | 'ready' | 'error';
+  isExiting: boolean;
+  enterScale: number;
 };
 
 /**
@@ -1536,6 +1553,9 @@ function FilmDnaGraph({
   centerPosterUrl,
   centerTitle,
   centerYear,
+  status,
+  isExiting,
+  enterScale,
 }: FilmDnaGraphProps) {
   const seriesPrevious = (tree.seriesPrevious ?? []).slice(
     0,
@@ -1620,6 +1640,52 @@ function FilmDnaGraph({
     seriesNext: false,
   };
 
+  // Single-node alignment: when only one node on a side, align its y to center poster y.
+  const getEffectiveInfluencePos = useCallback((index: number): StagePoint => {
+    const frame = NODE_POS.influence[index];
+    return influenceNodes.length === 1
+      ? { left: frame.left, top: CENTER_POSTER_POS.top }
+      : frame;
+  }, [influenceNodes.length]);
+
+  const getEffectiveLegacyPos = useCallback((index: number): StagePoint => {
+    const frame = NODE_POS.legacy[index];
+    return legacyNodes.length === 1
+      ? { left: frame.left, top: CENTER_POSTER_POS.top }
+      : frame;
+  }, [legacyNodes.length]);
+
+  const dynamicInfluenceLegacySpecs = useMemo((): FilmDnaConnectionSpec[] => {
+    const specs: FilmDnaConnectionSpec[] = [];
+    NODE_POS.influence.forEach((_, index) => {
+      const frame = getEffectiveInfluencePos(index);
+      const poster = nodeFrameToPosterAnchor(frame);
+      specs.push({
+        lineKey: `influence0${index + 1}`,
+        route: {
+          source: posterEdgeCenter(poster, 'right'),
+          target: CENTER_POSTER_ANCHORS.left,
+          targetEdge: 'left',
+          routing: 'influence-legacy',
+        },
+      });
+    });
+    NODE_POS.legacy.forEach((_, index) => {
+      const frame = getEffectiveLegacyPos(index);
+      const poster = nodeFrameToPosterAnchor(frame);
+      specs.push({
+        lineKey: `legacy0${index + 1}`,
+        route: {
+          source: CENTER_POSTER_ANCHORS.right,
+          target: posterEdgeCenter(poster, 'left'),
+          targetEdge: 'left',
+          routing: 'influence-legacy',
+        },
+      });
+    });
+    return specs;
+  }, [getEffectiveInfluencePos, getEffectiveLegacyPos]);
+
 
   const onCanvasPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1668,7 +1734,7 @@ function FilmDnaGraph({
       return {
         direction: 'influence',
         node,
-        posterPos: nodeFrameToPosterAnchor(NODE_POS.influence[hover.index]),
+        posterPos: nodeFrameToPosterAnchor(getEffectiveInfluencePos(hover.index)),
       };
     }
     if (hover.kind === 'legacy') {
@@ -1677,11 +1743,11 @@ function FilmDnaGraph({
       return {
         direction: 'legacy',
         node,
-        posterPos: nodeFrameToPosterAnchor(NODE_POS.legacy[hover.index]),
+        posterPos: nodeFrameToPosterAnchor(getEffectiveLegacyPos(hover.index)),
       };
     }
     return null;
-  }, [hover, influenceNodes, legacyNodes]);
+  }, [hover, influenceNodes, legacyNodes, getEffectiveInfluencePos, getEffectiveLegacyPos]);
 
   const relationshipBullets = useMemo(() => {
     if (!activeInfluenceLegacy) return null;
@@ -1698,7 +1764,7 @@ function FilmDnaGraph({
       if (!node) return null;
       return {
         node,
-        posterPos: nodeFrameToPosterAnchor(NODE_POS.influence[hover.index]),
+        posterPos: nodeFrameToPosterAnchor(getEffectiveInfluencePos(hover.index)),
       };
     }
     if (hover.kind === 'legacy') {
@@ -1706,7 +1772,7 @@ function FilmDnaGraph({
       if (!node) return null;
       return {
         node,
-        posterPos: nodeFrameToPosterAnchor(NODE_POS.legacy[hover.index]),
+        posterPos: nodeFrameToPosterAnchor(getEffectiveLegacyPos(hover.index)),
       };
     }
     if (hover.kind === 'series-prev') {
@@ -1735,6 +1801,8 @@ function FilmDnaGraph({
     seriesPreviousPositions,
     seriesNext,
     seriesNextPositions,
+    getEffectiveInfluencePos,
+    getEffectiveLegacyPos,
   ]);
 
   const seriesSummaryBullets = useMemo(() => {
@@ -1752,12 +1820,11 @@ function FilmDnaGraph({
   }, [hover, activePosterHover, centerNode, seriesSummaryBullets]);
 
 
+  const showSideContent = status === 'ready' && !isExiting;
+
   return (
-    <motion.div
+    <div
       className="film-dna-stage-host relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22 }}
       role="img"
       aria-label="Film DNA relationship graph"
       onPointerDown={onCanvasPointerDown}
@@ -1773,7 +1840,7 @@ function FilmDnaGraph({
           } as React.CSSProperties
         }
       >
-        <motion.div
+        <div
           className="relative overflow-visible"
           style={{
             width: STAGE_W,
@@ -1781,133 +1848,179 @@ function FilmDnaGraph({
             transform: `translate(${pan.x}px, ${pan.y}px)`,
           }}
         >
+          {/* Center node: morphs in from preview poster size on mount, morphs back on exit */}
           <motion.div
-            className="pointer-events-none absolute inset-0"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.18 }}
+            className="absolute z-20"
+            style={{
+              left: CENTER_POSTER_POS.left,
+              top: CENTER_POSTER_POS.top,
+              transformOrigin: `${POSTER_W / 2}px ${POSTER_H / 2}px`,
+            }}
+            initial={{ scale: enterScale, opacity: 0 }}
+            animate={{
+              scale: isExiting ? enterScale : 1,
+              opacity: isExiting ? 0 : 1,
+            }}
+            transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
           >
-            <FilmDnaConnectionLines
-              influenceLegacyPresence={influenceLegacyPresence}
-              seriesSpecs={seriesConnectionSpecs}
-              seriesCenterChainIndex={seriesCenterChainIndex}
-              hover={hover}
-              influenceCount={influenceNodes.length}
-              legacyCount={legacyNodes.length}
+            <FilmDnaNodeCard
+              node={centerNode}
+              posterUrl={resolvedCenterPosterUrl}
+              isCenter
+              hoverTarget={{ kind: 'center' }}
+              highlighted
+              onHover={setHover}
+              posterPos={{ left: 0, top: 0 }}
             />
           </motion.div>
 
+          {/* Loading indicator: positioned below the center node in stage coords */}
+          {status === 'loading' ? (
+            <motion.div
+              className="absolute flex flex-col items-center gap-3"
+              style={{
+                left: STAGE_W / 2,
+                top: CENTER_POSTER_POS.top + POSTER_H + 72,
+                transform: 'translateX(-50%)',
+              }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2, delay: 0.15 }}
+            >
+              <FilmDnaGeneratingLoader size={64} />
+              <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
+                Generating Film DNA…
+              </p>
+            </motion.div>
+          ) : null}
+
+          {/* Side content: connections + side nodes — fade in when ready, fade out on exit */}
           <AnimatePresence>
-            {relationshipBullets && activeInfluenceLegacy ? (
-              <FilmDnaRelationshipSummary
-                key={`${activeInfluenceLegacy.direction}-${activeInfluenceLegacy.node.title}-summary`}
-                bullets={relationshipBullets}
-                posterPos={activeInfluenceLegacy.posterPos}
-              />
+            {showSideContent ? (
+              <motion.div
+                key="dna-side-content"
+                className="absolute inset-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                <div className="pointer-events-none absolute inset-0">
+                  <FilmDnaConnectionLines
+                    influenceLegacySpecs={dynamicInfluenceLegacySpecs}
+                    influenceLegacyPresence={influenceLegacyPresence}
+                    seriesSpecs={seriesConnectionSpecs}
+                    seriesCenterChainIndex={seriesCenterChainIndex}
+                    hover={hover}
+                    influenceCount={influenceNodes.length}
+                    legacyCount={legacyNodes.length}
+                  />
+                </div>
+
+                <AnimatePresence>
+                  {relationshipBullets && activeInfluenceLegacy ? (
+                    <FilmDnaRelationshipSummary
+                      key={`${activeInfluenceLegacy.direction}-${activeInfluenceLegacy.node.title}-summary`}
+                      bullets={relationshipBullets}
+                      posterPos={activeInfluenceLegacy.posterPos}
+                    />
+                  ) : null}
+                </AnimatePresence>
+                <AnimatePresence>
+                  {significanceBullets && activePosterHover ? (
+                    <FilmDnaSignificanceSummary
+                      key={`significance-${activePosterHover.node.title}-summary`}
+                      bullets={significanceBullets}
+                      posterPos={activePosterHover.posterPos}
+                    />
+                  ) : null}
+                </AnimatePresence>
+                <AnimatePresence>
+                  {seriesSummaryBullets && activePosterHover ? (
+                    <FilmDnaSeriesSummary
+                      key={`series-summary-${activePosterHover.node.title}`}
+                      bullets={seriesSummaryBullets}
+                      posterPos={activePosterHover.posterPos}
+                    />
+                  ) : null}
+                </AnimatePresence>
+                <AnimatePresence>
+                  {activeInfluenceLegacy ? (
+                    <FilmDnaDirectionLabel
+                      key={`${activeInfluenceLegacy.direction}-${activeInfluenceLegacy.node.title}-label`}
+                      direction={activeInfluenceLegacy.direction}
+                      posterPos={activeInfluenceLegacy.posterPos}
+                    />
+                  ) : null}
+                </AnimatePresence>
+
+                {influenceNodes.map((node, index) => (
+                  <FilmDnaNodeCard
+                    key={`influence-${index}-${node.title}`}
+                    node={node}
+                    hoverTarget={{ kind: 'influence', index }}
+                    highlighted={isPathHighlighted(hover, {
+                      kind: 'influence',
+                      index,
+                    })}
+                    onHover={setHover}
+                    posterUrl={node.posterUrl}
+                    posterPos={nodeFrameToPosterAnchor(getEffectiveInfluencePos(index))}
+                  />
+                ))}
+
+                {legacyNodes.map((node, index) => (
+                  <FilmDnaNodeCard
+                    key={`legacy-${index}-${node.title}`}
+                    node={node}
+                    hoverTarget={{ kind: 'legacy', index }}
+                    highlighted={isPathHighlighted(hover, {
+                      kind: 'legacy',
+                      index,
+                    })}
+                    onHover={setHover}
+                    posterUrl={node.posterUrl}
+                    posterPos={nodeFrameToPosterAnchor(getEffectiveLegacyPos(index))}
+                  />
+                ))}
+
+                {seriesPrevious.map((node, index) => (
+                  <FilmDnaNodeCard
+                    key={`series-prev-${index}-${node.title}`}
+                    node={node}
+                    posterUrl={node.posterUrl}
+                    isSeries
+                    hoverTarget={{ kind: 'series-prev', index }}
+                    highlighted={isPathHighlighted(hover, {
+                      kind: 'series-prev',
+                      index,
+                    })}
+                    onHover={setHover}
+                    posterPos={seriesPreviousPositions[index]}
+                  />
+                ))}
+
+                {seriesNext.map((node, index) => (
+                  <FilmDnaNodeCard
+                    key={`series-next-${index}-${node.title}`}
+                    node={node}
+                    posterUrl={node.posterUrl}
+                    isSeries
+                    hoverTarget={{ kind: 'series-next', index }}
+                    highlighted={isPathHighlighted(hover, {
+                      kind: 'series-next',
+                      index,
+                    })}
+                    onHover={setHover}
+                    posterPos={seriesNextPositions[index]}
+                  />
+                ))}
+              </motion.div>
             ) : null}
           </AnimatePresence>
-          <AnimatePresence>
-            {significanceBullets && activePosterHover ? (
-              <FilmDnaSignificanceSummary
-                key={`significance-${activePosterHover.node.title}-summary`}
-                bullets={significanceBullets}
-                posterPos={activePosterHover.posterPos}
-              />
-            ) : null}
-          </AnimatePresence>
-          <AnimatePresence>
-            {seriesSummaryBullets && activePosterHover ? (
-              <FilmDnaSeriesSummary
-                key={`series-summary-${activePosterHover.node.title}`}
-                bullets={seriesSummaryBullets}
-                posterPos={activePosterHover.posterPos}
-              />
-            ) : null}
-          </AnimatePresence>
-          <AnimatePresence>
-            {activeInfluenceLegacy ? (
-              <FilmDnaDirectionLabel
-                key={`${activeInfluenceLegacy.direction}-${activeInfluenceLegacy.node.title}-label`}
-                direction={activeInfluenceLegacy.direction}
-                posterPos={activeInfluenceLegacy.posterPos}
-              />
-            ) : null}
-          </AnimatePresence>
-
-          {influenceNodes.map((node, index) => (
-            <FilmDnaNodeCard
-              key={`influence-${index}-${node.title}`}
-              node={node}
-              hoverTarget={{ kind: 'influence', index }}
-              highlighted={isPathHighlighted(hover, {
-                kind: 'influence',
-                index,
-              })}
-              onHover={setHover}
-              posterUrl={node.posterUrl}
-              posterPos={nodeFrameToPosterAnchor(NODE_POS.influence[index])}
-            />
-          ))}
-
-          <FilmDnaNodeCard
-            node={centerNode}
-            posterUrl={resolvedCenterPosterUrl}
-            isCenter
-            hoverTarget={{ kind: 'center' }}
-            highlighted
-            onHover={setHover}
-            posterPos={CENTER_POSTER_POS}
-          />
-
-          {legacyNodes.map((node, index) => (
-            <FilmDnaNodeCard
-              key={`legacy-${index}-${node.title}`}
-              node={node}
-              hoverTarget={{ kind: 'legacy', index }}
-              highlighted={isPathHighlighted(hover, {
-                kind: 'legacy',
-                index,
-              })}
-              onHover={setHover}
-              posterUrl={node.posterUrl}
-              posterPos={nodeFrameToPosterAnchor(NODE_POS.legacy[index])}
-            />
-          ))}
-
-          {seriesPrevious.map((node, index) => (
-            <FilmDnaNodeCard
-              key={`series-prev-${index}-${node.title}`}
-              node={node}
-              posterUrl={node.posterUrl}
-              isSeries
-              hoverTarget={{ kind: 'series-prev', index }}
-              highlighted={isPathHighlighted(hover, {
-                kind: 'series-prev',
-                index,
-              })}
-              onHover={setHover}
-              posterPos={seriesPreviousPositions[index]}
-            />
-          ))}
-
-          {seriesNext.map((node, index) => (
-            <FilmDnaNodeCard
-              key={`series-next-${index}-${node.title}`}
-              node={node}
-              posterUrl={node.posterUrl}
-              isSeries
-              hoverTarget={{ kind: 'series-next', index }}
-              highlighted={isPathHighlighted(hover, {
-                kind: 'series-next',
-                index,
-              })}
-              onHover={setHover}
-              posterPos={seriesNextPositions[index]}
-            />
-          ))}
-        </motion.div>
+        </div>
       </motion.div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1921,54 +2034,41 @@ export default function FilmDnaPanel({
   centerPosterUrl,
   centerTitle,
   centerYear,
+  isExiting = false,
+  enterScale = 5,
 }: FilmDnaPanelProps) {
-  const isReady = status === 'ready' && Boolean(tree);
+  const showGraph = status === 'loading' || status === 'ready';
 
   return (
-    <motion.div
-      className={
-        isReady
-          ? 'absolute inset-0 flex min-h-0 w-full flex-col'
-          : 'flex min-h-full w-full flex-col items-center justify-center px-4 py-8 sm:px-8'
-      }
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.18 }}
+    <div
+      className="absolute inset-0 flex min-h-0 w-full flex-col"
       aria-busy={status === 'loading'}
     >
-      {status === 'loading' ? (
-        <motion.div
-          className="flex flex-col items-center gap-4 text-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-        >
-          <FilmDnaGeneratingLoader size={104} />
-          <p className="text-[14px] font-semibold text-white/70">
-            Generating Film DNA…
-          </p>
-        </motion.div>
-      ) : null}
-
       {status === 'error' ? (
         <motion.div
-          className="mx-auto max-w-md px-4 text-center"
+          className="flex min-h-full w-full flex-col items-center justify-center px-4 py-8 sm:px-8"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
-          <p className="text-[14px] font-semibold text-red-300/95">
-            {errorMessage || 'Could not generate Film DNA.'}
-          </p>
+          <div className="mx-auto max-w-md px-4 text-center">
+            <p className="text-[14px] font-semibold text-red-300/95">
+              {errorMessage || 'Could not generate Film DNA.'}
+            </p>
+          </div>
         </motion.div>
       ) : null}
 
-      {isReady && tree ? (
+      {showGraph ? (
         <FilmDnaGraph
-          tree={tree}
+          tree={tree ?? EMPTY_FILM_DNA_TREE}
           centerPosterUrl={centerPosterUrl}
           centerTitle={centerTitle}
           centerYear={centerYear}
+          status={status}
+          isExiting={isExiting}
+          enterScale={enterScale}
         />
       ) : null}
-    </motion.div>
+    </div>
   );
 }
