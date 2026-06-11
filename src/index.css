@@ -337,3 +337,27 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* FilmBase wordmark — top-center brand mark */
+.filmbase-wordmark {
+  height: 13px;
+  width: auto;
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 600ms ease-out;
+}
+
+.filmbase-wordmark--loading {
+  animation: filmbaseWordmarkGlow 2800ms ease-in-out infinite;
+}
+
+.filmbase-wordmark--loaded {
+  animation: none;
+  opacity: 0.4;
+}
+
+@keyframes filmbaseWordmarkGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}

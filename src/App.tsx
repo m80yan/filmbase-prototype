@@ -5691,11 +5691,14 @@ export default function App() {
               <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
                 {posterPreviewMovie.title}
               </h1>
-            ) : (
-              <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
-                FilmBase
-              </h1>
-            )}
+            ) : !(isAddModalOpen || isDestructiveConfirmationOpen || isEditTrailerModalOpen || isTrailerOverlayInMain) ? (
+              <img
+                src="/icons/filmbase-wordmark.svg"
+                alt="FilmBase"
+                draggable={false}
+                className={`filmbase-wordmark ${isMoviesHydrated ? 'filmbase-wordmark--loaded' : 'filmbase-wordmark--loading'}`}
+              />
+            ) : null}
           </header>
 
           {/* Toolbar：海报预览打开时切换为预览模式控件；左右槽固定宽度使 slider 水平位置不变 */}
