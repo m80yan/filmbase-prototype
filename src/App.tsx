@@ -17,9 +17,9 @@ import { Movie, MovieCastDetail } from './types';
 import { getSupabaseClient, signInAnonymously } from './lib/supabaseClient';
 import { invokeGenerateFilmDna } from './lib/generateFilmDna';
 import { loadFilmDnaGraph, saveFilmDnaGraph } from './lib/filmDnaGraphStore';
-import { hydrateFilmDnaTreeFromLibrary } from './lib/filmDnaPosterHydration';
+import { hydrateFilmDnaTreePosters, normalizeFilmTitleKey } from './lib/filmDnaPosterHydration';
 import FilmDnaPanel from './components/FilmDnaOverlay';
-import type { FilmDnaTree } from './types/filmDna';
+import type { FilmDnaNode, FilmDnaTree } from './types/filmDna';
 import {
   deletePublicMovie,
   loadPublicMovies,
@@ -2693,6 +2693,21 @@ export default function App() {
     if (!isFilmDnaOpen || isFilmDnaExiting) return;
     filmDnaAbortRef.current?.abort();
     filmDnaAbortRef.current = null;
+    // Recompute morph scale at exit so the center node scales back to the
+    // current poster display size (not the stale size captured at entry).
+    {
+      const host = mainPreviewHostRef.current;
+      const layout = posterPreviewLayoutRef.current;
+      if (host && layout && layout.dispH > 0) {
+        const { width: hostW, height: hostH } = host.getBoundingClientRect();
+        if (hostW > 0 && hostH > 0) {
+          const stageScale = Math.min(hostW / 1080, hostH / 871);
+          if (stageScale > 0) {
+            setFilmDnaEnterScale(Math.max(2, Math.min(12, layout.dispH / (171 * stageScale))));
+          }
+        }
+      }
+    }
     setIsFilmDnaExiting(true);
     filmDnaExitTimeoutRef.current = setTimeout(() => {
       filmDnaExitTimeoutRef.current = null;
@@ -2710,17 +2725,37 @@ export default function App() {
     setModalMode('trailer');
   }, [posterPreviewMovie]);
 
-  const onPlayNodeTrailer = useCallback((node: import('./types/filmDna').FilmDnaNode) => {
-    const normalizedTitle = node.title.toLowerCase().trim();
+  const onPlayNodeTrailer = useCallback((node: FilmDnaNode) => {
+    const nodeKey = normalizeFilmTitleKey(node.title);
     const match = moviesRef.current.find(
       (m) =>
-        m.title.toLowerCase().trim() === normalizedTitle &&
+        normalizeFilmTitleKey(m.title) === nodeKey &&
         (node.year == null || m.year === node.year),
     );
     if (match) {
       setSelectedMovie(match);
       setModalMode('trailer');
+    } else {
+      console.warn('[FilmDNA] No library match for node:', node.title, node.year);
     }
+  }, []);
+
+  const isFilmDnaNodeInLibrary = useCallback((node: FilmDnaNode): boolean => {
+    const nodeKey = normalizeFilmTitleKey(node.title);
+    return moviesRef.current.some(
+      (m) =>
+        normalizeFilmTitleKey(m.title) === nodeKey &&
+        (node.year == null || m.year === node.year),
+    );
+  }, []);
+
+  const onAddMovieFromDnaNode = useCallback((node: FilmDnaNode) => {
+    if (!node.title?.trim()) {
+      console.warn('[FilmDNA] Cannot add movie: node has no title', node);
+      return;
+    }
+    setNewMovieTitle(node.title.trim());
+    setIsAddModalOpen(true);
   }, []);
 
   /**
@@ -2759,16 +2794,17 @@ export default function App() {
         const cached = await loadFilmDnaGraph(supabase, movie.id);
         if (ac.signal.aborted) return;
         if (cached) {
-          const hydratedCached = hydrateFilmDnaTreeFromLibrary(
-            cached,
-            moviesRef.current.map((m) => ({
+          const hydratedCached = await hydrateFilmDnaTreePosters(supabase, cached, {
+            libraryMovies: moviesRef.current.map((m) => ({
               id: m.id,
               title: m.title,
               year: m.year,
               posterUrl: m.posterUrl,
               posterStoragePath: m.posterStoragePath,
             })),
-          );
+            signal: ac.signal,
+          });
+          if (ac.signal.aborted) return;
           setFilmDnaTree(hydratedCached);
           setFilmDnaStatus('ready');
           return;
@@ -6826,7 +6862,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={MAIN_MODAL_OVERLAY_TRANSITION}
-            className={`absolute inset-0 z-[104] flex h-full min-h-0 items-center justify-center overflow-hidden p-4 md:p-8 ${
+            className={`absolute inset-0 z-[106] flex h-full min-h-0 items-center justify-center overflow-hidden p-4 md:p-8 ${
               isEditTrailerModalOpen ? 'pointer-events-none cursor-default' : ''
             }`}
           >
@@ -7049,7 +7085,7 @@ export default function App() {
                       const dnaOpacity = isFilmDnaOpen
                         ? (isFilmDnaExiting ? 1 : 0)
                         : undefined;
-                      const dnaTransition = isFilmDnaOpen ? 'opacity 0.35s ease' : undefined;
+                      const dnaTransition = isFilmDnaOpen ? 'opacity 0.35s cubic-bezier(0.2, 0, 0, 1)' : undefined;
                       if (posterPreviewLayout) {
                         return {
                           position: 'absolute' as const,
@@ -7266,6 +7302,8 @@ export default function App() {
                         enterScale={filmDnaEnterScale}
                         onPlayCenterTrailer={onPlayCenterTrailer}
                         onPlayNodeTrailer={onPlayNodeTrailer}
+                        isLibraryNode={isFilmDnaNodeInLibrary}
+                        onAddMovieNode={onAddMovieFromDnaNode}
                       />
                     </div>
                   ) : isInfoMode ? (
