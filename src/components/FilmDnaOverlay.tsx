@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { Film } from 'lucide-react';
 import { FilmDnaGeneratingLoader } from './FilmDnaGeneratingLoader';
 import { resolvePosterUrlFromRaw } from '../lib/filmDnaPosterHydration';
 import type { FilmDnaNode, FilmDnaTree } from '../types/filmDna';
@@ -27,6 +28,10 @@ type FilmDnaPanelProps = {
   onPlayCenterTrailer?: () => void;
   /** Called when the user clicks Play Trailer on a non-center node. */
   onPlayNodeTrailer?: (node: FilmDnaNode) => void;
+  /** Returns true if a non-center node has a matching library movie (determines Play Trailer vs Add Movie CTA). */
+  isLibraryNode?: (node: FilmDnaNode) => boolean;
+  /** Called when the user clicks Add Movie on a non-center node not yet in the library. */
+  onAddMovieNode?: (node: FilmDnaNode) => void;
 };
 
 /** 侧栏最多展示的节点数。 */
@@ -37,6 +42,7 @@ const MAX_SERIES_VISIBLE = 10;
 
 const POSTER_W = 114;
 const POSTER_H = 171;
+
 
 /**
  * 系列链可视间距：上一格年份文字底边 → 下一格海报顶边（舞台 px）。
@@ -183,13 +189,13 @@ function nodeFrameToPosterAnchor(frame: StagePoint): StagePoint {
 const NODE_POS = {
   center: { left: 546, top: 317 },
   influence: [
-    { left: -63, top: 463 },
+    { left: -63, top: 551 },  // middle influence node (+88 from original 463)
     { left: 51, top: 196 },
-    { left: 164, top: 646 },
+    { left: 164, top: 774 },  // lower influence node (+128 from original 646)
   ],
   legacy: [
     { left: 825, top: 61 },
-    { left: 939, top: 599 },
+    { left: 939, top: 687 },  // lower legacy node (+88 from original 599)
     /** Legacy 03（如 Saving Private Ryan）：海报 top 350 → 左缘中点 y = 435.5，与 Center 右缘水平连线。 */
     { left: 1053, top: 350 },
   ],
@@ -689,8 +695,9 @@ function FilmDnaConnectionLines({
         )
           ? 1
           : 0.25;
+        const isSingleLeft = lineKey.startsWith('influence') && influenceCount === 1;
         const straight =
-          (lineKey.startsWith('influence') && influenceCount === 1) ||
+          isSingleLeft ||
           (lineKey.startsWith('legacy') && legacyCount === 1);
         const polyline = buildConnectionPolyline({ ...route, straight });
         return (
@@ -1465,8 +1472,10 @@ type FilmDnaNodeCardProps = {
   onHover: (target: HoverTarget | null) => void;
   /** 海报矩形左上角（虚拟舞台坐标，连线锚点）。 */
   posterPos: StagePoint;
-  /** Called when user clicks Play Trailer. Center: always-visible. Non-center: hover-only. */
+  /** Called when user clicks Play Trailer. Center: always-visible. Non-center: hover-only, only when node is in library. */
   onPlayTrailer?: () => void;
+  /** Called when user clicks Add Movie. Non-center only, hover-only, only when node is NOT in library. */
+  onAddMovieNode?: () => void;
 };
 
 /**
@@ -1482,6 +1491,7 @@ function FilmDnaNodeCard({
   onHover,
   posterPos,
   onPlayTrailer,
+  onAddMovieNode,
 }: FilmDnaNodeCardProps) {
   const year = formatFilmDnaYear(node.year);
   const dimmed = !isCenter && !highlighted;
@@ -1496,72 +1506,126 @@ function FilmDnaNodeCard({
         posterUrl: posterUrl ?? node.posterUrl,
       });
 
+  const [imgError, setImgError] = useState(false);
+  // Reset the error flag whenever the URL changes so a freshly hydrated URL gets a real load attempt.
+  useEffect(() => { setImgError(false); }, [posterSrc]);
+  const showPlaceholder = !posterSrc || imgError;
+
   return (
-    <motion.article
-      className={`group/poster absolute w-max max-w-none text-left ${
-        isCenter || isSeries ? 'z-20' : 'z-10'
-      }`}
-      style={{ left: posterPos.left, top: posterPos.top }}
-      onPointerEnter={() => onHover(hoverTarget)}
-      onPointerLeave={() => onHover(null)}
-      aria-label={node.title}
+    // group/poster on outer div controls CSS hover for poster scale and button reveal.
+    // onPointerEnter/Leave are on the inner article only — hovering the action button
+    // below does NOT fire onHover, so it never dims/brightens other nodes.
+    <div
+      className={`group/poster absolute ${isCenter || isSeries ? 'z-20' : 'z-10'}`}
+      style={{
+        left: posterPos.left,
+        top: posterPos.top,
+      }}
     >
-      <motion.div
-        className={`relative h-[171px] w-[114px] overflow-hidden transition-opacity duration-300 ease-out ${
-          posterSrc ? POSTER_VIEW_HOVER : ''
-        } ${dimmed ? 'opacity-25' : 'opacity-100'} group-hover/poster:opacity-100`}
-      >
-        {posterSrc ? (
-          <img
-            draggable={false}
-            src={posterSrc}
-            alt=""
-            className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <div
-            className="block h-[171px] w-[114px] bg-white/10"
-            aria-hidden
-          />
-        )}
-      </motion.div>
-      <FilmDnaNodeText
-        text={node.title}
-        isCenter={isCenter}
-        className={`mt-4 ${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
-      />
-      {year ? (
-        <FilmDnaNodeText
-          text={year}
-          isCenter={isCenter}
-          className={`${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
-        />
-      ) : null}
-      {isCenter && onPlayTrailer ? (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
-          className="mt-2 cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+      {/*
+        Fixed-width column: poster is the alignment reference.
+        All children — poster, title, year, button — share one centerline.
+        Text wider than 114 px overflows visually but remains centered and
+        still receives pointer events (CSS overflow:visible bubbles events to
+        the article and outer div, so group-hover and onHover both fire).
+      */}
+      <div style={{ width: POSTER_W }} className="flex flex-col items-center">
+        <article
+          className="flex w-full flex-col items-center"
+          aria-label={node.title}
+          onPointerEnter={() => onHover(hoverTarget)}
+          onPointerLeave={() => onHover(null)}
         >
-          Play Trailer
-        </button>
-      ) : null}
-      {!isCenter && onPlayTrailer ? (
-        <div
-          className="pointer-events-none absolute opacity-0 group-hover/poster:pointer-events-auto group-hover/poster:opacity-100 transition-opacity"
-          style={{ left: POSTER_W, top: 0, paddingLeft: 20 }}
-        >
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
-            className="cursor-pointer bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+          <motion.div
+            className={`relative h-[171px] w-[114px] overflow-hidden transition-opacity duration-300 ease-out ${
+              !showPlaceholder ? POSTER_VIEW_HOVER : ''
+            } ${dimmed ? 'opacity-25' : 'opacity-100'} group-hover/poster:opacity-100`}
           >
-            Play Trailer
-          </button>
-        </div>
-      ) : null}
-    </motion.article>
+            {!showPlaceholder ? (
+              <img
+                draggable={false}
+                src={posterSrc}
+                alt=""
+                className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div
+                className="flex h-[171px] w-[114px] items-center justify-center bg-[#101010] text-white/40"
+                aria-hidden
+              >
+                <Film size={32} strokeWidth={1} />
+              </div>
+            )}
+          </motion.div>
+          <FilmDnaNodeText
+            text={node.title}
+            isCenter={isCenter}
+            className={`mt-4 ${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
+          />
+          {year ? (
+            <FilmDnaNodeText
+              text={year}
+              isCenter={isCenter}
+              className={`${textClass} ${dimmed ? '' : '!text-white'} group-hover/poster:!text-white`}
+            />
+          ) : null}
+        </article>
+
+        {/* Center: always-visible Play Trailer — centered in the 114 px column */}
+        {isCenter && onPlayTrailer ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
+              className="inline-flex h-9 cursor-pointer items-center rounded-full bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+            >
+              Play Trailer
+            </button>
+          </div>
+        ) : null}
+
+        {/* Non-center: hover-only Play Trailer (library node) — space always reserved to prevent layout shift */}
+        {!isCenter && onPlayTrailer ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onPlayTrailer(); }}
+              className="pointer-events-none opacity-0 group-hover/poster:pointer-events-auto group-hover/poster:opacity-100 inline-flex h-9 cursor-pointer items-center rounded-full bg-white/80 hover:bg-white text-black text-[11px] font-bold px-4 tracking-wide whitespace-nowrap shadow-xl transition-all active:translate-y-[2px]"
+            >
+              Play Trailer
+            </button>
+          </div>
+        ) : null}
+
+        {/* Non-center: hover-only Add Movie (non-library node) — space always reserved */}
+        {!isCenter && onAddMovieNode ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onAddMovieNode(); }}
+              className="pointer-events-none opacity-0 group-hover/poster:pointer-events-auto group-hover/poster:opacity-100 inline-flex h-9 cursor-pointer items-center gap-2 rounded-full bg-white/10 pl-[10px] pr-4 text-[11px] font-bold tracking-wide text-white/70 whitespace-nowrap transition-all hover:bg-white/20 hover:text-white active:translate-y-[2px]"
+            >
+              <img
+                draggable={false}
+                src="/icons/add-movie.svg"
+                alt=""
+                width={16}
+                height={16}
+                className="pointer-events-none h-4 w-4 shrink-0 opacity-70 transition-opacity"
+                decoding="async"
+                aria-hidden
+              />
+              Add Movie
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1575,6 +1639,8 @@ type FilmDnaGraphProps = {
   enterScale: number;
   onPlayCenterTrailer?: () => void;
   onPlayNodeTrailer?: (node: FilmDnaNode) => void;
+  isLibraryNode?: (node: FilmDnaNode) => boolean;
+  onAddMovieNode?: (node: FilmDnaNode) => void;
 };
 
 /**
@@ -1590,6 +1656,8 @@ function FilmDnaGraph({
   enterScale,
   onPlayCenterTrailer,
   onPlayNodeTrailer,
+  isLibraryNode,
+  onAddMovieNode,
 }: FilmDnaGraphProps) {
   const seriesPrevious = (tree.seriesPrevious ?? []).slice(
     0,
@@ -1912,20 +1980,22 @@ function FilmDnaGraph({
           {/* Loading indicator: positioned below the center node in stage coords */}
           {status === 'loading' ? (
             <motion.div
-              className="absolute flex flex-col items-center gap-3"
+              className="absolute"
               style={{
                 left: STAGE_W / 2,
-                top: CENTER_POSTER_POS.top + POSTER_H + 72,
+                top: CENTER_POSTER_POS.top + POSTER_H + 192,
                 transform: 'translateX(-50%)',
               }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2, delay: 0.15 }}
             >
-              <FilmDnaGeneratingLoader size={64} />
-              <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
-                Generating Film DNA…
-              </p>
+              <div className="flex items-center gap-4">
+                <FilmDnaGeneratingLoader size={64} />
+                <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
+                  Generating Film DNA…
+                </p>
+              </div>
             </motion.div>
           ) : null}
 
@@ -2001,7 +2071,8 @@ function FilmDnaGraph({
                     onHover={setHover}
                     posterUrl={node.posterUrl}
                     posterPos={nodeFrameToPosterAnchor(getEffectiveInfluencePos(index))}
-                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
+                    onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
+                    onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
                   />
                 ))}
 
@@ -2017,7 +2088,8 @@ function FilmDnaGraph({
                     onHover={setHover}
                     posterUrl={node.posterUrl}
                     posterPos={nodeFrameToPosterAnchor(getEffectiveLegacyPos(index))}
-                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
+                    onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
+                    onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
                   />
                 ))}
 
@@ -2034,7 +2106,8 @@ function FilmDnaGraph({
                     })}
                     onHover={setHover}
                     posterPos={seriesPreviousPositions[index]}
-                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
+                    onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
+                    onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
                   />
                 ))}
 
@@ -2051,7 +2124,8 @@ function FilmDnaGraph({
                     })}
                     onHover={setHover}
                     posterPos={seriesNextPositions[index]}
-                    onPlayTrailer={onPlayNodeTrailer ? () => onPlayNodeTrailer(node) : undefined}
+                    onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
+                    onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
                   />
                 ))}
               </motion.div>
@@ -2077,6 +2151,8 @@ export default function FilmDnaPanel({
   enterScale = 5,
   onPlayCenterTrailer,
   onPlayNodeTrailer,
+  isLibraryNode,
+  onAddMovieNode,
 }: FilmDnaPanelProps) {
   const showGraph = status === 'loading' || status === 'ready';
 
@@ -2117,6 +2193,8 @@ export default function FilmDnaPanel({
           enterScale={enterScale}
           onPlayCenterTrailer={onPlayCenterTrailer}
           onPlayNodeTrailer={onPlayNodeTrailer}
+          isLibraryNode={isLibraryNode}
+          onAddMovieNode={onAddMovieNode}
         />
       ) : null}
     </div>

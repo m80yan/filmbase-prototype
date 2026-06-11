@@ -25,7 +25,7 @@ type SearchMoviesHit = {
  *
  * @param title 原始片名
  */
-function normalizeFilmTitleKey(title: string): string {
+export function normalizeFilmTitleKey(title: string): string {
   return title
     .toLowerCase()
     .trim()
@@ -62,14 +62,25 @@ export function withNormalizedPosterUrl(node: FilmDnaNode): FilmDnaNode {
 }
 
 export type LibraryPosterLookup = {
+  /** titleKey|year → posterUrl; only contains movies with year > 0. */
   byIdentity: Map<string, string>;
+  /** titleKey → posterUrl; contains ALL movies including year=0.
+   *  Used as fallback when byIdentity has no entry for the title. */
+  byTitle: Map<string, string>;
+  /** Title keys whose entries in byTitle or uploadOnly (title-only) resolve to different
+   *  poster URLs across library movies — title-only fallback is suppressed for these. */
+  ambiguousTitles: Set<string>;
   byImdbId: Map<string, string>;
-  /** 仅包含有用户上传海报（posterStoragePath 存在）的条目，优先级高于节点自带 posterUrl。 */
+  /** Uploaded/custom posters only (posterStoragePath present), same key scheme as byIdentity.
+   *  Keyed by titleKey|year for year > 0, or titleKey alone for year = 0. */
   uploadOnly: Map<string, string>;
 };
 
 /**
- * 由当前片库构建海报查找表（标题+年份、imdb `tt…` id）。
+ * 由当前片库构建海报查找表（标题+年份、仅标题、imdb `tt…` id）。
+ *
+ * `byTitle` covers movies whose `year` is 0 or unknown so they are not silently
+ * dropped from the lookup when Film DNA nodes carry a known year.
  *
  * @param movies 片库影片列表
  */
@@ -77,6 +88,8 @@ export function buildLibraryPosterLookup(
   movies: FilmDnaLibraryMovie[],
 ): LibraryPosterLookup {
   const byIdentity = new Map<string, string>();
+  const byTitle = new Map<string, string>();
+  const ambiguousTitles = new Set<string>();
   const byImdbId = new Map<string, string>();
   const uploadOnly = new Map<string, string>();
 
@@ -85,11 +98,29 @@ export function buildLibraryPosterLookup(
     if (!url || !url.startsWith('http')) continue;
 
     const titleKey = normalizeFilmTitleKey(movie.title);
-    if (titleKey && Number.isFinite(movie.year) && movie.year > 0) {
+    if (!titleKey) continue;
+
+    // Always index by title alone — covers year=0 / pending-metadata movies.
+    // Track conflicting URLs so the title-only fallback can be suppressed for ambiguous titles.
+    const existingTitle = byTitle.get(titleKey);
+    if (existingTitle !== undefined && existingTitle !== url) {
+      ambiguousTitles.add(titleKey);
+    }
+    byTitle.set(titleKey, url);
+
+    if (Number.isFinite(movie.year) && movie.year > 0) {
       byIdentity.set(`${titleKey}|${movie.year}`, url);
       if (movie.posterStoragePath) {
         uploadOnly.set(`${titleKey}|${movie.year}`, url);
       }
+    } else if (movie.posterStoragePath) {
+      // year=0 uploaded poster: index by title-only so priority-1 check can find it.
+      // Track conflicts the same way as byTitle to stay consistent.
+      const existingUpload = uploadOnly.get(titleKey);
+      if (existingUpload !== undefined && existingUpload !== url) {
+        ambiguousTitles.add(titleKey);
+      }
+      uploadOnly.set(titleKey, url);
     }
 
     const imdb = movie.id.trim().toLowerCase();
@@ -98,11 +129,16 @@ export function buildLibraryPosterLookup(
     }
   }
 
-  return { byIdentity, byImdbId, uploadOnly };
+  return { byIdentity, byTitle, ambiguousTitles, byImdbId, uploadOnly };
 }
 
 /**
  * 在片库中按标题/年份查找海报 URL。
+ *
+ * Lookup order:
+ * 1. Exact normalizedTitle|year match (when node has a known year).
+ * 2. Prefix scan of byIdentity for any year>0 entry with the same title.
+ * 3. byTitle title-only match — handles library movies whose year is 0 or unknown.
  *
  * @param node 关系节点
  * @param lookup 片库查找表
@@ -114,20 +150,28 @@ function lookupLibraryPosterUrl(
   const titleKey = normalizeFilmTitleKey(node.title);
   if (!titleKey) return undefined;
 
+  // Step 1: exact title+year match.
   if (typeof node.year === 'number' && node.year > 0) {
     const exact = lookup.byIdentity.get(`${titleKey}|${node.year}`);
     if (exact) return exact;
   }
 
-  let fallback: string | undefined;
+  // Step 2: prefix scan — handles node.year=null and covers year>0 library entries
+  // when the node year differs (e.g. regional release year offset).
+  // Returns undefined if two distinct URLs map to the same title (ambiguous).
+  let prefixMatch: string | undefined;
   for (const [key, url] of lookup.byIdentity) {
     if (!key.startsWith(`${titleKey}|`)) continue;
-    if (fallback && fallback !== url) {
-      return undefined;
-    }
-    fallback = url;
+    if (prefixMatch && prefixMatch !== url) return undefined;
+    prefixMatch = url;
   }
-  return fallback;
+  if (prefixMatch) return prefixMatch;
+
+  // Step 3: title-only fallback — only reached when byIdentity has no entry for
+  // this title at all, meaning the library movie has year=0 (pending metadata).
+  // Suppressed for titles with conflicting URLs across library movies.
+  if (lookup.ambiguousTitles.has(titleKey)) return undefined;
+  return lookup.byTitle.get(titleKey);
 }
 
 /**
@@ -145,22 +189,29 @@ function hydrateFilmDnaNode(
   // Priority 1: user-uploaded poster from library (overrides TMDB/node posterUrl).
   if (lookup?.uploadOnly.size) {
     const titleKey = normalizeFilmTitleKey(normalized.title);
-    if (titleKey && typeof normalized.year === 'number' && normalized.year > 0) {
-      const uploaded = lookup.uploadOnly.get(`${titleKey}|${normalized.year}`);
-      if (uploaded) return { ...normalized, posterUrl: uploaded };
+    if (titleKey) {
+      // Prefer exact title+year key; fall back to title-only key for year=0 library movies.
+      // Title-only upload fallback is suppressed for ambiguous titles.
+      const titleOnlyUpload = lookup.ambiguousTitles.has(titleKey)
+        ? undefined
+        : lookup.uploadOnly.get(titleKey);
+      const uploadedKey =
+        typeof normalized.year === 'number' && normalized.year > 0
+          ? lookup.uploadOnly.get(`${titleKey}|${normalized.year}`) ?? titleOnlyUpload
+          : titleOnlyUpload;
+      if (uploadedKey) return { ...normalized, posterUrl: uploadedKey };
     }
   }
 
-  // Priority 2: node's own posterUrl (TMDB/backend).
-  if (normalized.posterUrl?.trim()) return normalized;
-
-  // Priority 3: any library poster (fallback when node has no posterUrl).
+  // Priority 2: stored library posterUrl (non-uploaded) — preferred over node's backend poster
+  // so library data is consistent with what the user sees elsewhere in the app.
   if (lookup) {
     const fromLibrary = lookupLibraryPosterUrl(normalized, lookup);
-    if (fromLibrary) {
-      return { ...normalized, posterUrl: fromLibrary };
-    }
+    if (fromLibrary) return { ...normalized, posterUrl: fromLibrary };
   }
+
+  // Priority 3: node's own posterUrl (TMDB/backend) — used for non-library nodes.
+  if (normalized.posterUrl?.trim()) return normalized;
 
   return normalized;
 }
@@ -283,7 +334,29 @@ async function fetchPosterUrlViaSearchMovies(
     return poster;
   }
 
-  return fallback;
+  if (fallback) return fallback;
+
+  // Year-qualified search returned zero results with posters — retry title-only.
+  // Handles future/sequel entries where the year in the node differs from TMDB.
+  if (year != null && year > 0) {
+    const { data: rd, error: re } = await supabase.functions.invoke('search-movies', {
+      body: { query: title },
+    });
+    if (!re && rd && typeof rd === 'object') {
+      const retryRaw = rd as { results?: SearchMoviesHit[]; error?: string };
+      if (!retryRaw.error && Array.isArray(retryRaw.results)) {
+        for (const hit of retryRaw.results) {
+          const poster = hit.posterUrl?.trim();
+          if (poster) return poster;
+        }
+      }
+    }
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[Film DNA] poster lookup exhausted for "${title}" (year ${year})`);
+    }
+  }
+
+  return null;
 }
 
 /**
