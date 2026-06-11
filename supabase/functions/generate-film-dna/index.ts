@@ -2031,6 +2031,123 @@ function buildUserPrompt(body: FilmDnaRequestBody): string {
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1: persist influence edges as a passive side effect of generation
+// ---------------------------------------------------------------------------
+
+type InfluenceEdgeRow = {
+  source_tmdb_id: number;
+  target_tmdb_id: number;
+  source_title: string;
+  source_year: number | null;
+  source_poster_url: string | null;
+  target_title: string;
+  target_year: number | null;
+  target_poster_url: string | null;
+  relation_type: "influence";
+  relationship_note: string | null;
+  relationship_bullets: string[] | null;
+  confidence: "ai";
+  ai_model: string;
+};
+
+/**
+ * Build Phase-1 influence edge rows from a finalised FilmDnaTree.
+ * Only emits rows when BOTH source and target carry a confirmed TMDB ID —
+ * skipping title-only nodes avoids creating low-quality duplicates.
+ *
+ * Direction rule (mirrors render semantics):
+ *   left[]  nodes influenced the center  → source = node,   target = center
+ *   right[] nodes were influenced by center → source = center, target = node
+ */
+function buildInfluenceEdgeRows(
+  tree: FilmDnaTree,
+  model: string,
+): InfluenceEdgeRow[] {
+  const { center } = tree;
+  if (!center.tmdbMovieId) return [];
+
+  const rows: InfluenceEdgeRow[] = [];
+
+  for (const node of tree.left) {
+    if (!node.tmdbMovieId) continue;
+    rows.push({
+      source_tmdb_id: node.tmdbMovieId,
+      target_tmdb_id: center.tmdbMovieId,
+      source_title: node.title,
+      source_year: typeof node.year === "number" ? node.year : null,
+      source_poster_url: node.posterUrl?.trim() || null,
+      target_title: center.title,
+      target_year: typeof center.year === "number" ? center.year : null,
+      target_poster_url: center.posterUrl?.trim() || null,
+      relation_type: "influence",
+      relationship_note: node.note?.trim() || null,
+      relationship_bullets:
+        node.relationshipBullets && node.relationshipBullets.length > 0
+          ? node.relationshipBullets
+          : null,
+      confidence: "ai",
+      ai_model: model,
+    });
+  }
+
+  for (const node of tree.right) {
+    if (!node.tmdbMovieId) continue;
+    rows.push({
+      source_tmdb_id: center.tmdbMovieId,
+      target_tmdb_id: node.tmdbMovieId,
+      source_title: center.title,
+      source_year: typeof center.year === "number" ? center.year : null,
+      source_poster_url: center.posterUrl?.trim() || null,
+      target_title: node.title,
+      target_year: typeof node.year === "number" ? node.year : null,
+      target_poster_url: node.posterUrl?.trim() || null,
+      relation_type: "influence",
+      relationship_note: node.note?.trim() || null,
+      relationship_bullets:
+        node.relationshipBullets && node.relationshipBullets.length > 0
+          ? node.relationshipBullets
+          : null,
+      confidence: "ai",
+      ai_model: model,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * INSERT edge rows via PostgREST using the service-role key.
+ * Silently skips duplicates (ON CONFLICT DO NOTHING via the partial unique index).
+ * Throws on network failure — caller wraps in try/catch.
+ */
+async function persistInfluenceEdges(
+  rows: InfluenceEdgeRow[],
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const resp = await fetch(
+    `${supabaseUrl}/rest/v1/film_dna_relationship_edges`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${serviceKey}`,
+        "apikey": serviceKey,
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+      },
+      body: JSON.stringify(rows),
+    },
+  );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`edge write ${resp.status}: ${text.slice(0, 300)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 Deno.serve(async (req) => {
   try {
     console.log(`${LOG_PREFIX} request start`, {
@@ -2258,6 +2375,32 @@ Deno.serve(async (req) => {
       seriesPreviousCount: result.seriesPrevious?.length ?? 0,
       seriesNextCount: result.seriesNext?.length ?? 0,
     });
+
+    // Write influence edges after the response is sent — never blocks generation.
+    // EdgeRuntime.waitUntil keeps the function alive until the task resolves.
+    {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
+      if (supabaseUrl && serviceKey) {
+        const edgeRows = buildInfluenceEdgeRows(result, OPENAI_MODEL);
+        if (edgeRows.length > 0) {
+          const edgeTask = persistInfluenceEdges(edgeRows, supabaseUrl, serviceKey)
+            .then(() => {
+              console.log(
+                `${LOG_PREFIX} wrote ${edgeRows.length} influence edge(s)`,
+              );
+            })
+            .catch((edgeErr) => {
+              console.warn(
+                `${LOG_PREFIX} influence edge write failed (non-critical)`,
+                edgeErr,
+              );
+            });
+          // deno-lint-ignore no-explicit-any
+          (globalThis as any).EdgeRuntime?.waitUntil?.(edgeTask);
+        }
+      }
+    }
 
     return new Response(JSON.stringify(result), {
       status: 200,
