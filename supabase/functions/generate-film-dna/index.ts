@@ -2130,7 +2130,6 @@ async function persistInfluenceEdges(
   supabaseUrl: string,
   serviceKey: string,
 ): Promise<void> {
-  console.log(`${LOG_PREFIX} [edges] persist called`, { rowCount: rows.length });
   if (rows.length === 0) return;
   const resp = await fetch(
     `${supabaseUrl}/rest/v1/film_dna_relationship_edges`,
@@ -2145,13 +2144,13 @@ async function persistInfluenceEdges(
       body: JSON.stringify(rows),
     },
   );
-  console.log(`${LOG_PREFIX} [edges] PostgREST response`, {
-    status: resp.status,
-    ok: resp.ok,
-  });
   if (!resp.ok) {
     const text = await resp.text();
-    console.warn(`${LOG_PREFIX} [edges] PostgREST error body`, text.slice(0, 500));
+    console.warn(
+      `${LOG_PREFIX} [edges] PostgREST error`,
+      { status: resp.status },
+      text.slice(0, 500),
+    );
     throw new Error(`edge write ${resp.status}: ${text.slice(0, 300)}`);
   }
 }
@@ -2386,57 +2385,24 @@ Deno.serve(async (req) => {
       seriesNextCount: result.seriesNext?.length ?? 0,
     });
 
-    // ---------------------------------------------------------------------------
-    // Phase 1 edge persistence — TEMPORARY DEBUG MODE
-    // awaited so all logs flush before the response is returned.
-    // Restore to EdgeRuntime.waitUntil once persistence is confirmed working.
-    // ---------------------------------------------------------------------------
+    // Phase 1: persist influence edges — awaited; failure must not affect the returned tree
     {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")?.trim();
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
-
-      const leftNoTmdb = result.left.filter((n) => !n.tmdbMovieId).length;
-      const rightNoTmdb = result.right.filter((n) => !n.tmdbMovieId).length;
-      const leftNoTitle = result.left.filter((n) => !n.title?.trim()).length;
-      const rightNoTitle = result.right.filter((n) => !n.title?.trim()).length;
-
-      console.log(`${LOG_PREFIX} [edges] start`, {
-        hasSupabaseUrl: Boolean(supabaseUrl),
-        hasServiceKey: Boolean(serviceKey),
-        centerTitle: result.center.title,
-        centerYear: result.center.year,
-        centerTmdbId: result.center.tmdbMovieId ?? null,
-        leftCount: result.left.length,
-        rightCount: result.right.length,
-        leftNoTmdb,
-        rightNoTmdb,
-        leftSkippedNoTitle: leftNoTitle,
-        rightSkippedNoTitle: rightNoTitle,
-      });
-
       if (!supabaseUrl || !serviceKey) {
         console.warn(`${LOG_PREFIX} [edges] skipped — missing env vars`);
       } else {
         const edgeRows = buildInfluenceEdgeRows(result, OPENAI_MODEL);
-        console.log(`${LOG_PREFIX} [edges] built`, { rowCount: edgeRows.length });
-
         if (edgeRows.length === 0) {
-          console.warn(
-            `${LOG_PREFIX} [edges] 0 rows — center or all nodes missing tmdbMovieId`,
-          );
+          console.warn(`${LOG_PREFIX} [edges] 0 rows — all nodes missing titles`);
         } else {
-          // TEMPORARY DEBUG: direct await so logs are captured before function returns.
-          // Restore to EdgeRuntime.waitUntil once confirmed working.
           try {
             await persistInfluenceEdges(edgeRows, supabaseUrl, serviceKey);
             console.log(
               `${LOG_PREFIX} [edges] wrote ${edgeRows.length} influence edge(s)`,
             );
           } catch (edgeErr) {
-            console.warn(
-              `${LOG_PREFIX} [edges] write failed (non-critical)`,
-              edgeErr,
-            );
+            console.warn(`${LOG_PREFIX} [edges] write failed (non-critical)`, edgeErr);
           }
         }
       }
