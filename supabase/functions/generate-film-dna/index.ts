@@ -1135,7 +1135,7 @@ const SERIES_DUPLICATE_VERSION_JUSTIFICATION_RE =
  * model-generated notes for numbered parts, sequels, prequels, follow-ups.
  */
 const CANONICAL_SERIES_RE =
-  /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b/i;
+  /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b|\b[2-9]\s*:/i;
 
 /**
  * 推断系列链上、下相邻节点是否应绘制垂直连线（无显式 API 字段时）。
