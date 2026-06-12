@@ -34,6 +34,28 @@ function isCachedSeriesNodeDuplicateOfCenter(node: FilmDnaNode, center: FilmDnaN
   return !CLIENT_VERSION_JUSTIFICATION_RE.test(noteText);
 }
 
+function cachedNodesMatch(a: FilmDnaNode, b: FilmDnaNode): boolean {
+  if (a.tmdbMovieId && b.tmdbMovieId) return a.tmdbMovieId === b.tmdbMovieId;
+  const pa = a.posterUrl?.trim();
+  const pb = b.posterUrl?.trim();
+  if (pa && pb && pa === pb) return true;
+  if (normalizeCachedTitle(a.title) !== normalizeCachedTitle(b.title)) return false;
+  const ya = typeof a.year === 'number' && a.year > 0 ? a.year : null;
+  const yb = typeof b.year === 'number' && b.year > 0 ? b.year : null;
+  if (ya != null && yb != null) return ya === yb;
+  return true;
+}
+
+function filterCachedAxisCrossDedup(tree: FilmDnaTree): FilmDnaTree {
+  const axis = [...(tree.seriesPrevious ?? []), ...(tree.seriesNext ?? [])];
+  if (!axis.length) return tree;
+  const onAxis = (node: FilmDnaNode) => axis.some((s) => cachedNodesMatch(node, s));
+  const left = tree.left.filter((n) => !onAxis(n));
+  const right = tree.right.filter((n) => !onAxis(n));
+  if (left.length === tree.left.length && right.length === tree.right.length) return tree;
+  return { ...tree, left, right };
+}
+
 function filterCachedSeriesDuplicatesOfCenter(tree: FilmDnaTree): FilmDnaTree {
   if (!tree.seriesPrevious?.length && !tree.seriesNext?.length) return tree;
   const sp = tree.seriesPrevious?.filter((n) => !isCachedSeriesNodeDuplicateOfCenter(n, tree.center));
@@ -80,7 +102,7 @@ export async function loadFilmDnaGraph(
   const graph = data.graph as FilmDnaTree | null;
   if (!graph || typeof graph !== 'object' || !graph.center) return null;
 
-  return filterCachedSeriesDuplicatesOfCenter(graph);
+  return filterCachedAxisCrossDedup(filterCachedSeriesDuplicatesOfCenter(graph));
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Film } from 'lucide-react';
@@ -42,6 +43,10 @@ type FilmDnaPanelProps = {
   disableCenterMorph?: boolean;
   /** Loading caption; defaults to the first-open copy. Jump flow passes “Loading This Film’s DNA…”. */
   loadingLabel?: string;
+  /** Ref attached to the center node div — used by the parent to capture its rect for the exit FLIP. */
+  centerNodeRef?: RefObject<HTMLDivElement>;
+  /** When true, the exit FLIP is running: hide the center node instantly so the Preview poster animates instead. */
+  exitHeroActive?: boolean;
 };
 
 /** 侧栏最多展示的节点数。 */
@@ -1807,6 +1812,8 @@ type FilmDnaGraphProps = {
   isJumpActive?: boolean;
   disableCenterMorph?: boolean;
   loadingLabel?: string;
+  centerNodeRef?: RefObject<HTMLDivElement>;
+  exitHeroActive?: boolean;
 };
 
 /**
@@ -1829,6 +1836,8 @@ function FilmDnaGraph({
   isJumpActive,
   disableCenterMorph,
   loadingLabel,
+  centerNodeRef,
+  exitHeroActive,
 }: FilmDnaGraphProps) {
   const seriesPrevious = (tree.seriesPrevious ?? []).slice(
     0,
@@ -2177,6 +2186,7 @@ function FilmDnaGraph({
         >
           {/* Center node: morphs in from preview poster size on mount, morphs back on exit */}
           <motion.div
+            ref={centerNodeRef}
             className="absolute z-20"
             style={{
               left: CENTER_POSTER_POS.left,
@@ -2185,16 +2195,18 @@ function FilmDnaGraph({
             }}
             initial={disableCenterMorph ? false : { scale: enterScale, opacity: 0 }}
             animate={{
-              scale: isExiting ? enterScale : 1,
-              opacity: isExiting ? 0 : 1,
+              scale: exitHeroActive ? 1 : isExiting ? enterScale : 1,
+              opacity: exitHeroActive ? 0 : isExiting ? 0 : 1,
             }}
             transition={
-              isExiting
-                ? {
-                    scale: { duration: 0.35, ease: [0.2, 0, 0, 1] },
-                    opacity: { delay: 0.28, duration: 0.07, ease: 'easeIn' },
-                  }
-                : { duration: 0.35, ease: [0.2, 0, 0, 1] }
+              exitHeroActive
+                ? { duration: 0 }
+                : isExiting
+                  ? {
+                      scale: { duration: 0.35, ease: [0.2, 0, 0, 1] },
+                      opacity: { delay: 0.28, duration: 0.07, ease: 'easeIn' },
+                    }
+                  : { duration: 0.35, ease: [0.2, 0, 0, 1] }
             }
           >
             <FilmDnaNodeCard
@@ -2429,6 +2441,8 @@ export default function FilmDnaPanel({
   isJumpActive,
   disableCenterMorph,
   loadingLabel,
+  centerNodeRef,
+  exitHeroActive,
 }: FilmDnaPanelProps) {
   const showGraph = status === 'loading' || status === 'ready';
 
@@ -2476,6 +2490,8 @@ export default function FilmDnaPanel({
           isJumpActive={isJumpActive}
           disableCenterMorph={disableCenterMorph}
           loadingLabel={loadingLabel}
+          centerNodeRef={centerNodeRef}
+          exitHeroActive={exitHeroActive}
         />
       ) : null}
     </div>

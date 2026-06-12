@@ -1892,10 +1892,14 @@ export default function App() {
   const [isFilmDnaOpen, setIsFilmDnaOpen] = useState(false);
   const [isFilmDnaExiting, setIsFilmDnaExiting] = useState(false);
   const [filmDnaEnterScale, setFilmDnaEnterScale] = useState(5);
+  const [dnaExitHeroGeometry, setDnaExitHeroGeometry] =
+    useState<PreviewSourceHeroGeometry | null>(null);
+  const [dnaExitHeroRun, setDnaExitHeroRun] = useState(false);
   const [filmDnaStatus, setFilmDnaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [filmDnaTree, setFilmDnaTree] = useState<FilmDnaTree | null>(null);
   const [filmDnaError, setFilmDnaError] = useState('');
   const filmDnaAbortRef = useRef<AbortController | null>(null);
+  const bgDnaInFlightRef = useRef<Set<string>>(new Set());
   const filmDnaExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 'open' = 首次进入 Film DNA；'jump' = 由子节点「Jump Here」跳转。仅影响加载文案与中心节点是否做 morph 入场。 */
   const [filmDnaLoadingReason, setFilmDnaLoadingReason] = useState<'open' | 'jump'>('open');
@@ -1938,6 +1942,8 @@ export default function App() {
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
   /** Preview 海报实际定位框；hero 的 source / target 均换算到此框的本地坐标。 */
   const posterPreviewFrameRef = useRef<HTMLDivElement>(null);
+  /** Film DNA 中心节点 div — 退出 FLIP 时用于捕获 source rect。 */
+  const dnaCenterNodeRef = useRef<HTMLDivElement>(null);
   /** 供 pointer 拖拽时读取最新布局（避免闭包陈旧）。 */
   const posterPreviewLayoutRef = useRef<{
     maxW: number;
@@ -2702,9 +2708,39 @@ export default function App() {
     if (!isFilmDnaOpen || isFilmDnaExiting) return;
     filmDnaAbortRef.current?.abort();
     filmDnaAbortRef.current = null;
-    // Recompute morph scale at exit so the center node scales back to the
-    // current poster display size (not the stale size captured at entry).
+
+    // Attempt frame-local FLIP exit: capture center node and frame rects before any state changes.
+    let heroSet = false;
     {
+      const centerEl = dnaCenterNodeRef.current;
+      const frameEl = posterPreviewFrameRef.current;
+      const layout = posterPreviewLayoutRef.current;
+      if (centerEl && frameEl && layout && layout.dispW > 0 && layout.dispH > 0) {
+        const centerPosterImg = centerEl.querySelector('img');
+        const sV = centerPosterImg?.getBoundingClientRect();
+        const fV = frameEl.getBoundingClientRect();
+        if (sV && sV.width > 0 && sV.height > 0 && fV.width > 0 && fV.height > 0) {
+          setDnaExitHeroGeometry({
+            sourceLocalRect: {
+              left: sV.left - fV.left,
+              top: sV.top - fV.top,
+              width: sV.width,
+              height: sV.height,
+            },
+            targetLocalRect: {
+              left: (layout.maxW - layout.dispW) / 2,
+              top: (layout.maxH - layout.dispH) / 2,
+              width: layout.dispW,
+              height: layout.dispH,
+            },
+          });
+          heroSet = true;
+        }
+      }
+    }
+
+    // Fallback: recompute scale-based morph when FLIP geometry is unavailable.
+    if (!heroSet) {
       const host = mainPreviewHostRef.current;
       const layout = posterPreviewLayoutRef.current;
       if (host && layout && layout.dispH > 0) {
@@ -2717,11 +2753,14 @@ export default function App() {
         }
       }
     }
+
     setIsFilmDnaExiting(true);
     filmDnaExitTimeoutRef.current = setTimeout(() => {
       filmDnaExitTimeoutRef.current = null;
       setIsFilmDnaExiting(false);
       setIsFilmDnaOpen(false);
+      setDnaExitHeroGeometry(null);
+      setDnaExitHeroRun(false);
       setFilmDnaTree(null);
       setFilmDnaError('');
       setFilmDnaStatus('idle');
@@ -2803,6 +2842,48 @@ export default function App() {
     },
     [],
   );
+
+  const prefetchFilmDnaForMovie = useCallback((movie: Movie) => {
+    const movieId = movie.id?.trim();
+    if (!movieId) return;
+    if (bgDnaInFlightRef.current.has(movieId)) return;
+    bgDnaInFlightRef.current.add(movieId);
+    void (async () => {
+      const supabase = supabaseRef.current ?? getSupabaseClient();
+      supabaseRef.current = supabase;
+      try {
+        const cached = await loadFilmDnaGraph(supabase, movieId);
+        if (cached) return;
+        const libraryMovies = [movie, ...moviesRef.current.filter((m) => m.id !== movie.id)].map(
+          (m) => ({
+            id: m.id,
+            title: m.title,
+            year: m.year,
+            posterUrl: m.posterUrl,
+            posterStoragePath: m.posterStoragePath,
+          }),
+        );
+        const tree = await invokeGenerateFilmDna(
+          supabase,
+          {
+            title: movie.title,
+            year: movie.year,
+            director: movie.director,
+            writer: movie.writer,
+            genres: movie.genre,
+            plot: movie.plot,
+            tagline: movie.tagline,
+          },
+          { libraryMovies },
+        );
+        await saveFilmDnaGraph(supabase, movieId, movie.title, movie.year, tree);
+      } catch (err) {
+        console.warn('[Film DNA prefetch] failed for', movie.title, err);
+      } finally {
+        bgDnaInFlightRef.current.delete(movieId);
+      }
+    })();
+  }, []);
 
   /**
    * 解析 Film DNA 节点对应的库内影片（标题归一化 + 年份匹配）。
@@ -3344,6 +3425,23 @@ export default function App() {
     );
     return () => window.clearTimeout(tid);
   }, [posterPreviewEnterRun, isPosterPreviewEnterAnimating, finishPosterPreviewEnter]);
+
+  /** Film DNA 退出 FLIP：geometry 就绪后双 rAF 启动 CSS transition。 */
+  useLayoutEffect(() => {
+    if (!dnaExitHeroGeometry || dnaExitHeroRun) return;
+    let cancelled = false;
+    let innerId = 0;
+    const outerId = window.requestAnimationFrame(() => {
+      innerId = window.requestAnimationFrame(() => {
+        if (!cancelled) setDnaExitHeroRun(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(outerId);
+      if (innerId) window.cancelAnimationFrame(innerId);
+    };
+  }, [dnaExitHeroGeometry, dnaExitHeroRun]);
 
   useEffect(() => {
     if (!isPosterPreviewOpen || !previewNaturalSize) return;
@@ -4109,6 +4207,7 @@ export default function App() {
       try {
         const newMovie = await enrichAndUpsertNewMovie(imdbId, userTrailerSnapshot);
         setMovies((prev) => [newMovie, ...prev.filter((m) => m.id !== imdbId)]);
+        prefetchFilmDnaForMovie(newMovie);
       } catch (err) {
         console.error('fast add enrich failed:', err);
         setMovies((prev) => prev.filter((m) => m.id !== imdbId));
@@ -4146,6 +4245,7 @@ export default function App() {
       if (searchQuery) setSearchQuery('');
       setMovies((prev) => [newMovie, ...prev]);
       setPendingScrollMovieId(newMovie.id);
+      prefetchFilmDnaForMovie(newMovie);
 
       setIsAddModalOpen(false);
       setNewMovieTitle('');
@@ -7164,6 +7264,34 @@ export default function App() {
                           cursor: 'default',
                         };
                       }
+                      // Film DNA exit FLIP: animate real poster from center-node position to target.
+                      if (dnaExitHeroGeometry) {
+                        const { sourceLocalRect: s, targetLocalRect: t } = dnaExitHeroGeometry;
+                        const invertX = s.left - t.left;
+                        const invertY = s.top - t.top;
+                        const invertScaleX = s.width / t.width;
+                        const invertScaleY = s.height / t.height;
+                        return {
+                          position: 'absolute' as const,
+                          left: t.left,
+                          top: t.top,
+                          width: t.width,
+                          height: t.height,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          objectFit: 'cover' as const,
+                          opacity: 1,
+                          transform: dnaExitHeroRun
+                            ? 'none'
+                            : `translate(${invertX}px, ${invertY}px) scale(${invertScaleX}, ${invertScaleY})`,
+                          transformOrigin: 'top left',
+                          transition: dnaExitHeroRun
+                            ? `transform ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}`
+                            : 'none',
+                          willChange: 'transform',
+                          cursor: 'default',
+                        };
+                      }
                       const enter = getPosterPreviewEnterVisual(
                         isPosterPreviewEnterAnimating,
                         posterPreviewEnterRun,
@@ -7171,6 +7299,7 @@ export default function App() {
                       const panTransform = (px: number, py: number) =>
                         `translate(calc(-50% + ${px}px), calc(-50% + ${py}px)) scale(${enter.scale})`;
                       // Film DNA morph: hide preview poster while DNA is active; restore on exit.
+                      // Only used on the fallback path (no FLIP geometry available).
                       const dnaOpacity = isFilmDnaOpen
                         ? (isFilmDnaExiting ? 1 : 0)
                         : undefined;
@@ -7406,6 +7535,8 @@ export default function App() {
                             ? 'Loading This Film’s DNA…'
                             : undefined
                         }
+                        centerNodeRef={dnaCenterNodeRef}
+                        exitHeroActive={!!dnaExitHeroGeometry}
                       />
                     </div>
                   ) : isInfoMode ? (

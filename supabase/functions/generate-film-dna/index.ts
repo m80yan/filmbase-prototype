@@ -1082,6 +1082,9 @@ function filmNodesMatchForSeriesDedup(
   ) {
     return idA === idB;
   }
+  const pa = a.posterUrl?.trim();
+  const pb = b.posterUrl?.trim();
+  if (pa && pb && pa === pb) return true;
   if (!filmNodesMatchTitle(a, b)) return false;
   const yearA = isUsableFilmYear(a.year) ? a.year : null;
   const yearB = isUsableFilmYear(b.year) ? b.year : null;
@@ -2362,6 +2365,31 @@ Deno.serve(async (req) => {
     }
 
     result = filterSeriesNodesDuplicatingCenter(result);
+    {
+      const axisDeduped = excludeSideNodesDuplicatingSeriesAxis(
+        result.left,
+        result.right,
+        result.seriesPrevious ?? [],
+        result.seriesNext ?? [],
+      );
+      if (
+        axisDeduped.left.length !== result.left.length ||
+        axisDeduped.right.length !== result.right.length
+      ) {
+        const axisTitles = [
+          ...(result.seriesPrevious ?? []),
+          ...(result.seriesNext ?? []),
+        ].map((n) => n.title);
+        logFilmDnaDiag("final-axis-dedup-removed", {
+          left: axisDeduped.left.length,
+          right: axisDeduped.right.length,
+        }, {
+          before: { left: result.left.length, right: result.right.length },
+          seriesAxisTitles: axisTitles,
+        });
+        result = { ...result, left: axisDeduped.left, right: axisDeduped.right };
+      }
+    }
     result = applySeriesSummaryScope(result);
 
     logFilmDnaDiag("final-response", {
