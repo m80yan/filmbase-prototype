@@ -382,6 +382,25 @@ function connectionArrowPolygon(
   }
 }
 
+/**
+ * Outward delta for a poster edge when the poster is hovered and scaled (origin-center).
+ * Each edge expands outward by half the total size increase.
+ */
+function scaledPosterEdgeOffset(
+  edge: PosterEdge,
+  hovered: boolean,
+): { dx: number; dy: number } {
+  if (!hovered) return { dx: 0, dy: 0 };
+  const dH = (POSTER_W * (POSTER_HOVER_SCALE - 1)) / 2;  // 8.55 px
+  const dV = (POSTER_H * (POSTER_HOVER_SCALE - 1)) / 2;  // 12.825 px
+  switch (edge) {
+    case 'left':   return { dx: -dH, dy: 0 };
+    case 'right':  return { dx: +dH, dy: 0 };
+    case 'top':    return { dx: 0,   dy: -dV };
+    case 'bottom': return { dx: 0,   dy: +dV };
+  }
+}
+
 type FilmDnaConnectionSpec = {
   lineKey: string;
   route: ConnectionRoute;
@@ -725,24 +744,47 @@ function FilmDnaConnectionLines({
         const straight =
           isSingleLeft ||
           (lineKey.startsWith('legacy') && legacyCount === 1);
-        const polyline = buildConnectionPolyline({ ...route, straight });
+        const isTargetHovered =
+          hover !== null &&
+          ((lineKey.startsWith('influence') && hover.kind === 'center') ||
+            (lineKey.startsWith('legacy') &&
+              hover.kind === 'legacy' &&
+              hover.index === parseInt(lineKey.slice(-1), 10) - 1));
+        const { dx, dy } = scaledPosterEdgeOffset(route.targetEdge, isTargetHovered);
+        const dynamicTarget: StageCoord = { x: route.target.x + dx, y: route.target.y + dy };
+        // Influence source = influence poster right edge; legacy source = center poster right edge.
+        const isSourceHovered =
+          hover !== null &&
+          ((lineKey.startsWith('influence') &&
+            hover.kind === 'influence' &&
+            hover.index === parseInt(lineKey.slice(-1), 10) - 1) ||
+            (lineKey.startsWith('legacy') && hover.kind === 'center'));
+        const { dx: sdx } = scaledPosterEdgeOffset('right', isSourceHovered);
+        const dynamicSource: StageCoord = { x: route.source.x + sdx, y: route.source.y };
+        const polyline = buildConnectionPolyline({ ...route, straight, source: dynamicSource, target: dynamicTarget });
         return (
           <g key={lineKey} fill="white" opacity={opacity}>
-            <path
+            <motion.path
               d={polyline}
+              animate={{ d: polyline }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
               fill="none"
               stroke="white"
               strokeWidth={CONNECTION_STROKE_W}
               strokeLinejoin="miter"
               strokeLinecap="butt"
             />
-            <circle
-              cx={route.source.x}
-              cy={route.source.y}
+            <motion.circle
+              cx={dynamicSource.x}
+              cy={dynamicSource.y}
+              animate={{ cx: dynamicSource.x }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
               r={CONNECTION_MARKER_R}
             />
-            <polygon
-              points={connectionArrowPolygon(route.target, route.targetEdge)}
+            <motion.polygon
+              points={connectionArrowPolygon(dynamicTarget, route.targetEdge)}
+              animate={{ points: connectionArrowPolygon(dynamicTarget, route.targetEdge) }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
             />
           </g>
         );
@@ -777,7 +819,14 @@ function FilmDnaConnectionLines({
             ? fromItem.posterPos.top + anchorBelow
             : route.source.y;
         const dynamicSource: StageCoord = { x: route.source.x, y: dynamicSourceY };
-        const dynamicPolyline = buildConnectionPolyline({ ...route, source: dynamicSource });
+        // Target hover detection (lower chain item).
+        const toIdx = seriesSegment?.toChainIndex ?? -1;
+        const toItem = seriesChain[toIdx];
+        const isTargetHovered =
+          hover !== null && toItem !== undefined && hoverMatchesTarget(hover, toItem.hoverTarget);
+        const { dx: tdx, dy: tdy } = scaledPosterEdgeOffset(route.targetEdge, isTargetHovered);
+        const dynamicTarget: StageCoord = { x: route.target.x + tdx, y: route.target.y + tdy };
+        const dynamicPolyline = buildConnectionPolyline({ ...route, source: dynamicSource, target: dynamicTarget });
 
         return (
           <g key={lineKey} fill="white" opacity={opacity}>
@@ -798,8 +847,10 @@ function FilmDnaConnectionLines({
               transition={{ duration: 0.2, ease: 'easeOut' }}
               r={CONNECTION_MARKER_R}
             />
-            <polygon
-              points={connectionArrowPolygon(route.target, route.targetEdge)}
+            <motion.polygon
+              points={connectionArrowPolygon(dynamicTarget, route.targetEdge)}
+              animate={{ points: connectionArrowPolygon(dynamicTarget, route.targetEdge) }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
             />
           </g>
         );
