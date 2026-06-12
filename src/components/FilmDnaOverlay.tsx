@@ -79,6 +79,12 @@ const SERIES_VISUAL_NODE_HEIGHT =
  */
 const SERIES_STEP_Y = SERIES_VISUAL_NODE_HEIGHT + SERIES_VISUAL_GAP_Y;
 
+/** Y-axis connector source — 10 px below year text (resting child node). */
+const SERIES_YEAR_ANCHOR_BELOW = SERIES_VISUAL_NODE_HEIGHT + 10;
+/** Y-axis connector source — 10 px below action button (center node or hovered child).
+ *  8 px = `mt-2` wrapper margin, 36 px = `h-9` button height, 10 px gap. */
+const SERIES_BUTTON_ANCHOR_BELOW = SERIES_VISUAL_NODE_HEIGHT + 8 + 36 + 10;
+
 /** Film DNA 虚拟舞台宽度与默认高度（docs/film-dna-spec.md）。 */
 const STAGE_W = 1080;
 const STAGE_H_BASE = 871;
@@ -675,6 +681,8 @@ type FilmDnaConnectionLinesProps = {
   seriesSpecs: FilmDnaConnectionSpec[];
   /** center 在系列链中的索引（= seriesPrevious 数量）。 */
   seriesCenterChainIndex: number;
+  /** Full ordered chain — used to derive hover-aware source anchors per segment. */
+  seriesChain: SeriesChainItem[];
   hover: HoverTarget | null;
   influenceCount: number;
   legacyCount: number;
@@ -688,6 +696,7 @@ function FilmDnaConnectionLines({
   influenceLegacyPresence,
   seriesSpecs,
   seriesCenterChainIndex,
+  seriesChain,
   hover,
   influenceCount,
   legacyCount,
@@ -701,6 +710,7 @@ function FilmDnaConnectionLines({
       style={{ overflow: 'visible' }}
       aria-hidden
     >
+      {/* X-axis influence/legacy connectors — unchanged, plain SVG */}
       {influenceLegacySpecs.map(({ lineKey, route }) => {
         if (!influenceLegacyPresence[lineKey]) return null;
         const opacity = isLineHighlighted(
@@ -737,6 +747,7 @@ function FilmDnaConnectionLines({
           </g>
         );
       })}
+      {/* Y-axis series connectors — motion.path/circle for animated source anchor */}
       {seriesSpecs.map(({ lineKey, route, seriesSegment }) => {
         const opacity = isLineHighlighted(
           hover,
@@ -747,20 +758,44 @@ function FilmDnaConnectionLines({
         )
           ? 1
           : 0.25;
-        const polyline = buildConnectionPolyline(route);
+
+        // Derive hover-aware source Y: center and hovered child use action-button
+        // anchor; resting child uses year-text anchor.
+        const fromIdx = seriesSegment?.fromChainIndex ?? -1;
+        const fromItem = seriesChain[fromIdx];
+        const isCenter = fromIdx === seriesCenterChainIndex;
+        const isUpperHovered =
+          hover !== null &&
+          fromItem !== undefined &&
+          hoverMatchesTarget(hover, fromItem.hoverTarget);
+        const anchorBelow =
+          isCenter || isUpperHovered
+            ? SERIES_BUTTON_ANCHOR_BELOW
+            : SERIES_YEAR_ANCHOR_BELOW;
+        const dynamicSourceY =
+          fromItem != null
+            ? fromItem.posterPos.top + anchorBelow
+            : route.source.y;
+        const dynamicSource: StageCoord = { x: route.source.x, y: dynamicSourceY };
+        const dynamicPolyline = buildConnectionPolyline({ ...route, source: dynamicSource });
+
         return (
           <g key={lineKey} fill="white" opacity={opacity}>
-            <path
-              d={polyline}
+            <motion.path
+              d={dynamicPolyline}
+              animate={{ d: dynamicPolyline }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
               fill="none"
               stroke="white"
               strokeWidth={CONNECTION_STROKE_W}
               strokeLinejoin="miter"
               strokeLinecap="butt"
             />
-            <circle
-              cx={route.source.x}
-              cy={route.source.y}
+            <motion.circle
+              cx={dynamicSource.x}
+              cy={dynamicSourceY}
+              animate={{ cy: dynamicSourceY }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
               r={CONNECTION_MARKER_R}
             />
             <polygon
@@ -958,6 +993,17 @@ type HoverTarget =
   | { kind: 'legacy'; index: number }
   | { kind: 'series-prev'; index: number }
   | { kind: 'series-next'; index: number };
+
+function hoverMatchesTarget(a: HoverTarget, b: HoverTarget): boolean {
+  if (a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case 'center': return true;
+    case 'influence': return b.kind === 'influence' && a.index === b.index;
+    case 'legacy': return b.kind === 'legacy' && a.index === b.index;
+    case 'series-prev': return b.kind === 'series-prev' && a.index === b.index;
+    case 'series-next': return b.kind === 'series-next' && a.index === b.index;
+  }
+}
 
 type InfluenceLegacyDirection = 'influence' | 'legacy';
 
@@ -2178,6 +2224,7 @@ function FilmDnaGraph({
                     influenceLegacyPresence={influenceLegacyPresence}
                     seriesSpecs={seriesConnectionSpecs}
                     seriesCenterChainIndex={seriesCenterChainIndex}
+                    seriesChain={seriesChain}
                     hover={hover}
                     influenceCount={influenceNodes.length}
                     legacyCount={legacyNodes.length}
