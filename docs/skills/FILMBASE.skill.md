@@ -195,7 +195,10 @@ Always normalize OpenAI output before rendering or saving.
 Normalization must:
 - cap influence nodes to 0–3
 - cap legacy nodes to 0–3
-- remove duplicate nodes across both sides
+- keep series previous/next nodes independent from influence and legacy caps
+- remove the center film from all relationship lists
+- remove duplicate nodes across influence, legacy, and series lists
+- remove same-title variants unless verified as a direct sequel, direct prequel, official remake, or same-continuity franchise entry
 - remove invalid nodes without title or year
 - remove low-confidence filler when confidence exists
 - preserve posterUrl when available
@@ -236,7 +239,11 @@ Do not solve Film DNA stability with React-only cache. The result must survive r
 
 ## Film DNA node quality
 
+Influence and Legacy nodes are lateral relationship nodes.
 Each side of the center node should contain 0–3 nodes.
+
+Series Previous and Series Next nodes are vertical Y-axis relationship nodes.
+They are independent from the 0–3 lateral Influence and Legacy caps.
 
 Influence side:
 - earlier works that clearly shaped, inspired, preceded, or strongly relate to the center film
@@ -246,11 +253,29 @@ Legacy side:
 
 Rules:
 - do not force exactly 3 nodes
+- for widely recognized, historically significant, or canonically influential films, aim for 2–3 Influence nodes when defensible
+- for widely recognized, historically significant, or canonically influential films, aim for 2–3 Legacy nodes when defensible
+- avoid sparse graphs for films with clear cinematic lineage
+- for obscure, recent, niche, or weakly connected films, fewer nodes are acceptable
 - do not pad weak or generic recommendations
 - strong relationship quality is more important than visual symmetry
 - avoid duplicate titles, years, or IMDb IDs
 - prefer clear film-level relationships over loose genre similarity
 - fewer strong nodes are better than a full but weak graph
+
+Same-title and center duplicate rules:
+- do not include the center film itself as any relationship node
+- do not include same-title records as Influence, Legacy, Series Previous, or Series Next unless the relationship is verified as a direct sequel, direct prequel, official remake, or same-continuity franchise entry
+- same-title records with different years must not be placed on the Y-axis by default
+- if a same-title record appears to be a duplicate, malformed metadata entry, poster duplicate, or unrelated title collision, remove it during normalization
+
+Series rules:
+- series nodes are not counted as Influence or Legacy nodes
+- series nodes represent direct franchise, sequel, prequel, or same-continuity ordering only
+- Series Previous should contain earlier films in the same series or direct continuity
+- Series Next should contain later films in the same series or direct continuity
+- order series nodes from nearest to farthest relative to the center film
+- do not place remakes, same-title variants, alternate adaptations, or shared-source works on the Y-axis unless they are verified as direct series continuity
 
 Expected node shape:
 

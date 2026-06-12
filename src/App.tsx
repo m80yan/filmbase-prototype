@@ -1897,6 +1897,12 @@ export default function App() {
   const [filmDnaError, setFilmDnaError] = useState('');
   const filmDnaAbortRef = useRef<AbortController | null>(null);
   const filmDnaExitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 'open' = 首次进入 Film DNA；'jump' = 由子节点「Jump Here」跳转。仅影响加载文案与中心节点是否做 morph 入场。 */
+  const [filmDnaLoadingReason, setFilmDnaLoadingReason] = useState<'open' | 'jump'>('open');
+  /** 「Jump Here」点击后、子节点移动到中心的过渡进行中（移动结束前不进入 loading）。 */
+  const [isFilmDnaJumpAnimating, setIsFilmDnaJumpAnimating] = useState(false);
+  /** 跳转目标库影片，在移动动画期间暂存，移动完成时作为新中心载入。 */
+  const pendingJumpMovieRef = useRef<Movie | null>(null);
   /** 从卡片打开预览时：容器内 fade+scale 入场（非共享元素飞线）。 */
   const [isPosterPreviewEnterAnimating, setIsPosterPreviewEnterAnimating] = useState(false);
   /** 入场 CSS transition 是否已启动（双 rAF 后置 true）。 */
@@ -2682,6 +2688,9 @@ export default function App() {
     setIsFilmDnaExiting(false);
     filmDnaAbortRef.current?.abort();
     filmDnaAbortRef.current = null;
+    pendingJumpMovieRef.current = null;
+    setIsFilmDnaJumpAnimating(false);
+    setFilmDnaLoadingReason('open');
     setIsFilmDnaOpen(false);
     setFilmDnaTree(null);
     setFilmDnaError('');
@@ -2716,7 +2725,10 @@ export default function App() {
       setFilmDnaTree(null);
       setFilmDnaError('');
       setFilmDnaStatus('idle');
+      setFilmDnaLoadingReason('open');
     }, 400);
+    pendingJumpMovieRef.current = null;
+    setIsFilmDnaJumpAnimating(false);
   }, [isFilmDnaOpen, isFilmDnaExiting]);
 
   const onPlayCenterTrailer = useCallback(() => {
@@ -2725,83 +2737,33 @@ export default function App() {
     setModalMode('trailer');
   }, [posterPreviewMovie]);
 
-  const onPlayNodeTrailer = useCallback((node: FilmDnaNode) => {
-    const nodeKey = normalizeFilmTitleKey(node.title);
-    const match = moviesRef.current.find(
-      (m) =>
-        normalizeFilmTitleKey(m.title) === nodeKey &&
-        (node.year == null || m.year === node.year),
-    );
-    if (match) {
-      setSelectedMovie(match);
-      setModalMode('trailer');
-    } else {
-      console.warn('[FilmDNA] No library match for node:', node.title, node.year);
-    }
-  }, []);
-
-  const isFilmDnaNodeInLibrary = useCallback((node: FilmDnaNode): boolean => {
-    const nodeKey = normalizeFilmTitleKey(node.title);
-    return moviesRef.current.some(
-      (m) =>
-        normalizeFilmTitleKey(m.title) === nodeKey &&
-        (node.year == null || m.year === node.year),
-    );
-  }, []);
-
-  const onAddMovieFromDnaNode = useCallback((node: FilmDnaNode) => {
-    if (!node.title?.trim()) {
-      console.warn('[FilmDNA] Cannot add movie: node has no title', node);
-      return;
-    }
-    setNewMovieTitle(node.title.trim());
-    setIsAddModalOpen(true);
-  }, []);
-
   /**
-   * 进入 Film DNA 模式并调用 `generate-film-dna`（与 Info 互斥，由调用方先 `setIsInfoMode(false)`）。
+   * 载入或生成给定中心影片的 Film DNA 图（缓存优先，海报回填，失败置 error）。
+   * 调用方负责在调用前设置 `filmDnaStatus = 'loading'` 与中止控制器。
+   * 首次进入与「Jump Here」跳转共用此逻辑，确保加载完成后图谱以相同 fade-in 出现。
    *
-   * @param movie 当前海报预览影片
+   * @param movie 作为新中心的影片
+   * @param ac 中止控制器（切换/退出时取消）
    */
-  const enterFilmDnaMode = useCallback((movie: Movie) => {
-    // Compute morph scale: how much larger the preview poster is vs the DNA center node.
-    {
-      const host = mainPreviewHostRef.current;
-      const layout = posterPreviewLayoutRef.current;
-      if (host && layout && layout.dispH > 0) {
-        const { width: hostW, height: hostH } = host.getBoundingClientRect();
-        if (hostW > 0 && hostH > 0) {
-          const stageScale = Math.min(hostW / 1080, hostH / 871);
-          if (stageScale > 0) {
-            setFilmDnaEnterScale(Math.max(2, Math.min(12, layout.dispH / (171 * stageScale))));
-          }
-        }
-      }
-    }
-    const supabase = supabaseRef.current ?? getSupabaseClient();
-    supabaseRef.current = supabase;
-    filmDnaAbortRef.current?.abort();
-    const ac = new AbortController();
-    filmDnaAbortRef.current = ac;
-    setIsFilmDnaOpen(true);
-    setIsFilmDnaExiting(false);
-    setFilmDnaStatus('loading');
-    setFilmDnaTree(null);
-    setFilmDnaError('');
-    void (async () => {
+  const runFilmDnaGraphLoad = useCallback(
+    async (movie: Movie, ac: AbortController) => {
+      const supabase = supabaseRef.current ?? getSupabaseClient();
+      supabaseRef.current = supabase;
+      const libraryMovies = () =>
+        moviesRef.current.map((m) => ({
+          id: m.id,
+          title: m.title,
+          year: m.year,
+          posterUrl: m.posterUrl,
+          posterStoragePath: m.posterStoragePath,
+        }));
       try {
         // Check for a persisted graph before calling OpenAI.
         const cached = await loadFilmDnaGraph(supabase, movie.id);
         if (ac.signal.aborted) return;
         if (cached) {
           const hydratedCached = await hydrateFilmDnaTreePosters(supabase, cached, {
-            libraryMovies: moviesRef.current.map((m) => ({
-              id: m.id,
-              title: m.title,
-              year: m.year,
-              posterUrl: m.posterUrl,
-              posterStoragePath: m.posterStoragePath,
-            })),
+            libraryMovies: libraryMovies(),
             signal: ac.signal,
           });
           if (ac.signal.aborted) return;
@@ -2822,13 +2784,7 @@ export default function App() {
             tagline: movie.tagline,
           },
           {
-            libraryMovies: moviesRef.current.map((m) => ({
-              id: m.id,
-              title: m.title,
-              year: m.year,
-              posterUrl: m.posterUrl,
-              posterStoragePath: m.posterStoragePath,
-            })),
+            libraryMovies: libraryMovies(),
             signal: ac.signal,
           },
         );
@@ -2844,8 +2800,138 @@ export default function App() {
           err instanceof Error ? err.message : 'Could not generate Film DNA.',
         );
       }
-    })();
+    },
+    [],
+  );
+
+  /**
+   * 解析 Film DNA 节点对应的库内影片（标题归一化 + 年份匹配）。
+   * 返回完整 `Movie`（含稳定 `id`），供 trailer / Jump Here 以稳定 id 操作，避免仅靠标题。
+   *
+   * @param node Film DNA 子节点
+   */
+  const resolveLibraryMovieForNode = useCallback(
+    (node: FilmDnaNode): Movie | null => {
+      const nodeKey = normalizeFilmTitleKey(node.title);
+      return (
+        moviesRef.current.find(
+          (m) =>
+            normalizeFilmTitleKey(m.title) === nodeKey &&
+            (node.year == null || m.year === node.year),
+        ) ?? null
+      );
+    },
+    [],
+  );
+
+  const onPlayNodeTrailer = useCallback(
+    (node: FilmDnaNode) => {
+      const match = resolveLibraryMovieForNode(node);
+      if (match) {
+        setSelectedMovie(match);
+        setModalMode('trailer');
+      } else {
+        console.warn('[FilmDNA] No library match for node:', node.title, node.year);
+      }
+    },
+    [resolveLibraryMovieForNode],
+  );
+
+  const isFilmDnaNodeInLibrary = useCallback(
+    (node: FilmDnaNode): boolean => resolveLibraryMovieForNode(node) != null,
+    [resolveLibraryMovieForNode],
+  );
+
+  /**
+   * 「Jump Here」点击：解析目标库影片并启动移动到中心的过渡。
+   * 移动结束前不进入 loading（见 {@link onFilmDnaJumpMoveComplete}）。
+   * 动画或加载进行中时忽略重复点击。
+   *
+   * @param node 被点击的库内子节点
+   */
+  const onJumpToFilmDnaNode = useCallback(
+    (node: FilmDnaNode) => {
+      if (isFilmDnaJumpAnimating || filmDnaStatus === 'loading') return;
+      const target = resolveLibraryMovieForNode(node);
+      if (!target) {
+        console.warn('[FilmDNA] Jump: no library match for node:', node.title, node.year);
+        return;
+      }
+      if (posterPreviewMovie && target.id === posterPreviewMovie.id) return;
+      pendingJumpMovieRef.current = target;
+      setIsFilmDnaJumpAnimating(true);
+    },
+    [isFilmDnaJumpAnimating, filmDnaStatus, resolveLibraryMovieForNode, posterPreviewMovie],
+  );
+
+  /**
+   * 移动到中心动画完成后：将中心切换为跳转目标并进入 jump 加载流程。
+   * 更新 `posterPreviewMovie` 使退出预览 / Info / 上传 / 预告片均对齐新中心。
+   */
+  const onFilmDnaJumpMoveComplete = useCallback(() => {
+    const target = pendingJumpMovieRef.current;
+    if (!target) {
+      setIsFilmDnaJumpAnimating(false);
+      return;
+    }
+    pendingJumpMovieRef.current = null;
+    setPosterPreviewMovie(target);
+    filmDnaAbortRef.current?.abort();
+    const ac = new AbortController();
+    filmDnaAbortRef.current = ac;
+    setFilmDnaLoadingReason('jump');
+    setFilmDnaStatus('loading');
+    setFilmDnaTree(null);
+    setFilmDnaError('');
+    setIsFilmDnaJumpAnimating(false);
+    void runFilmDnaGraphLoad(target, ac);
+  }, [runFilmDnaGraphLoad]);
+
+  const onAddMovieFromDnaNode = useCallback((node: FilmDnaNode) => {
+    if (!node.title?.trim()) {
+      console.warn('[FilmDNA] Cannot add movie: node has no title', node);
+      return;
+    }
+    setNewMovieTitle(node.title.trim());
+    setIsAddModalOpen(true);
   }, []);
+
+  /**
+   * 进入 Film DNA 模式并调用 `generate-film-dna`（与 Info 互斥，由调用方先 `setIsInfoMode(false)`）。
+   *
+   * @param movie 当前海报预览影片
+   */
+  const enterFilmDnaMode = useCallback(
+    (movie: Movie) => {
+      // Compute morph scale: how much larger the preview poster is vs the DNA center node.
+      {
+        const host = mainPreviewHostRef.current;
+        const layout = posterPreviewLayoutRef.current;
+        if (host && layout && layout.dispH > 0) {
+          const { width: hostW, height: hostH } = host.getBoundingClientRect();
+          if (hostW > 0 && hostH > 0) {
+            const stageScale = Math.min(hostW / 1080, hostH / 871);
+            if (stageScale > 0) {
+              setFilmDnaEnterScale(Math.max(2, Math.min(12, layout.dispH / (171 * stageScale))));
+            }
+          }
+        }
+      }
+      filmDnaAbortRef.current?.abort();
+      const ac = new AbortController();
+      filmDnaAbortRef.current = ac;
+      pendingJumpMovieRef.current = null;
+      setIsFilmDnaJumpAnimating(false);
+      setFilmDnaLoadingReason('open');
+      setIsFilmDnaOpen(true);
+      setIsFilmDnaExiting(false);
+      setFilmDnaStatus('loading');
+      setFilmDnaTree(null);
+      setFilmDnaError('');
+      void runFilmDnaGraphLoad(movie, ac);
+    },
+    [runFilmDnaGraphLoad],
+  );
 
   /**
    * 切换 Film DNA 模式：再次点击图标或 ESC 退出；进入时关闭 Info 并拉取 DNA。
@@ -7307,6 +7393,15 @@ export default function App() {
                         onPlayNodeTrailer={onPlayNodeTrailer}
                         isLibraryNode={isFilmDnaNodeInLibrary}
                         onAddMovieNode={onAddMovieFromDnaNode}
+                        onJumpToNode={onJumpToFilmDnaNode}
+                        onJumpMoveComplete={onFilmDnaJumpMoveComplete}
+                        isJumpActive={isFilmDnaJumpAnimating || filmDnaStatus === 'loading'}
+                        disableCenterMorph={filmDnaLoadingReason === 'jump'}
+                        loadingLabel={
+                          filmDnaLoadingReason === 'jump'
+                            ? 'Loading This Film’s DNA…'
+                            : undefined
+                        }
                       />
                     </div>
                   ) : isInfoMode ? (

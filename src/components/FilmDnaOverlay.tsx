@@ -32,6 +32,16 @@ type FilmDnaPanelProps = {
   isLibraryNode?: (node: FilmDnaNode) => boolean;
   /** Called when the user clicks Add Movie on a non-center node not yet in the library. */
   onAddMovieNode?: (node: FilmDnaNode) => void;
+  /** Called when the user clicks Jump Here on an in-library child node — re-centers Film DNA on that movie. */
+  onJumpToNode?: (node: FilmDnaNode) => void;
+  /** Called once the move-to-center animation finishes; the parent then enters the jump loading state. */
+  onJumpMoveComplete?: () => void;
+  /** True while a jump animation or jump load is active — suppresses repeated Jump Here clicks. */
+  isJumpActive?: boolean;
+  /** When true, the center node skips the morph-in entrance (the jump ghost already moved it in). */
+  disableCenterMorph?: boolean;
+  /** Loading caption; defaults to the first-open copy. Jump flow passes “Loading This Film’s DNA…”. */
+  loadingLabel?: string;
 };
 
 /** 侧栏最多展示的节点数。 */
@@ -1476,6 +1486,8 @@ type FilmDnaNodeCardProps = {
   onPlayTrailer?: () => void;
   /** Called when user clicks Add Movie. Non-center only, hover-only, only when node is NOT in library. */
   onAddMovieNode?: () => void;
+  /** Called when user clicks Jump Here. Non-center library nodes only; hover-only lower-right poster CTA. */
+  onJumpHere?: () => void;
 };
 
 /**
@@ -1492,6 +1504,7 @@ function FilmDnaNodeCard({
   posterPos,
   onPlayTrailer,
   onAddMovieNode,
+  onJumpHere,
 }: FilmDnaNodeCardProps) {
   const year = formatFilmDnaYear(node.year);
   const dimmed = !isCenter && !highlighted;
@@ -1536,29 +1549,74 @@ function FilmDnaNodeCard({
           onPointerEnter={() => onHover(hoverTarget)}
           onPointerLeave={() => onHover(null)}
         >
-          <motion.div
-            className={`relative h-[171px] w-[114px] overflow-hidden transition-opacity duration-300 ease-out ${
-              !showPlaceholder ? POSTER_VIEW_HOVER : ''
-            } ${dimmed ? 'opacity-25' : 'opacity-100'} group-hover/poster:opacity-100`}
-          >
-            {!showPlaceholder ? (
-              <img
-                draggable={false}
-                src={posterSrc}
-                alt=""
-                className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
-                referrerPolicy="no-referrer"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <div
-                className="flex h-[171px] w-[114px] items-center justify-center bg-[#101010] text-white/40"
-                aria-hidden
+          {/* Poster wrapper: sized to the poster so the inline Jump Here action can
+              anchor to the poster's right edge and bottom without affecting layout. */}
+          <div className="relative">
+            <motion.div
+              className={`relative h-[171px] w-[114px] overflow-hidden transition-opacity duration-300 ease-out ${
+                !showPlaceholder ? POSTER_VIEW_HOVER : ''
+              } ${dimmed ? 'opacity-25' : 'opacity-100'} group-hover/poster:opacity-100`}
+            >
+              {!showPlaceholder ? (
+                <img
+                  draggable={false}
+                  src={posterSrc}
+                  alt=""
+                  className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgError(true)}
+                />
+              ) : (
+                <div
+                  className="flex h-[171px] w-[114px] items-center justify-center bg-[#101010] text-white/40"
+                  aria-hidden
+                >
+                  <Film size={32} strokeWidth={1} />
+                </div>
+              )}
+            </motion.div>
+
+            {/* Jump Here: transparent hit area + visual CTA.
+                Always pointer-events-auto (no group-hover guard) so the cursor moving from
+                the scale-expanded poster directly into this area keeps group/poster hovered
+                — no dead zone.  Height = enlarged-poster height; top offset = -scaleExpandY
+                so the element spans exactly the enlarged poster's vertical extent.
+                paddingLeft = scaleExpandX (8.55) + 20px gap = 28.55px from the left edge
+                (which sits at the normal poster right = POSTER_W), placing the icon 20px
+                from the enlarged poster's visual right edge.  items-end aligns icon+text
+                to the button's bottom, which equals the enlarged poster's bottom. */}
+            {!isCenter && onJumpHere ? (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJumpHere();
+                }}
+                aria-label={`Jump to ${node.title} Film DNA`}
+                className="group/jump absolute inline-flex cursor-pointer items-end gap-[2px] whitespace-nowrap rounded-none border-0 bg-transparent text-[14px] leading-normal text-white opacity-0 shadow-none transition-opacity duration-200 group-hover/poster:opacity-100"
+                style={{
+                  left: POSTER_W,
+                  top: -(POSTER_H * (POSTER_HOVER_SCALE - 1) / 2),
+                  height: POSTER_H * POSTER_HOVER_SCALE,
+                  padding: 0,
+                  paddingLeft: POSTER_W * (POSTER_HOVER_SCALE - 1) / 2 + 20,
+                }}
               >
-                <Film size={32} strokeWidth={1} />
-              </div>
-            )}
-          </motion.div>
+                <img
+                  draggable={false}
+                  src="/icons/arrow-down-left.svg"
+                  alt=""
+                  width={14}
+                  height={14}
+                  className="pointer-events-none h-3.5 w-3.5 shrink-0"
+                  decoding="async"
+                  aria-hidden
+                />
+                <span className="group-hover/jump:underline">Jump Here</span>
+              </button>
+            ) : null}
+          </div>
           <FilmDnaNodeText
             text={node.title}
             isCenter={isCenter}
@@ -1641,6 +1699,11 @@ type FilmDnaGraphProps = {
   onPlayNodeTrailer?: (node: FilmDnaNode) => void;
   isLibraryNode?: (node: FilmDnaNode) => boolean;
   onAddMovieNode?: (node: FilmDnaNode) => void;
+  onJumpToNode?: (node: FilmDnaNode) => void;
+  onJumpMoveComplete?: () => void;
+  isJumpActive?: boolean;
+  disableCenterMorph?: boolean;
+  loadingLabel?: string;
 };
 
 /**
@@ -1658,6 +1721,11 @@ function FilmDnaGraph({
   onPlayNodeTrailer,
   isLibraryNode,
   onAddMovieNode,
+  onJumpToNode,
+  onJumpMoveComplete,
+  isJumpActive,
+  disableCenterMorph,
+  loadingLabel,
 }: FilmDnaGraphProps) {
   const seriesPrevious = (tree.seriesPrevious ?? []).slice(
     0,
@@ -1712,6 +1780,28 @@ function FilmDnaGraph({
 
   const [hover, setHover] = useState<HoverTarget | null>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  /**
+   * 跳转「幽灵」节点：被点击的子节点海报副本，从其原位移动到中心位（transform-based）。
+   * 移动期间侧栏内容淡出；到位后通知父级进入加载，并清除自身（与新中心静态出现同帧切换，无闪烁）。
+   */
+  const [jumpGhost, setJumpGhost] = useState<{
+    node: FilmDnaNode;
+    startPos: StagePoint;
+  } | null>(null);
+
+  const handleJumpFromNode = useCallback(
+    (node: FilmDnaNode, startPos: StagePoint) => {
+      if (isJumpActive || jumpGhost) return;
+      setJumpGhost({ node, startPos });
+      onJumpToNode?.(node);
+    },
+    [isJumpActive, jumpGhost, onJumpToNode],
+  );
+
+  const handleJumpGhostArrived = useCallback(() => {
+    onJumpMoveComplete?.();
+    setJumpGhost(null);
+  }, [onJumpMoveComplete]);
   // Stage panning only
   const dragRef = useRef<{
     pointerId: number | null;
@@ -1922,7 +2012,9 @@ function FilmDnaGraph({
   }, [hover, activePosterHover, centerNode, seriesSummaryBullets]);
 
 
-  const showSideContent = status === 'ready' && !isExiting;
+  // Side content (lines + side/series nodes) hides while the jump ghost moves to center,
+  // so the rest of the graph fades out as the clicked node lifts off toward the middle.
+  const showSideContent = status === 'ready' && !isExiting && !jumpGhost;
 
   return (
     <div
@@ -1958,9 +2050,9 @@ function FilmDnaGraph({
               top: CENTER_POSTER_POS.top,
               transformOrigin: `${POSTER_W / 2}px ${POSTER_H / 2}px`,
             }}
-            initial={{ scale: enterScale, opacity: 0 }}
+            initial={disableCenterMorph ? false : { scale: enterScale, opacity: 0 }}
             animate={{
-              scale: isExiting ? enterScale : 1,
+              scale: disableCenterMorph ? 1 : isExiting ? enterScale : 1,
               opacity: isExiting ? 0 : 1,
             }}
             transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
@@ -1976,6 +2068,40 @@ function FilmDnaGraph({
               onPlayTrailer={onPlayCenterTrailer}
             />
           </motion.div>
+
+          {/* Jump ghost: the clicked child node's poster, sliding from its position to center. */}
+          {jumpGhost ? (
+            <motion.div
+              className="absolute left-0 top-0 z-30"
+              style={{ transformOrigin: `${POSTER_W / 2}px ${POSTER_H / 2}px` }}
+              initial={{ x: jumpGhost.startPos.left, y: jumpGhost.startPos.top, opacity: 1 }}
+              animate={{ x: CENTER_POSTER_POS.left, y: CENTER_POSTER_POS.top, opacity: 1 }}
+              transition={{ duration: 0.4, ease: [0.2, 0, 0, 1] }}
+              onAnimationComplete={handleJumpGhostArrived}
+            >
+              <div className="relative h-[171px] w-[114px] overflow-hidden">
+                {(() => {
+                  const ghostSrc = resolvePosterUrlFromRaw(jumpGhost.node);
+                  return ghostSrc ? (
+                    <img
+                      draggable={false}
+                      src={ghostSrc}
+                      alt=""
+                      className="block h-[171px] w-[114px] aspect-[2/3] object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div
+                      className="flex h-[171px] w-[114px] items-center justify-center bg-[#101010] text-white/40"
+                      aria-hidden
+                    >
+                      <Film size={32} strokeWidth={1} />
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          ) : null}
 
           {/* Loading indicator: positioned below the center node in stage coords */}
           {status === 'loading' ? (
@@ -1993,7 +2119,7 @@ function FilmDnaGraph({
               <div className="flex items-center gap-4">
                 <FilmDnaGeneratingLoader size={64} />
                 <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
-                  Generating Film DNA…
+                  {loadingLabel ?? 'Generating Film DNA…'}
                 </p>
               </div>
             </motion.div>
@@ -2073,6 +2199,7 @@ function FilmDnaGraph({
                     posterPos={nodeFrameToPosterAnchor(getEffectiveInfluencePos(index))}
                     onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
                     onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
+                    onJumpHere={onJumpToNode && isLibraryNode?.(node) ? () => handleJumpFromNode(node, nodeFrameToPosterAnchor(getEffectiveInfluencePos(index))) : undefined}
                   />
                 ))}
 
@@ -2090,6 +2217,7 @@ function FilmDnaGraph({
                     posterPos={nodeFrameToPosterAnchor(getEffectiveLegacyPos(index))}
                     onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
                     onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
+                    onJumpHere={onJumpToNode && isLibraryNode?.(node) ? () => handleJumpFromNode(node, nodeFrameToPosterAnchor(getEffectiveLegacyPos(index))) : undefined}
                   />
                 ))}
 
@@ -2108,6 +2236,7 @@ function FilmDnaGraph({
                     posterPos={seriesPreviousPositions[index]}
                     onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
                     onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
+                    onJumpHere={onJumpToNode && isLibraryNode?.(node) ? () => handleJumpFromNode(node, seriesPreviousPositions[index]) : undefined}
                   />
                 ))}
 
@@ -2126,6 +2255,7 @@ function FilmDnaGraph({
                     posterPos={seriesNextPositions[index]}
                     onPlayTrailer={onPlayNodeTrailer && isLibraryNode?.(node) ? () => onPlayNodeTrailer(node) : undefined}
                     onAddMovieNode={!isLibraryNode?.(node) && onAddMovieNode ? () => onAddMovieNode(node) : undefined}
+                    onJumpHere={onJumpToNode && isLibraryNode?.(node) ? () => handleJumpFromNode(node, seriesNextPositions[index]) : undefined}
                   />
                 ))}
               </motion.div>
@@ -2153,6 +2283,11 @@ export default function FilmDnaPanel({
   onPlayNodeTrailer,
   isLibraryNode,
   onAddMovieNode,
+  onJumpToNode,
+  onJumpMoveComplete,
+  isJumpActive,
+  disableCenterMorph,
+  loadingLabel,
 }: FilmDnaPanelProps) {
   const showGraph = status === 'loading' || status === 'ready';
 
@@ -2195,6 +2330,11 @@ export default function FilmDnaPanel({
           onPlayNodeTrailer={onPlayNodeTrailer}
           isLibraryNode={isLibraryNode}
           onAddMovieNode={onAddMovieNode}
+          onJumpToNode={onJumpToNode}
+          onJumpMoveComplete={onJumpMoveComplete}
+          isJumpActive={isJumpActive}
+          disableCenterMorph={disableCenterMorph}
+          loadingLabel={loadingLabel}
         />
       ) : null}
     </div>
