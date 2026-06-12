@@ -2188,7 +2188,14 @@ function FilmDnaGraph({
               scale: disableCenterMorph ? 1 : isExiting ? enterScale : 1,
               opacity: isExiting ? 0 : 1,
             }}
-            transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
+            transition={
+              isExiting
+                ? {
+                    scale: { duration: 0.35, ease: [0.2, 0, 0, 1] },
+                    opacity: { delay: 0.28, duration: 0.07, ease: 'easeIn' },
+                  }
+                : { duration: 0.35, ease: [0.2, 0, 0, 1] }
+            }
           >
             <FilmDnaNodeCard
               node={centerNode}
