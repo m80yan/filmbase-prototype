@@ -267,6 +267,9 @@ type ConnectionRoute = {
   targetEdge: PosterEdge;
   routing: ConnectionRouting;
   straight?: boolean;
+  /** When set, overrides the auto-computed midX so the center-side horizontal
+   *  segment stays fixed while only the child-side segment changes length. */
+  fixedMidX?: number;
 };
 
 
@@ -280,12 +283,13 @@ function buildInfluenceLegacyPolyline(
   target: StageCoord,
   targetEdge: PosterEdge,
   straight?: boolean,
+  fixedMidX?: number,
 ): string {
   const approach = approachPointBeforeArrow(target, targetEdge);
   if (straight) {
     return `M ${source.x} ${source.y} L ${approach.x} ${approach.y}`;
   }
-  const midX = (source.x + approach.x) / 2;
+  const midX = fixedMidX !== undefined ? fixedMidX : (source.x + approach.x) / 2;
   return `M ${source.x} ${source.y} H ${midX} V ${approach.y} H ${approach.x}`;
 }
 
@@ -321,6 +325,7 @@ function buildConnectionPolyline(route: ConnectionRoute): string {
     route.target,
     route.targetEdge,
     route.straight,
+    route.fixedMidX,
   );
 }
 
@@ -1842,6 +1847,10 @@ function FilmDnaGraph({
         (CENTER_POSTER_ANCHORS.left.x - (frame.left + POSTER_W)) / 2;
       return { left: frame.left + halfConnDist, top: CENTER_POSTER_POS.top };
     }
+    // 3-node layout: shift all three influence nodes left by 96px.
+    if (influenceNodes.length === 3) {
+      return { left: frame.left - 96, top: frame.top };
+    }
     return frame;
   }, [influenceNodes.length]);
 
@@ -1850,16 +1859,26 @@ function FilmDnaGraph({
     if (legacyNodes.length === 1) return { left: frame.left, top: CENTER_POSTER_POS.top };
     // 2-node layout: move bottom-right node (index 1) up by 248px.
     if (legacyNodes.length === 2 && index === 1) return { left: frame.left, top: frame.top - 248 };
-    // 3-node layout: move bottom-right node (index 1) down by 104px.
-    if (legacyNodes.length === 3 && index === 1) return { left: frame.left, top: frame.top + 104 };
+    // 3-node layout: move bottom-right node (index 1) down by 18px.
+    if (legacyNodes.length === 3 && index === 1) return { left: frame.left, top: frame.top + 18 };
     return frame;
   }, [legacyNodes.length]);
 
   const dynamicInfluenceLegacySpecs = useMemo((): FilmDnaConnectionSpec[] => {
     const specs: FilmDnaConnectionSpec[] = [];
+    // approach.x is the same for every influence connector.
+    const influenceApproachX = CENTER_POSTER_ANCHORS.left.x - CONNECTION_ARROW_LEN;
     NODE_POS.influence.forEach((_, index) => {
       const frame = getEffectiveInfluencePos(index);
       const poster = nodeFrameToPosterAnchor(frame);
+      // 3-node left layout: pin midX to the original (un-shifted) value so the
+      // center-side horizontal segment stays unchanged and only the child-side
+      // segment changes length (it lengthens by 96px as the node moves left).
+      let fixedMidX: number | undefined;
+      if (influenceNodes.length === 3) {
+        const origPosterRightX = NODE_POS.influence[index].left + POSTER_W;
+        fixedMidX = (origPosterRightX + influenceApproachX) / 2;
+      }
       specs.push({
         lineKey: `influence0${index + 1}`,
         route: {
@@ -1867,6 +1886,7 @@ function FilmDnaGraph({
           target: CENTER_POSTER_ANCHORS.left,
           targetEdge: 'left',
           routing: 'influence-legacy',
+          ...(fixedMidX !== undefined ? { fixedMidX } : {}),
         },
       });
     });
@@ -1884,7 +1904,7 @@ function FilmDnaGraph({
       });
     });
     return specs;
-  }, [getEffectiveInfluencePos, getEffectiveLegacyPos]);
+  }, [getEffectiveInfluencePos, getEffectiveLegacyPos, influenceNodes.length]);
 
 
   const onCanvasPointerDown = useCallback(
