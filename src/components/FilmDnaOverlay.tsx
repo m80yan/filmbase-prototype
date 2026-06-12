@@ -1833,18 +1833,26 @@ function FilmDnaGraph({
   };
 
   // Single-node alignment: when only one node on a side, align its y to center poster y.
+  // For single influence: also shift right by half the connector distance so the
+  // straight line spans half the original distance (poster right-center → center left-center).
   const getEffectiveInfluencePos = useCallback((index: number): StagePoint => {
     const frame = NODE_POS.influence[index];
-    return influenceNodes.length === 1
-      ? { left: frame.left, top: CENTER_POSTER_POS.top }
-      : frame;
+    if (influenceNodes.length === 1) {
+      const halfConnDist =
+        (CENTER_POSTER_ANCHORS.left.x - (frame.left + POSTER_W)) / 2;
+      return { left: frame.left + halfConnDist, top: CENTER_POSTER_POS.top };
+    }
+    return frame;
   }, [influenceNodes.length]);
 
   const getEffectiveLegacyPos = useCallback((index: number): StagePoint => {
     const frame = NODE_POS.legacy[index];
-    return legacyNodes.length === 1
-      ? { left: frame.left, top: CENTER_POSTER_POS.top }
-      : frame;
+    if (legacyNodes.length === 1) return { left: frame.left, top: CENTER_POSTER_POS.top };
+    // 2-node layout: move bottom-right node (index 1) up by 248px.
+    if (legacyNodes.length === 2 && index === 1) return { left: frame.left, top: frame.top - 248 };
+    // 3-node layout: move bottom-right node (index 1) down by 104px.
+    if (legacyNodes.length === 3 && index === 1) return { left: frame.left, top: frame.top + 104 };
+    return frame;
   }, [legacyNodes.length]);
 
   const dynamicInfluenceLegacySpecs = useMemo((): FilmDnaConnectionSpec[] => {
