@@ -458,6 +458,9 @@ const SERIES_NEXT_NOTE = "Next entry in the same series.";
 const CANONICAL_SERIES_RE =
   /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b|\b[2-9]\s*:/i;
 
+// Case-sensitive: excludes lowercase "v" (versus) found in titles like "Batman v Superman".
+const ROMAN_NUMERAL_SEQUEL_RE = /\b(II|III|IV|V|VI|VII|VIII|IX|X)\b/;
+
 /**
  * 推断系列链相邻节点是否应绘制垂直连线（无显式 API 字段时）。
  *
@@ -478,17 +481,18 @@ function inferLineageConnectedAbove(
   // upper.note excluded: may be SERIES_PREV_NOTE / SERIES_NEXT_NOTE which
   // self-matches CANONICAL_SERIES_RE and produces false positives.
   const canonicalTest = `${lower.note} ${upper.title} ${lower.title}`;
-  if (CANONICAL_SERIES_RE.test(canonicalTest)) return true;
+  if (CANONICAL_SERIES_RE.test(canonicalTest) || ROMAN_NUMERAL_SEQUEL_RE.test(canonicalTest)) return true;
   return false;
 }
 
 /**
  * 是否绘制系列链上、下相邻海报之间的垂直连线/箭头。
  *
- * explicit false => no connector.
- * explicit true => trusted for GPT-generated nodes; re-validated via inference
- * for TMDb-machine-note nodes (SERIES_PREV_NOTE / SERIES_NEXT_NOTE) because
- * the stored true may have been computed by an older permissive inference pass.
+ * TMDb-machine-note nodes (SERIES_PREV_NOTE / SERIES_NEXT_NOTE) are always
+ * re-validated via inference regardless of cached boolean, because the stored
+ * value may have been produced by an older pass that defaulted to false for
+ * sequels like "Rambo III" whose note carries no explicit canonical signal.
+ * Non-TMDb explicit true/false is trusted as-is.
  *
  * @param upper 上方节点
  * @param lower 下方节点
@@ -497,14 +501,11 @@ function shouldDrawSeriesLineAbove(
   upper: FilmDnaNode,
   lower: FilmDnaNode,
 ): boolean {
+  if (upper.note === SERIES_PREV_NOTE || upper.note === SERIES_NEXT_NOTE) {
+    return inferLineageConnectedAbove(upper, lower);
+  }
   if (typeof lower.lineageConnectedAbove === 'boolean') {
-    if (!lower.lineageConnectedAbove) return false;
-    // Re-validate TMDb-machine-note nodes: their stored true may have been set
-    // by old inference that defaulted to true rather than requiring a signal.
-    if (upper.note === SERIES_PREV_NOTE || upper.note === SERIES_NEXT_NOTE) {
-      return inferLineageConnectedAbove(upper, lower);
-    }
-    return true;
+    return lower.lineageConnectedAbove;
   }
   return inferLineageConnectedAbove(upper, lower);
 }
@@ -1737,9 +1738,6 @@ function FilmDnaGraph({
     MAX_SERIES_VISIBLE,
   );
   const seriesNext = (tree.seriesNext ?? []).slice(0, MAX_SERIES_VISIBLE);
-  const seriesPreviousPositions = layoutSeriesPreviousPositions(
-    seriesPrevious.length,
-  );
   const seriesNextPositions = layoutSeriesNextPositions(seriesNext.length);
   const centerNode: FilmDnaNode = useMemo(
     () => ({
@@ -1756,6 +1754,25 @@ function FilmDnaGraph({
     ],
   );
 
+  const seriesAxisNodes = [...seriesPrevious, ...seriesNext];
+  const legacyNodes = excludeSameStoryOnVerticalAxis(
+    limitVisibleNodes(
+      orderInfluenceLegacyTimelineNodes(tree.right, centerYear, 'legacy'),
+    ),
+    centerNode,
+    seriesNext,
+    seriesAxisNodes,
+  );
+  // When the right X-axis has 2+ legacy nodes the cluster occupies the center-right
+  // quadrant; shift the closest previous node up 86px to clear it visually.
+  const _basePreviousPositions = layoutSeriesPreviousPositions(seriesPrevious.length);
+  const seriesPreviousPositions =
+    seriesPrevious.length > 0 && legacyNodes.length >= 2
+      ? _basePreviousPositions.map((pos, i) =>
+          i === seriesPrevious.length - 1 ? { ...pos, top: pos.top - 86 } : pos,
+        )
+      : _basePreviousPositions;
+
   const seriesChain = buildSeriesChain(
     seriesPrevious,
     seriesPreviousPositions,
@@ -1765,21 +1782,12 @@ function FilmDnaGraph({
   );
   const seriesCenterChainIndex = seriesPrevious.length;
   const seriesConnectionSpecs = buildAdjacentSeriesConnectionSpecs(seriesChain);
-  const seriesAxisNodes = [...seriesPrevious, ...seriesNext];
   const influenceNodes = excludeSameStoryOnVerticalAxis(
     limitVisibleNodes(
       orderInfluenceLegacyTimelineNodes(tree.left, centerYear, 'influence'),
     ),
     centerNode,
     seriesPrevious,
-    seriesAxisNodes,
-  );
-  const legacyNodes = excludeSameStoryOnVerticalAxis(
-    limitVisibleNodes(
-      orderInfluenceLegacyTimelineNodes(tree.right, centerYear, 'legacy'),
-    ),
-    centerNode,
-    seriesNext,
     seriesAxisNodes,
   );
 

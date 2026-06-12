@@ -1137,6 +1137,9 @@ const SERIES_DUPLICATE_VERSION_JUSTIFICATION_RE =
 const CANONICAL_SERIES_RE =
   /\b(sequel|prequel|follow-?up|continuation|franchise|same series|entry in the same|previous entry|next entry|previous installment|next installment|part \d|chapter \d|#\d)\b|\b[2-9]\s*:/i;
 
+// Case-sensitive: excludes lowercase "v" (versus) found in titles like "Batman v Superman".
+const ROMAN_NUMERAL_SEQUEL_RE = /\b(II|III|IV|V|VI|VII|VIII|IX|X)\b/;
+
 /**
  * 推断系列链上、下相邻节点是否应绘制垂直连线（无显式 API 字段时）。
  *
@@ -1158,7 +1161,7 @@ function inferLineageConnectedAbove(
   // TMDb constant SERIES_PREV_NOTE / SERIES_NEXT_NOTE which self-matches
   // CANONICAL_SERIES_RE and would produce a false positive for non-sequel cases.
   const canonicalTest = `${lower.note} ${upper.title} ${lower.title}`;
-  if (CANONICAL_SERIES_RE.test(canonicalTest)) return true;
+  if (CANONICAL_SERIES_RE.test(canonicalTest) || ROMAN_NUMERAL_SEQUEL_RE.test(canonicalTest)) return true;
   return false;
 }
 
