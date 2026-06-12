@@ -7174,7 +7174,11 @@ export default function App() {
                       const dnaOpacity = isFilmDnaOpen
                         ? (isFilmDnaExiting ? 1 : 0)
                         : undefined;
-                      const dnaTransition = isFilmDnaOpen ? 'opacity 0.35s cubic-bezier(0.2, 0, 0, 1)' : undefined;
+                      const dnaTransition = isFilmDnaOpen
+                        ? isFilmDnaExiting
+                          ? 'opacity 0.07s ease-in 0.28s'
+                          : 'opacity 0.35s cubic-bezier(0.2, 0, 0, 1)'
+                        : undefined;
                       if (posterPreviewLayout) {
                         return {
                           position: 'absolute' as const,

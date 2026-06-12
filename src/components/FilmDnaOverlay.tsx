@@ -2185,7 +2185,7 @@ function FilmDnaGraph({
             }}
             initial={disableCenterMorph ? false : { scale: enterScale, opacity: 0 }}
             animate={{
-              scale: disableCenterMorph ? 1 : isExiting ? enterScale : 1,
+              scale: isExiting ? enterScale : 1,
               opacity: isExiting ? 0 : 1,
             }}
             transition={
