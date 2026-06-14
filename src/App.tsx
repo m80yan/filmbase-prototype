@@ -1987,6 +1987,27 @@ export default function App() {
   /** 键盘导航时当前高亮的建议索引（`-1` 表示无）。 */
   const [addMovieActiveSuggestionIndex, setAddMovieActiveSuggestionIndex] = useState(-1);
   const addMovieSearchSeqRef = useRef(0);
+  /** 建议下拉滚动容器与各行节点：键盘导航时滚动保持高亮行可见。 */
+  const addMovieSuggestionListRef = useRef<HTMLDivElement | null>(null);
+  const addMovieSuggestionRowRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  /** 仅键盘（ArrowUp/ArrowDown）引起的高亮变化才滚动；hover 不触发。 */
+  const addMovieSuggestionKeyboardNavRef = useRef(false);
+  useEffect(() => {
+    if (!addMovieSuggestionKeyboardNavRef.current) return;
+    addMovieSuggestionKeyboardNavRef.current = false;
+    if (addMovieActiveSuggestionIndex < 0) return;
+    const list = addMovieSuggestionListRef.current;
+    const row = addMovieSuggestionRowRefs.current[addMovieActiveSuggestionIndex];
+    if (!list || !row) return;
+    // 只调整下拉容器自身的 scrollTop，避免 scrollIntoView 连带滚动外层 modal。
+    const rowTop = row.offsetTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < list.scrollTop) {
+      list.scrollTop = rowTop;
+    } else if (rowBottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = rowBottom - list.clientHeight;
+    }
+  }, [addMovieActiveSuggestionIndex]);
   /** Add Movie modal「Search by title」输入框：打开 modal 时自动聚焦。 */
   const addMovieTitleSearchInputRef = useRef<HTMLInputElement>(null);
   /** Add Movie：展开 IMDb URL 区后聚焦。 */
@@ -7739,6 +7760,7 @@ export default function App() {
                         ) {
                           e.preventDefault();
                           setAddMovieSuggestionsDismissed(false);
+                          addMovieSuggestionKeyboardNavRef.current = true;
                           setAddMovieActiveSuggestionIndex((prev) => {
                             const n = addMovieSearchHits.length;
                             if (prev < 0) return 0;
@@ -7753,6 +7775,7 @@ export default function App() {
                         ) {
                           e.preventDefault();
                           setAddMovieSuggestionsDismissed(false);
+                          addMovieSuggestionKeyboardNavRef.current = true;
                           setAddMovieActiveSuggestionIndex((prev) => (prev <= 0 ? -1 : prev - 1));
                           return;
                         }
@@ -7796,6 +7819,7 @@ export default function App() {
                     newMovieTitle.trim().length >= 2 &&
                     (addMovieSearchLoading || addMovieSearchHits.length > 0) && (
                       <div
+                        ref={addMovieSuggestionListRef}
                         className="filmbase-scrollbar-subtle absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
                         role="listbox"
                         aria-label="Movie search suggestions"
@@ -7816,6 +7840,9 @@ export default function App() {
                           return (
                             <button
                               key={`${hit.tmdbId}-${hit.imdbId}`}
+                              ref={(el) => {
+                                addMovieSuggestionRowRefs.current[idx] = el;
+                              }}
                               type="button"
                               role="option"
                               aria-selected={active}
@@ -7826,7 +7853,7 @@ export default function App() {
                               onMouseEnter={() => setAddMovieActiveSuggestionIndex(idx)}
                               onClick={() => fastAddMovieFromSearchHit(hit)}
                               className={`group/addsug flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                                active ? 'bg-white/10' : 'hover:bg-white/5'
+                                active ? 'bg-white/5' : 'hover:bg-white/5'
                               }`}
                             >
                               <div className="h-12 w-8 shrink-0 overflow-hidden rounded border border-white/10 bg-white/5">
@@ -7845,9 +7872,7 @@ export default function App() {
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex w-full min-w-0 items-center gap-2">
-                                  <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-white">
-                                    {hit.title}
-                                  </div>
+                                  <AddMovieSuggestionTitle title={hit.title} active={active} />
                                   <img draggable={false}
                                     src="/icons/arrow-up-left.svg"
                                     alt=""
@@ -7858,7 +7883,7 @@ export default function App() {
                                     className="pointer-events-none h-4 w-4 shrink-0 object-contain opacity-0 transition-opacity duration-150 group-hover/addsug:opacity-100"
                                   />
                                 </div>
-                                <div className="text-[11px] leading-5 text-white/40 tabular-nums">
+                                <div className={`text-[11px] leading-5 tabular-nums ${active ? 'text-white/75' : 'text-white/40 group-hover/addsug:text-white/75'}`}>
                                   {directorLabel ? (
                                     <span className="inline-flex items-center">
                                       <span>{yearLabel}</span>
@@ -8498,6 +8523,61 @@ const OVERFLOW_MEASURE_TOLERANCE_PX = 1;
  */
 function isHorizontallyOverflowing(el: HTMLElement): boolean {
   return el.scrollWidth > el.clientWidth + OVERFLOW_MEASURE_TOLERANCE_PX;
+}
+
+/**
+ * Add Movie 建议行片名：溢出时复用 Poster View 卡片片名跑马灯（同 `marquee`
+ * keyframes 与 `gridStripMarqueeDurationSec` 线速），仅高亮行（hover / 键盘）滚动。
+ */
+function AddMovieSuggestionTitle({ title, active }: { title: string; active: boolean }) {
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [durationSec, setDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
+
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const measure = () => setIsOverflowing(isHorizontallyOverflowing(el));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [title]);
+
+  useLayoutEffect(() => {
+    if (!isOverflowing || !stripRef.current) return;
+    setDurationSec(gridStripMarqueeDurationSec(stripRef.current.scrollWidth));
+  }, [isOverflowing, title]);
+
+  return (
+    <div className="relative h-5 min-w-0 flex-1 overflow-hidden">
+      <div
+        ref={measureRef}
+        className={`block min-w-0 w-full truncate text-sm font-medium leading-5 text-white ${
+          isOverflowing && active ? 'opacity-0' : ''
+        }`}
+      >
+        {title}
+      </div>
+      {isOverflowing && (
+        <div
+          className={`absolute inset-0 transition-opacity duration-300 ${
+            active ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          <div
+            ref={stripRef}
+            className="flex w-max whitespace-nowrap text-sm font-medium leading-5 text-white transform-gpu will-change-transform [backface-visibility:hidden]"
+            style={{ animation: `marquee ${durationSec}s linear infinite` }}
+          >
+            <span className="pr-8">{title}</span>
+            <span className="pr-8">{title}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -9522,7 +9602,7 @@ function MovieCard({
           isEditing
             ? 'group/posteredit rounded-[16px] group-hover/posteredit:rounded-none group-hover:rounded-none'
             : 'rounded-none group-hover:rounded-none'
-        } ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}
+        } ${!isEditing ? 'group-hover:scale-115' : ''}`}
       >
         {isEditing && (
           <button
