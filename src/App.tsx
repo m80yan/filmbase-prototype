@@ -4989,12 +4989,6 @@ export default function App() {
     isAddModalOpen || Boolean(deleteMovieConfirm);
 
   /**
-   * 仅删除确认等需「吃满」主滚动区时收紧库区内边距；
-   * 预告片/海报预览/Add Movie 为 absolute 叠层，不改变 padding，避免列表 scroll 与布局抖动。
-   */
-  const suppressLibraryChromeForOverlays = Boolean(deleteMovieConfirm);
-
-  /**
    * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
    */
   const isListViewRowsScrollSplit = viewMode === 'list' && isMoviesHydrated;
@@ -6791,13 +6785,11 @@ export default function App() {
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
         <div
           className={
-            suppressLibraryChromeForOverlays
-              ? `${viewMode === 'list' ? 'px-0 py-0' : 'px-8 py-0'}`
-              : !isMoviesHydrated
-                ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
-                : isListViewRowsScrollSplit
-                  ? 'flex h-full min-h-0 flex-col px-0 pt-0 pb-0'
-                  : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+            !isMoviesHydrated
+              ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+              : isListViewRowsScrollSplit
+                ? 'flex h-full min-h-0 flex-col px-0 pt-0 pb-0'
+                : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
           }
         >
           {!isMoviesHydrated ? (
