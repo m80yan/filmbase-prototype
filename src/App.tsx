@@ -1895,6 +1895,15 @@ export default function App() {
   const [dnaExitHeroGeometry, setDnaExitHeroGeometry] =
     useState<PreviewSourceHeroGeometry | null>(null);
   const [dnaExitHeroRun, setDnaExitHeroRun] = useState(false);
+  /**
+   * Preview 返回 Library 的收缩 FLIP：从当前 Fit 海报矩形收缩回库内卡片位置。
+   * 与 enter / Film DNA exit 同一 frame-local 模式（element 持有 target 小矩形，
+   * 初始反向 transform 置于大矩形，run 后过渡到 none 收缩到卡片）。仅 back 图标触发。
+   */
+  const [previewExitHeroGeometry, setPreviewExitHeroGeometry] =
+    useState<PreviewSourceHeroGeometry | null>(null);
+  const [previewExitHeroRun, setPreviewExitHeroRun] = useState(false);
+  const previewExitFinishOnceRef = useRef(false);
   const [filmDnaStatus, setFilmDnaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [filmDnaTree, setFilmDnaTree] = useState<FilmDnaTree | null>(null);
   const [filmDnaError, setFilmDnaError] = useState('');
@@ -1942,6 +1951,8 @@ export default function App() {
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
   /** Preview 海报实际定位框；hero 的 source / target 均换算到此框的本地坐标。 */
   const posterPreviewFrameRef = useRef<HTMLDivElement>(null);
+  /** Preview 海报 `img` 本体；返回 Library 收缩 FLIP 时量测其当前屏幕矩形为 source。 */
+  const previewPosterImgRef = useRef<HTMLImageElement>(null);
   /** Film DNA 中心节点 div — 退出 FLIP 时用于捕获 source rect。 */
   const dnaCenterNodeRef = useRef<HTMLDivElement>(null);
   /** 供 pointer 拖拽时读取最新布局（避免闭包陈旧）。 */
@@ -2978,6 +2989,11 @@ export default function App() {
     }
     pendingJumpMovieRef.current = null;
     setPosterPreviewMovie(target);
+    // 新中心若已在当前筛选结果中（卡片已挂载/注册），把模糊 Library 滚动到该卡片，
+    // 使日后 back 收缩 FLIP 有真实目标。不在结果集中则不动（不改筛选），back 走即时关闭。
+    if (movieLibraryItemElsRef.current.has(target.id)) {
+      setPendingScrollMovieId(target.id);
+    }
     filmDnaAbortRef.current?.abort();
     const ac = new AbortController();
     filmDnaAbortRef.current = ac;
@@ -3070,6 +3086,9 @@ export default function App() {
     setPreviewSourceHeroRequest(null);
     setPreviewSourceHeroGeometry(null);
     setActivePreviewSourceKey(null);
+    setPreviewExitHeroGeometry(null);
+    setPreviewExitHeroRun(false);
+    previewExitFinishOnceRef.current = false;
     posterPreviewEnterFinishOnceRef.current = false;
     previewDragRef.current = {
       pointerId: null,
@@ -3080,6 +3099,116 @@ export default function App() {
       moved: false,
     };
   }, [exitFilmDnaMode]);
+
+  /** 收缩 FLIP 结束（transitionend 或兜底超时）：执行真正的关闭。仅触发一次。 */
+  const finishPreviewExitShrink = useCallback(() => {
+    if (previewExitFinishOnceRef.current) return;
+    previewExitFinishOnceRef.current = true;
+    closePosterPreview();
+  }, [closePosterPreview]);
+
+  /**
+   * Preview back 图标：把当前预览海报收缩回库内对应卡片，再关闭。
+   * 仅当真实的库内目标元素存在且可量测时播放；否则（被筛除/未挂载/缩放动画中/
+   * reduce-motion/子模式）回退到即时 {@link closePosterPreview}。不改动任何筛选/搜索状态。
+   * backdrop / shell 关闭仍走 closePosterPreview，保持瞬时无收缩。
+   */
+  const closePreviewWithShrink = useCallback(() => {
+    const fallback = () => closePosterPreview();
+    // 子模式（Info / Film DNA）、上传待确认、入场动画中、或无影片：直接关闭。
+    if (
+      isPosterPreviewEnterAnimating ||
+      isInfoMode ||
+      isFilmDnaOpen ||
+      (isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying) ||
+      !posterPreviewMovie
+    ) {
+      return fallback();
+    }
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return fallback();
+    }
+    const frameEl = posterPreviewFrameRef.current;
+    const layout = posterPreviewLayoutRef.current;
+    if (!frameEl || !layout || layout.dispW < 1 || layout.dispH < 1) return fallback();
+
+    // 目标：库内该影片卡片中的海报 img（与入场取源同一选择器）；缺失即回退。
+    const root = movieLibraryItemElsRef.current.get(posterPreviewMovie.id);
+    if (!root) return fallback();
+    const targetEl =
+      (root.querySelector('img[alt]:not([alt=""])') as HTMLElement | null) ?? root;
+
+    const frame = frameEl.getBoundingClientRect();
+    if (frame.width < 1 || frame.height < 1) return fallback();
+    const tRect = targetEl.getBoundingClientRect();
+    if (tRect.width < 1 || tRect.height < 1) return fallback();
+
+    // source：优先量测当前 img 实屏矩形（兼顾缩放/平移）；缺失时退回居中 Fit 矩形。
+    const imgRect = previewPosterImgRef.current?.getBoundingClientRect();
+    const sourceLocalRect =
+      imgRect && imgRect.width >= 1 && imgRect.height >= 1
+        ? {
+            left: imgRect.left - frame.left,
+            top: imgRect.top - frame.top,
+            width: imgRect.width,
+            height: imgRect.height,
+          }
+        : {
+            left: (frame.width - layout.dispW) / 2,
+            top: (frame.height - layout.dispH) / 2,
+            width: layout.dispW,
+            height: layout.dispH,
+          };
+    const targetLocalRect = {
+      left: tRect.left - frame.left,
+      top: tRect.top - frame.top,
+      width: tRect.width,
+      height: tRect.height,
+    };
+
+    previewExitFinishOnceRef.current = false;
+    setPreviewExitHeroRun(false);
+    setPreviewExitHeroGeometry({ sourceLocalRect, targetLocalRect });
+  }, [
+    isPosterPreviewEnterAnimating,
+    isInfoMode,
+    isFilmDnaOpen,
+    isScopedPosterUploadOpen,
+    pendingPosterUrl,
+    isPosterApplying,
+    posterPreviewMovie,
+    closePosterPreview,
+  ]);
+
+  /** 收缩 FLIP：geometry 就绪后双 rAF 启动 CSS transition（镜像 enter / DNA exit）。 */
+  useLayoutEffect(() => {
+    if (!previewExitHeroGeometry || previewExitHeroRun) return;
+    let cancelled = false;
+    let innerId = 0;
+    const outerId = window.requestAnimationFrame(() => {
+      innerId = window.requestAnimationFrame(() => {
+        if (!cancelled) setPreviewExitHeroRun(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(outerId);
+      if (innerId) window.cancelAnimationFrame(innerId);
+    };
+  }, [previewExitHeroGeometry, previewExitHeroRun]);
+
+  /** 收缩 FLIP `transitionend` 未触发时兜底关闭。 */
+  useEffect(() => {
+    if (!previewExitHeroRun) return;
+    const tid = window.setTimeout(
+      finishPreviewExitShrink,
+      POSTER_PREVIEW_ENTER_TRANSITION_MS + 120,
+    );
+    return () => window.clearTimeout(tid);
+  }, [previewExitHeroRun, finishPreviewExitShrink]);
 
   /**
    * Scheme A：在 shell（侧栏 / 顶栏 / 窗口控件）捕获阶段先关闭主区内浮层（海报预览 / 预告片），不 `stopPropagation`，
@@ -4209,7 +4338,9 @@ export default function App() {
     const placeholder = buildPlaceholderMovieFromSearchHit(hit);
     if (searchQuery) setSearchQuery('');
     setMovies((prev) => [placeholder, ...prev]);
-    setPendingScrollMovieId(imdbId);
+    // 仅当 Library 未被海报预览 / Film DNA 叠层遮挡时滚动到新片。
+    // 从 Film DNA 节点添加时叠层仍打开（isPosterPreviewOpen=true），不滚动模糊背后的 Library。
+    if (!isPosterPreviewOpen) setPendingScrollMovieId(imdbId);
     setIsAddModalOpen(false);
     setNewMovieTitle('');
     setNewMovieUrl('');
@@ -4265,7 +4396,8 @@ export default function App() {
       const newMovie = await enrichAndUpsertNewMovie(imdbId, newMovieTrailerUrl.trim());
       if (searchQuery) setSearchQuery('');
       setMovies((prev) => [newMovie, ...prev]);
-      setPendingScrollMovieId(newMovie.id);
+      // 同上：叠层（预览 / Film DNA）打开时不滚动模糊背后的 Library。
+      if (!isPosterPreviewOpen) setPendingScrollMovieId(newMovie.id);
       prefetchFilmDnaForMovie(newMovie);
 
       setIsAddModalOpen(false);
@@ -5922,7 +6054,7 @@ export default function App() {
                   <button
                     type="button"
                     disabled={isPosterPreviewChromeLocked}
-                    onClick={() => closePosterPreview()}
+                    onClick={() => closePreviewWithShrink()}
                     className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/80"
                     title={
                       isPosterPreviewChromeLocked
@@ -7236,6 +7368,7 @@ export default function App() {
                 }}
               >
                   <img draggable={false}
+                    ref={previewPosterImgRef}
                     src={getPosterPreviewDisplayedSrc(
                       posterPreviewMovie,
                       pendingPosterUrl,
@@ -7251,6 +7384,37 @@ export default function App() {
                     }}
                     className={`max-h-none max-w-none select-none object-contain${isPosterPreviewEnterAnimating || isPosterPreviewSubModeActive ? ' pointer-events-none' : ' pointer-events-auto'}`}
                     style={(() => {
+                      // Preview → Library 收缩 FLIP：最高优先级，覆盖正常 Fit 布局。
+                      // element 持有 target（卡片小矩形），初始反向 transform 置于 source（当前大矩形），
+                      // run 后过渡 transform→none 收缩到卡片。
+                      if (previewExitHeroGeometry) {
+                        const { sourceLocalRect: s, targetLocalRect: t } = previewExitHeroGeometry;
+                        const invertX = s.left - t.left;
+                        const invertY = s.top - t.top;
+                        const invertScaleX = s.width / t.width;
+                        const invertScaleY = s.height / t.height;
+                        return {
+                          position: 'absolute' as const,
+                          left: t.left,
+                          top: t.top,
+                          width: t.width,
+                          height: t.height,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          objectFit: 'cover' as const,
+                          opacity: 1,
+                          transform: previewExitHeroRun
+                            ? 'none'
+                            : `translate(${invertX}px, ${invertY}px) scale(${invertScaleX}, ${invertScaleY})`,
+                          transformOrigin: 'top left',
+                          transition: previewExitHeroRun
+                            ? `transform ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}`
+                            : 'none',
+                          willChange: 'transform',
+                          pointerEvents: 'none' as const,
+                          cursor: 'default',
+                        };
+                      }
                       if (
                         previewSourceHeroRequest &&
                         !previewSourceHeroGeometry &&
@@ -7391,9 +7555,15 @@ export default function App() {
                       };
                     })()}
                     onTransitionEnd={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      // 返回 Library 的收缩 FLIP 结束 → 真正关闭。
+                      if (previewExitHeroGeometry && previewExitHeroRun) {
+                        if (e.propertyName !== 'transform') return;
+                        finishPreviewExitShrink();
+                        return;
+                      }
                       if (!isPosterPreviewEnterAnimating) return;
                       if (!posterPreviewEnterRun) return;
-                      if (e.target !== e.currentTarget) return;
                       if (
                         e.propertyName !== 'opacity' &&
                         e.propertyName !== 'transform' &&
