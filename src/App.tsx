@@ -5651,10 +5651,10 @@ export default function App() {
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner focus:border-[#E99896] focus:ring-0 focus:outline-none ${
+              className={`w-full h-[36px] bg-black/30 border-2 border-transparent rounded-[18px] py-0 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner focus:border-[#E99896] focus:ring-0 focus:outline-none ${
 
                 isBackgroundInert ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
-              
+
               }`}
             />
             {searchQuery && (
@@ -7892,7 +7892,7 @@ export default function App() {
                       alt=""
                       width={16}
                       height={16}
-                      className={`pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none ${
+                      className={`pointer-events-none absolute left-[9px] top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none ${
                         isAdding ? 'opacity-10' : 'opacity-40'
                       }`}
                       decoding="async"
@@ -7961,13 +7961,13 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className="w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner placeholder:text-white/20 focus:border-[#E99896] focus:ring-0 focus:outline-none"
+                      className="w-full h-[40px] bg-black/30 border-2 border-transparent rounded-[20px] py-0 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner placeholder:text-white/20 focus:border-[#E99896] focus:ring-0 focus:outline-none"
                     />
                     {newMovieTitle ? (
                       <ClearSearchButton
                         iconSize={16}
                         disabled={isAdding}
-                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40"
+                        className="absolute right-[12px] top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40"
                         onClear={() => {
                           addMovieSearchSeqRef.current += 1;
                           setNewMovieTitle('');
