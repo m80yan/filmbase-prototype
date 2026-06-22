@@ -115,7 +115,8 @@ lightbox
 │   ├── Line Legacy 02
 │   ├── Line Legacy 03
 │   ├── Line Series Prev
-│   └── Line Series Next
+│   ├── Line Series Next
+│   └── Additional Series Lines, if multi-series rendering is implemented later
 ├── Influence Nodes
 │   ├── Influence Node 01
 │   ├── Influence Node 02
@@ -125,8 +126,8 @@ lightbox
 │   ├── Legacy Node 01
 │   ├── Legacy Node 02
 │   └── Legacy Node 03
-├── Series Previous Node
-└── Series Next Node
+├── Series Previous Nodes
+└── Series Next Nodes
 
 ## Node Rules
 
@@ -173,6 +174,12 @@ Text size: 14px
 Text opacity: 25%  
 Text color: #ffffff  
 Poster opacity: 25%
+
+Series nodes are vertical Y-axis relationship nodes.
+They are independent from Influence and Legacy lateral node caps.
+
+Series nodes are reserved for direct franchise, sequel, prequel, or same-continuity ordering only.
+Do not use Series nodes for loose influence, remakes, same-source adaptations, or duplicate same-title records.
 
 ### Center Node
 
@@ -316,13 +323,25 @@ Do not assume the final cache key without checking the current implementation.
 
 Influence: max 3  
 Legacy: max 3  
-Series Previous: max 1  
-Series Next: max 1
+Series Previous: 0+  
+Series Next: 0+
 
+Influence and Legacy are lateral relationship nodes.
 Influence and Legacy should be 0–3 nodes each.
 
-Do not force exactly 3 nodes.
+Series Previous and Series Next are vertical Y-axis relationship nodes.
+Series nodes are not counted as Influence or Legacy nodes.
 
+For widely recognized, historically significant, or canonically influential films:
+- aim for 2–3 Influence nodes when defensible
+- aim for 2–3 Legacy nodes when defensible
+- avoid sparse graphs when clear cinematic lineage exists
+
+For obscure, recent, niche, or weakly connected films:
+- fewer nodes are acceptable
+- do not pad weak or generic recommendations
+
+Do not force exactly 3 lateral nodes.
 Strong relationship quality is more important than visual symmetry.
 
 If a strong relationship does not exist, render fewer nodes and omit the corresponding line.
@@ -336,10 +355,17 @@ Legacy 01/02/03:
 right[0]/right[1]/right[2]
 
 Series Previous:
-seriesPrevious[0]
+seriesPrevious[0], seriesPrevious[1], ...
 
 Series Next:
-seriesNext[0]
+seriesNext[0], seriesNext[1], ...
+
+Series ordering:
+- order series nodes from nearest to farthest relative to the center film
+- earlier same-continuity films go in Series Previous
+- later same-continuity films go in Series Next
+- the current visual layout may render only the nearest previous and nearest next node until multi-series rendering is implemented
+- if only one Series Previous or Series Next node is rendered, use `seriesPrevious[0]` and `seriesNext[0]`
 
 ### Missing Data
 
@@ -358,11 +384,28 @@ Legacy means later works that were clearly influenced by, descended from, or str
 
 Rules:
 - prefer clear film-level relationships over loose genre similarity
+- for widely recognized, historically significant, or canonically influential films, aim for 2–3 Influence nodes when defensible
+- for widely recognized, historically significant, or canonically influential films, aim for 2–3 Legacy nodes when defensible
+- avoid sparse graphs for films with clear cinematic lineage
 - avoid generic recommendations
 - avoid duplicate titles, years, or IMDb IDs
 - avoid filler nodes added only to fill visual slots
 - fewer strong nodes are better than a full but weak graph
 - low-confidence nodes should not be displayed if confidence exists
+
+Same-title and center duplicate rules:
+- do not include the center film itself as any relationship node
+- do not include same-title records as Influence, Legacy, Series Previous, or Series Next unless the relationship is verified as a direct sequel, direct prequel, official remake, or same-continuity franchise entry
+- same-title records with different years must not be placed on the Y-axis by default
+- if a same-title record appears to be a duplicate, malformed metadata entry, poster duplicate, or unrelated title collision, remove it during normalization
+
+Series relationship rules:
+- series nodes are not counted as Influence or Legacy nodes
+- series nodes represent direct franchise, sequel, prequel, or same-continuity ordering only
+- Series Previous should contain earlier films in the same series or direct continuity
+- Series Next should contain later films in the same series or direct continuity
+- order series nodes from nearest to farthest relative to the center film
+- do not place remakes, same-title variants, alternate adaptations, or shared-source works on the Y-axis unless they are verified as direct series continuity
 
 Expected node shape:
 
@@ -384,9 +427,14 @@ Before rendering or saving generated Film DNA output:
 
 - ensure influence nodes are an array
 - ensure legacy nodes are an array
+- ensure series previous nodes are an array
+- ensure series next nodes are an array
 - cap influence nodes to 0–3
 - cap legacy nodes to 0–3
-- remove duplicate nodes across both sides
+- keep series previous/next nodes independent from influence and legacy caps
+- remove the center film from all relationship lists
+- remove duplicate nodes across influence, legacy, and series lists
+- remove same-title variants unless verified as a direct sequel, direct prequel, official remake, or same-continuity franchise entry
 - remove invalid nodes without title or year
 - remove low-confidence filler if confidence exists
 - preserve `posterUrl` when available
@@ -864,6 +912,8 @@ center_title text not null,
 center_year int,
 influences jsonb not null default '[]'::jsonb,
 legacy jsonb not null default '[]'::jsonb,
+series_previous jsonb not null default '[]'::jsonb,
+series_next jsonb not null default '[]'::jsonb,
 status text not null default 'ready',
 model text, -- OpenAI model used to generate the graph, when available
 version int not null default 1,

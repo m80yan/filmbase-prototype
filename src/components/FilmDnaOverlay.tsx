@@ -1844,7 +1844,7 @@ function FilmDnaGraph({
     MAX_SERIES_VISIBLE,
   );
   const seriesNext = (tree.seriesNext ?? []).slice(0, MAX_SERIES_VISIBLE);
-  const seriesNextPositions = layoutSeriesNextPositions(seriesNext.length);
+  const _baseSeriesNextPositions = layoutSeriesNextPositions(seriesNext.length);
   const centerNode: FilmDnaNode = useMemo(
     () => ({
       title: centerTitle,
@@ -1878,6 +1878,17 @@ function FilmDnaGraph({
           i === seriesPrevious.length - 1 ? { ...pos, top: pos.top - 86 } : pos,
         )
       : _basePreviousPositions;
+
+  // When the right X-axis has exactly 3 legacy nodes, drop the nearest seriesNext node
+  // (index 0, directly below center) by 242px so its hover annotation — which expands to
+  // the right — no longer covers the lower-right legacy node. The center→seriesNext
+  // vertical connector follows automatically because it routes to this node position.
+  const seriesNextPositions =
+    legacyNodes.length === 3 && _baseSeriesNextPositions.length > 0
+      ? _baseSeriesNextPositions.map((pos, i) =>
+          i === 0 ? { ...pos, top: pos.top + 242 } : pos,
+        )
+      : _baseSeriesNextPositions;
 
   const seriesChain = buildSeriesChain(
     seriesPrevious,
@@ -2268,7 +2279,7 @@ function FilmDnaGraph({
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2, delay: 0.15 }}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-0">
                 <FilmDnaGeneratingLoader size={64} />
                 <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
                   {loadingLabel ?? 'Generating Film DNA…'}

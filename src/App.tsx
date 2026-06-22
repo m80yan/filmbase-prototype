@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useLayoutEffect, useReducer, useCallback } from 'react';
 import { 
-  ChevronDown, 
   ChevronRight,
   Star, 
   Film,
@@ -983,18 +982,21 @@ function sortMoviesForInitialDisplay(list: Movie[]): Movie[] {
 }
 
 /**
- * 列表 sticky 表头 IMDb / RT 图标：仅用 SVG 区分状态，不用 `opacity` 压色深。
- * - 非当前排序列：`imdb-source-muted` / `rt-source-muted`
- * - 当前排序列（常态）：`imdb-source-header` / `rt-source-header`
- * - 列上 hover：`imdb-source-color` / `rt-source-white`
+ * 列表 sticky 表头 IMDb / RT 标签。IMDb 单独切换白色 wordmark 与彩色 badge。
  */
 const LIST_HEADER_RATINGS_ICON = {
-  imdbInactive: '/icons/ratings/imdb-source-muted.svg',
-  imdbNormal: '/icons/ratings/imdb-source-header.svg',
-  imdbHover: '/icons/ratings/imdb-source-color.svg',
-  rtInactive: '/icons/ratings/rt-source-muted.svg',
-  rtNormal: '/icons/ratings/rt-source-header.svg',
-  rtHover: '/icons/ratings/rt-source-white.svg',
+  imdbWordmark: '/icons/ratings/imdb-wordmark.svg',
+  imdbBadgeColor: '/icons/ratings/imdb-badge-color.svg',
+  rt: '/icons/ratings/rt-source-white.svg',
+} as const;
+
+/** List View 表头排序图标：SVG 保持纯白，所有亮度状态由按钮透明度控制。 */
+const LIST_HEADER_SORT_ICON = {
+  menuClosed: '/icons/sort/sort-menu-chevron-down.svg',
+  menuOpen: '/icons/sort/sort-menu-chevron-up.svg',
+  neutral: '/icons/sort/sort-neutral.svg',
+  descending: '/icons/sort/sort-descending.svg',
+  ascending: '/icons/sort/sort-ascending.svg',
 } as const;
 
 /** 网格海报尺寸 slider 最小值（px）；再小则 hover overlay 易破版。 */
@@ -1895,6 +1897,15 @@ export default function App() {
   const [dnaExitHeroGeometry, setDnaExitHeroGeometry] =
     useState<PreviewSourceHeroGeometry | null>(null);
   const [dnaExitHeroRun, setDnaExitHeroRun] = useState(false);
+  /**
+   * Preview 返回 Library 的收缩 FLIP：从当前 Fit 海报矩形收缩回库内卡片位置。
+   * 与 enter / Film DNA exit 同一 frame-local 模式（element 持有 target 小矩形，
+   * 初始反向 transform 置于大矩形，run 后过渡到 none 收缩到卡片）。仅 back 图标触发。
+   */
+  const [previewExitHeroGeometry, setPreviewExitHeroGeometry] =
+    useState<PreviewSourceHeroGeometry | null>(null);
+  const [previewExitHeroRun, setPreviewExitHeroRun] = useState(false);
+  const previewExitFinishOnceRef = useRef(false);
   const [filmDnaStatus, setFilmDnaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [filmDnaTree, setFilmDnaTree] = useState<FilmDnaTree | null>(null);
   const [filmDnaError, setFilmDnaError] = useState('');
@@ -1942,6 +1953,8 @@ export default function App() {
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
   /** Preview 海报实际定位框；hero 的 source / target 均换算到此框的本地坐标。 */
   const posterPreviewFrameRef = useRef<HTMLDivElement>(null);
+  /** Preview 海报 `img` 本体；返回 Library 收缩 FLIP 时量测其当前屏幕矩形为 source。 */
+  const previewPosterImgRef = useRef<HTMLImageElement>(null);
   /** Film DNA 中心节点 div — 退出 FLIP 时用于捕获 source rect。 */
   const dnaCenterNodeRef = useRef<HTMLDivElement>(null);
   /** 供 pointer 拖拽时读取最新布局（避免闭包陈旧）。 */
@@ -1987,6 +2000,27 @@ export default function App() {
   /** 键盘导航时当前高亮的建议索引（`-1` 表示无）。 */
   const [addMovieActiveSuggestionIndex, setAddMovieActiveSuggestionIndex] = useState(-1);
   const addMovieSearchSeqRef = useRef(0);
+  /** 建议下拉滚动容器与各行节点：键盘导航时滚动保持高亮行可见。 */
+  const addMovieSuggestionListRef = useRef<HTMLDivElement | null>(null);
+  const addMovieSuggestionRowRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  /** 仅键盘（ArrowUp/ArrowDown）引起的高亮变化才滚动；hover 不触发。 */
+  const addMovieSuggestionKeyboardNavRef = useRef(false);
+  useEffect(() => {
+    if (!addMovieSuggestionKeyboardNavRef.current) return;
+    addMovieSuggestionKeyboardNavRef.current = false;
+    if (addMovieActiveSuggestionIndex < 0) return;
+    const list = addMovieSuggestionListRef.current;
+    const row = addMovieSuggestionRowRefs.current[addMovieActiveSuggestionIndex];
+    if (!list || !row) return;
+    // 只调整下拉容器自身的 scrollTop，避免 scrollIntoView 连带滚动外层 modal。
+    const rowTop = row.offsetTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < list.scrollTop) {
+      list.scrollTop = rowTop;
+    } else if (rowBottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = rowBottom - list.clientHeight;
+    }
+  }, [addMovieActiveSuggestionIndex]);
   /** Add Movie modal「Search by title」输入框：打开 modal 时自动聚焦。 */
   const addMovieTitleSearchInputRef = useRef<HTMLInputElement>(null);
   /** Add Movie：展开 IMDb URL 区后聚焦。 */
@@ -2957,6 +2991,11 @@ export default function App() {
     }
     pendingJumpMovieRef.current = null;
     setPosterPreviewMovie(target);
+    // 新中心若已在当前筛选结果中（卡片已挂载/注册），把模糊 Library 滚动到该卡片，
+    // 使日后 back 收缩 FLIP 有真实目标。不在结果集中则不动（不改筛选），back 走即时关闭。
+    if (movieLibraryItemElsRef.current.has(target.id)) {
+      setPendingScrollMovieId(target.id);
+    }
     filmDnaAbortRef.current?.abort();
     const ac = new AbortController();
     filmDnaAbortRef.current = ac;
@@ -3049,6 +3088,9 @@ export default function App() {
     setPreviewSourceHeroRequest(null);
     setPreviewSourceHeroGeometry(null);
     setActivePreviewSourceKey(null);
+    setPreviewExitHeroGeometry(null);
+    setPreviewExitHeroRun(false);
+    previewExitFinishOnceRef.current = false;
     posterPreviewEnterFinishOnceRef.current = false;
     previewDragRef.current = {
       pointerId: null,
@@ -3059,6 +3101,116 @@ export default function App() {
       moved: false,
     };
   }, [exitFilmDnaMode]);
+
+  /** 收缩 FLIP 结束（transitionend 或兜底超时）：执行真正的关闭。仅触发一次。 */
+  const finishPreviewExitShrink = useCallback(() => {
+    if (previewExitFinishOnceRef.current) return;
+    previewExitFinishOnceRef.current = true;
+    closePosterPreview();
+  }, [closePosterPreview]);
+
+  /**
+   * Preview back 图标：把当前预览海报收缩回库内对应卡片，再关闭。
+   * 仅当真实的库内目标元素存在且可量测时播放；否则（被筛除/未挂载/缩放动画中/
+   * reduce-motion/子模式）回退到即时 {@link closePosterPreview}。不改动任何筛选/搜索状态。
+   * backdrop / shell 关闭仍走 closePosterPreview，保持瞬时无收缩。
+   */
+  const closePreviewWithShrink = useCallback(() => {
+    const fallback = () => closePosterPreview();
+    // 子模式（Info / Film DNA）、上传待确认、入场动画中、或无影片：直接关闭。
+    if (
+      isPosterPreviewEnterAnimating ||
+      isInfoMode ||
+      isFilmDnaOpen ||
+      (isScopedPosterUploadOpen && Boolean(pendingPosterUrl) && !isPosterApplying) ||
+      !posterPreviewMovie
+    ) {
+      return fallback();
+    }
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return fallback();
+    }
+    const frameEl = posterPreviewFrameRef.current;
+    const layout = posterPreviewLayoutRef.current;
+    if (!frameEl || !layout || layout.dispW < 1 || layout.dispH < 1) return fallback();
+
+    // 目标：库内该影片卡片中的海报 img（与入场取源同一选择器）；缺失即回退。
+    const root = movieLibraryItemElsRef.current.get(posterPreviewMovie.id);
+    if (!root) return fallback();
+    const targetEl =
+      (root.querySelector('img[alt]:not([alt=""])') as HTMLElement | null) ?? root;
+
+    const frame = frameEl.getBoundingClientRect();
+    if (frame.width < 1 || frame.height < 1) return fallback();
+    const tRect = targetEl.getBoundingClientRect();
+    if (tRect.width < 1 || tRect.height < 1) return fallback();
+
+    // source：优先量测当前 img 实屏矩形（兼顾缩放/平移）；缺失时退回居中 Fit 矩形。
+    const imgRect = previewPosterImgRef.current?.getBoundingClientRect();
+    const sourceLocalRect =
+      imgRect && imgRect.width >= 1 && imgRect.height >= 1
+        ? {
+            left: imgRect.left - frame.left,
+            top: imgRect.top - frame.top,
+            width: imgRect.width,
+            height: imgRect.height,
+          }
+        : {
+            left: (frame.width - layout.dispW) / 2,
+            top: (frame.height - layout.dispH) / 2,
+            width: layout.dispW,
+            height: layout.dispH,
+          };
+    const targetLocalRect = {
+      left: tRect.left - frame.left,
+      top: tRect.top - frame.top,
+      width: tRect.width,
+      height: tRect.height,
+    };
+
+    previewExitFinishOnceRef.current = false;
+    setPreviewExitHeroRun(false);
+    setPreviewExitHeroGeometry({ sourceLocalRect, targetLocalRect });
+  }, [
+    isPosterPreviewEnterAnimating,
+    isInfoMode,
+    isFilmDnaOpen,
+    isScopedPosterUploadOpen,
+    pendingPosterUrl,
+    isPosterApplying,
+    posterPreviewMovie,
+    closePosterPreview,
+  ]);
+
+  /** 收缩 FLIP：geometry 就绪后双 rAF 启动 CSS transition（镜像 enter / DNA exit）。 */
+  useLayoutEffect(() => {
+    if (!previewExitHeroGeometry || previewExitHeroRun) return;
+    let cancelled = false;
+    let innerId = 0;
+    const outerId = window.requestAnimationFrame(() => {
+      innerId = window.requestAnimationFrame(() => {
+        if (!cancelled) setPreviewExitHeroRun(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(outerId);
+      if (innerId) window.cancelAnimationFrame(innerId);
+    };
+  }, [previewExitHeroGeometry, previewExitHeroRun]);
+
+  /** 收缩 FLIP `transitionend` 未触发时兜底关闭。 */
+  useEffect(() => {
+    if (!previewExitHeroRun) return;
+    const tid = window.setTimeout(
+      finishPreviewExitShrink,
+      POSTER_PREVIEW_ENTER_TRANSITION_MS + 120,
+    );
+    return () => window.clearTimeout(tid);
+  }, [previewExitHeroRun, finishPreviewExitShrink]);
 
   /**
    * Scheme A：在 shell（侧栏 / 顶栏 / 窗口控件）捕获阶段先关闭主区内浮层（海报预览 / 预告片），不 `stopPropagation`，
@@ -4188,7 +4340,9 @@ export default function App() {
     const placeholder = buildPlaceholderMovieFromSearchHit(hit);
     if (searchQuery) setSearchQuery('');
     setMovies((prev) => [placeholder, ...prev]);
-    setPendingScrollMovieId(imdbId);
+    // 仅当 Library 未被海报预览 / Film DNA 叠层遮挡时滚动到新片。
+    // 从 Film DNA 节点添加时叠层仍打开（isPosterPreviewOpen=true），不滚动模糊背后的 Library。
+    if (!isPosterPreviewOpen) setPendingScrollMovieId(imdbId);
     setIsAddModalOpen(false);
     setNewMovieTitle('');
     setNewMovieUrl('');
@@ -4244,7 +4398,8 @@ export default function App() {
       const newMovie = await enrichAndUpsertNewMovie(imdbId, newMovieTrailerUrl.trim());
       if (searchQuery) setSearchQuery('');
       setMovies((prev) => [newMovie, ...prev]);
-      setPendingScrollMovieId(newMovie.id);
+      // 同上：叠层（预览 / Film DNA）打开时不滚动模糊背后的 Library。
+      if (!isPosterPreviewOpen) setPendingScrollMovieId(newMovie.id);
       prefetchFilmDnaForMovie(newMovie);
 
       setIsAddModalOpen(false);
@@ -4834,12 +4989,6 @@ export default function App() {
    */
   const isMainLibraryScrollOverflowLocked =
     isAddModalOpen || Boolean(deleteMovieConfirm);
-
-  /**
-   * 仅删除确认等需「吃满」主滚动区时收紧库区内边距；
-   * 预告片/海报预览/Add Movie 为 absolute 叠层，不改变 padding，避免列表 scroll 与布局抖动。
-   */
-  const suppressLibraryChromeForOverlays = Boolean(deleteMovieConfirm);
 
   /**
    * List View：表头固定在滚动区外，仅行列表使用 `filmbase-scrollbar`（Grid / 加载态仍用外层滚动）。
@@ -5498,10 +5647,10 @@ export default function App() {
               placeholder="Search FilmBase"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner focus:border-[#E99896] focus:ring-0 focus:outline-none ${
+              className={`w-full h-[36px] bg-black/30 border-2 border-transparent rounded-[18px] py-0 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner focus:border-[#E99896] focus:ring-0 focus:outline-none ${
 
                 isBackgroundInert ? 'placeholder:text-white/10' : 'placeholder:text-white/20'
-              
+
               }`}
             />
             {searchQuery && (
@@ -5901,7 +6050,7 @@ export default function App() {
                   <button
                     type="button"
                     disabled={isPosterPreviewChromeLocked}
-                    onClick={() => closePosterPreview()}
+                    onClick={() => closePreviewWithShrink()}
                     className="group/backprev relative p-1.5 rounded-md text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/80"
                     title={
                       isPosterPreviewChromeLocked
@@ -6638,13 +6787,11 @@ export default function App() {
         {/* Content area — vertical padding off while poster preview / 预告片 overlay 打开 */}
         <div
           className={
-            suppressLibraryChromeForOverlays
-              ? `${viewMode === 'list' ? 'px-0 py-0' : 'px-8 py-0'}`
-              : !isMoviesHydrated
-                ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
-                : isListViewRowsScrollSplit
-                  ? 'flex h-full min-h-0 flex-col px-0 pt-0 pb-0'
-                  : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+            !isMoviesHydrated
+              ? `flex min-h-full flex-col pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
+              : isListViewRowsScrollSplit
+                ? 'flex h-full min-h-0 flex-col px-0 pt-0 pb-0'
+                : `pb-8 ${viewMode === 'list' ? 'pt-0 px-0' : 'pt-4 px-8'}`
           }
         >
           {!isMoviesHydrated ? (
@@ -6684,20 +6831,37 @@ export default function App() {
                   style={{ height: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }}
                   aria-hidden={false}
                 >
-                  <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 py-4 backdrop-blur-md">
+                  <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 backdrop-blur-md">
               <div
-                className={`filmbase-list-view-header-grid ${LIST_VIEW_TABLE_GRID_CLASS} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
+                className={`filmbase-list-view-header-grid ${LIST_VIEW_TABLE_GRID_CLASS} h-full w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
               >
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
                   <span className={`block w-[100px] max-w-full text-center transition-transform duration-300 ease-out ${isEditing ? 'translate-x-[44px]' : ''}`}>Poster</span>
                 </div>
-                <div className={`relative pl-10 transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
+                <div className={`relative h-full transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
                   <button
+                    type="button"
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
-                    className={`flex min-h-5 items-center gap-1.5 leading-5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
+                    className={`group flex h-full w-full cursor-pointer items-center gap-1.5 pl-10 leading-5 text-white transition-opacity duration-300 active:opacity-80 ${isSortDropdownOpen ? 'opacity-40 hover:opacity-40' : 'opacity-40 hover:opacity-100'}`}
                   >
-                    <span>Title</span>
-                    <ChevronDown size={10} className={`transition-transform duration-300 ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
+                    <span>
+                      {sortMode === 'title-asc'
+                        ? 'Title · A–Z'
+                        : sortMode === 'title-desc'
+                          ? 'Title · Z–A'
+                          : sortMode === 'duration-desc'
+                            ? 'Duration · Longest'
+                            : sortMode === 'duration-asc'
+                              ? 'Duration · Shortest'
+                              : 'Title'}
+                    </span>
+                    <img draggable={false}
+                      src={isSortDropdownOpen ? LIST_HEADER_SORT_ICON.menuOpen : LIST_HEADER_SORT_ICON.menuClosed}
+                      alt=""
+                      width={10}
+                      height={10}
+                      className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                    />
                   </button>
 
                   <AnimatePresence>
@@ -6711,14 +6875,14 @@ export default function App() {
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute top-full left-0 z-50 mt-3 w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-[#1F1F1F] py-[10px] shadow-2xl"
+                          className="absolute top-full left-[25px] z-50 mt-3 w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-[#1F1F1F] py-[10px] shadow-2xl"
                         >
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Title
+                          <div className="px-3.5 pb-1.5 pt-2 text-[12px] font-bold uppercase tracking-wider text-white/35">
+                            TITLE
                           </div>
                           {[
-                            { id: 'title-asc', label: 'A-Z' },
-                            { id: 'title-desc', label: 'Z-A' },
+                            { id: 'title-asc', label: 'A–Z' },
+                            { id: 'title-desc', label: 'Z–A' },
                           ].map((opt) => (
                             <button
                               key={opt.id}
@@ -6727,10 +6891,10 @@ export default function App() {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] leading-normal tracking-normal transition-colors hover:bg-white/[0.06] ${
                                 sortMode === opt.id
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
+                                  ? 'font-bold text-white hover:text-white'
+                                  : 'font-medium text-white/65 hover:text-white/90'
                               }`}
                             >
                               {opt.label}
@@ -6741,8 +6905,8 @@ export default function App() {
                           ))}
 
                           <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Duration
+                          <div className="px-3.5 pb-1.5 pt-2 text-[12px] font-bold uppercase tracking-wider text-white/35">
+                            DURATION
                           </div>
                           {[
                             { id: 'duration-desc', label: 'Longest' },
@@ -6755,10 +6919,10 @@ export default function App() {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] leading-normal tracking-normal transition-colors hover:bg-white/[0.06] ${
                                 sortMode === opt.id
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
+                                  ? 'font-bold text-white hover:text-white'
+                                  : 'font-medium text-white/65 hover:text-white/90'
                               }`}
                             >
                               {opt.label}
@@ -6768,45 +6932,6 @@ export default function App() {
                             </button>
                           ))}
 
-                          <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Genre filter
-                          </div>
-                          {allUniqueGenres.map((genre) => (
-                            <button
-                              key={genre}
-                              type="button"
-                              onClick={() => {
-                                setSelectedGenres([genre]);
-                                setIsSortDropdownOpen(false);
-                              }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
-                                selectedGenres.length === 1 && selectedGenres[0] === genre
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
-                              }`}
-                            >
-                              {genre}
-                              {selectedGenres.length === 1 && selectedGenres[0] === genre ? (
-                                <Check size={12} className="shrink-0 text-white opacity-90" aria-hidden />
-                              ) : null}
-                            </button>
-                          ))}
-                          {selectedGenres.length > 0 && (
-                            <>
-                              <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedGenres([]);
-                                  setIsSortDropdownOpen(false);
-                                }}
-                                className="flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium text-red-400/70 transition-colors hover:bg-white/[0.06] hover:text-red-400"
-                              >
-                                Clear genre filter
-                              </button>
-                            </>
-                          )}
                         </motion.div>
                       </>
                     )}
@@ -6817,60 +6942,80 @@ export default function App() {
                 <button 
                   type="button"
                   onClick={() => setSortMode(sortMode === 'imdb-desc' ? 'imdb-asc' : 'imdb-desc')}
-                  className="group relative flex min-h-5 items-center justify-center leading-5"
+                  className="group relative flex h-full min-h-5 cursor-pointer items-center justify-center gap-1.5 leading-5 text-white transition-opacity duration-300 active:opacity-80"
                   aria-label="Sort by IMDb rating"
                 >
                   {/** 与列表行 hover 同：18px 高、60×32 等比宽 */}
                   <span className="relative inline-block h-[18px] w-[calc(18px*60/32)] shrink-0">
                     <img draggable={false}
-                      src={sortMode.startsWith('imdb') ? LIST_HEADER_RATINGS_ICON.imdbNormal : LIST_HEADER_RATINGS_ICON.imdbInactive}
+                      src={LIST_HEADER_RATINGS_ICON.imdbWordmark}
                       alt=""
                       width={60}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain group-hover:hidden"
+                      className={`pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-0' : 'opacity-40 group-hover:opacity-0'}`}
                     />
                     <img draggable={false}
-                      src={LIST_HEADER_RATINGS_ICON.imdbHover}
+                      src={LIST_HEADER_RATINGS_ICON.imdbBadgeColor}
                       alt=""
                       width={60}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute left-1/2 top-1/2 hidden h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain group-hover:block"
+                      className={`pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     />
                   </span>
+                  <img draggable={false}
+                    src={sortMode.startsWith('imdb')
+                      ? sortMode === 'imdb-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className={`pointer-events-none h-[10px] w-[10px] shrink-0 transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}
+                  />
                 </button>
                 <button 
                   type="button"
                   onClick={() => setSortMode(sortMode === 'rt-desc' ? 'rt-asc' : 'rt-desc')}
-                  className="group relative flex min-h-5 items-center justify-center leading-5"
+                  className="group relative flex h-full min-h-5 cursor-pointer items-center justify-center gap-1.5 leading-5 text-white opacity-40 transition-opacity duration-300 hover:opacity-100 active:opacity-80"
                   aria-label="Sort by Rotten Tomatoes"
                 >
                   <span className="relative inline-block h-[18px] w-[18px] shrink-0">
                     <img draggable={false}
-                      src={sortMode.startsWith('rt') ? LIST_HEADER_RATINGS_ICON.rtNormal : LIST_HEADER_RATINGS_ICON.rtInactive}
+                      src={LIST_HEADER_RATINGS_ICON.rt}
                       alt=""
                       width={32}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain group-hover:hidden"
-                    />
-                    <img draggable={false}
-                      src={LIST_HEADER_RATINGS_ICON.rtHover}
-                      alt=""
-                      width={32}
-                      height={32}
-                      decoding="async"
-                      className="pointer-events-none absolute inset-0 m-auto hidden h-[18px] w-[18px] object-contain group-hover:block"
+                      className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain"
                     />
                   </span>
+                  <img draggable={false}
+                    src={sortMode.startsWith('rt')
+                      ? sortMode === 'rt-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                  />
                 </button>
                 <button 
+                  type="button"
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
-                  className={`flex min-h-5 items-center gap-1.5 justify-start pr-8 leading-5 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
+                  className="group flex h-full min-h-5 cursor-pointer items-center justify-start gap-1.5 leading-5 text-white opacity-40 transition-opacity duration-300 hover:opacity-100 active:opacity-80"
+                  aria-label="Sort by My Rating"
                 >
                   <span className="text-[12px] font-bold tracking-widest whitespace-nowrap leading-5">My Rating</span>
-                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
+                  <img draggable={false}
+                    src={sortMode.startsWith('personal')
+                      ? sortMode === 'personal-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                  />
                 </button>
               </div>
                   </div>
@@ -7215,6 +7360,7 @@ export default function App() {
                 }}
               >
                   <img draggable={false}
+                    ref={previewPosterImgRef}
                     src={getPosterPreviewDisplayedSrc(
                       posterPreviewMovie,
                       pendingPosterUrl,
@@ -7230,6 +7376,37 @@ export default function App() {
                     }}
                     className={`max-h-none max-w-none select-none object-contain${isPosterPreviewEnterAnimating || isPosterPreviewSubModeActive ? ' pointer-events-none' : ' pointer-events-auto'}`}
                     style={(() => {
+                      // Preview → Library 收缩 FLIP：最高优先级，覆盖正常 Fit 布局。
+                      // element 持有 target（卡片小矩形），初始反向 transform 置于 source（当前大矩形），
+                      // run 后过渡 transform→none 收缩到卡片。
+                      if (previewExitHeroGeometry) {
+                        const { sourceLocalRect: s, targetLocalRect: t } = previewExitHeroGeometry;
+                        const invertX = s.left - t.left;
+                        const invertY = s.top - t.top;
+                        const invertScaleX = s.width / t.width;
+                        const invertScaleY = s.height / t.height;
+                        return {
+                          position: 'absolute' as const,
+                          left: t.left,
+                          top: t.top,
+                          width: t.width,
+                          height: t.height,
+                          maxWidth: 'none',
+                          maxHeight: 'none',
+                          objectFit: 'cover' as const,
+                          opacity: 1,
+                          transform: previewExitHeroRun
+                            ? 'none'
+                            : `translate(${invertX}px, ${invertY}px) scale(${invertScaleX}, ${invertScaleY})`,
+                          transformOrigin: 'top left',
+                          transition: previewExitHeroRun
+                            ? `transform ${POSTER_PREVIEW_ENTER_TRANSITION_MS}ms ${POSTER_PREVIEW_ENTER_EASING}`
+                            : 'none',
+                          willChange: 'transform',
+                          pointerEvents: 'none' as const,
+                          cursor: 'default',
+                        };
+                      }
                       if (
                         previewSourceHeroRequest &&
                         !previewSourceHeroGeometry &&
@@ -7370,9 +7547,15 @@ export default function App() {
                       };
                     })()}
                     onTransitionEnd={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      // 返回 Library 的收缩 FLIP 结束 → 真正关闭。
+                      if (previewExitHeroGeometry && previewExitHeroRun) {
+                        if (e.propertyName !== 'transform') return;
+                        finishPreviewExitShrink();
+                        return;
+                      }
                       if (!isPosterPreviewEnterAnimating) return;
                       if (!posterPreviewEnterRun) return;
-                      if (e.target !== e.currentTarget) return;
                       if (
                         e.propertyName !== 'opacity' &&
                         e.propertyName !== 'transform' &&
@@ -7701,7 +7884,7 @@ export default function App() {
                       alt=""
                       width={16}
                       height={16}
-                      className={`pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none ${
+                      className={`pointer-events-none absolute left-[9px] top-1/2 z-[1] h-4 w-4 -translate-y-1/2 select-none ${
                         isAdding ? 'opacity-10' : 'opacity-40'
                       }`}
                       decoding="async"
@@ -7739,6 +7922,7 @@ export default function App() {
                         ) {
                           e.preventDefault();
                           setAddMovieSuggestionsDismissed(false);
+                          addMovieSuggestionKeyboardNavRef.current = true;
                           setAddMovieActiveSuggestionIndex((prev) => {
                             const n = addMovieSearchHits.length;
                             if (prev < 0) return 0;
@@ -7753,6 +7937,7 @@ export default function App() {
                         ) {
                           e.preventDefault();
                           setAddMovieSuggestionsDismissed(false);
+                          addMovieSuggestionKeyboardNavRef.current = true;
                           setAddMovieActiveSuggestionIndex((prev) => (prev <= 0 ? -1 : prev - 1));
                           return;
                         }
@@ -7768,13 +7953,13 @@ export default function App() {
                         }
                       }}
                       disabled={isAdding}
-                      className="w-full bg-black/30 border-2 border-transparent rounded-[17px] py-1.5 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner placeholder:text-white/20 focus:border-[#E99896] focus:ring-0 focus:outline-none"
+                      className="w-full h-[40px] bg-black/30 border-2 border-transparent rounded-[20px] py-0 pl-8 pr-8 text-[13px] font-normal transition-all text-white shadow-inner placeholder:text-white/20 focus:border-[#E99896] focus:ring-0 focus:outline-none"
                     />
                     {newMovieTitle ? (
                       <ClearSearchButton
                         iconSize={16}
                         disabled={isAdding}
-                        className="absolute right-4 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40"
+                        className="absolute right-[12px] top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40"
                         onClear={() => {
                           addMovieSearchSeqRef.current += 1;
                           setNewMovieTitle('');
@@ -7796,6 +7981,7 @@ export default function App() {
                     newMovieTitle.trim().length >= 2 &&
                     (addMovieSearchLoading || addMovieSearchHits.length > 0) && (
                       <div
+                        ref={addMovieSuggestionListRef}
                         className="filmbase-scrollbar-subtle absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
                         role="listbox"
                         aria-label="Movie search suggestions"
@@ -7816,6 +8002,9 @@ export default function App() {
                           return (
                             <button
                               key={`${hit.tmdbId}-${hit.imdbId}`}
+                              ref={(el) => {
+                                addMovieSuggestionRowRefs.current[idx] = el;
+                              }}
                               type="button"
                               role="option"
                               aria-selected={active}
@@ -7826,7 +8015,7 @@ export default function App() {
                               onMouseEnter={() => setAddMovieActiveSuggestionIndex(idx)}
                               onClick={() => fastAddMovieFromSearchHit(hit)}
                               className={`group/addsug flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                                active ? 'bg-white/10' : 'hover:bg-white/5'
+                                active ? 'bg-white/5' : 'hover:bg-white/5'
                               }`}
                             >
                               <div className="h-12 w-8 shrink-0 overflow-hidden rounded border border-white/10 bg-white/5">
@@ -7845,9 +8034,7 @@ export default function App() {
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex w-full min-w-0 items-center gap-2">
-                                  <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-white">
-                                    {hit.title}
-                                  </div>
+                                  <AddMovieSuggestionTitle title={hit.title} active={active} />
                                   <img draggable={false}
                                     src="/icons/arrow-up-left.svg"
                                     alt=""
@@ -7858,7 +8045,7 @@ export default function App() {
                                     className="pointer-events-none h-4 w-4 shrink-0 object-contain opacity-0 transition-opacity duration-150 group-hover/addsug:opacity-100"
                                   />
                                 </div>
-                                <div className="text-[11px] leading-5 text-white/40 tabular-nums">
+                                <div className={`text-[11px] leading-5 tabular-nums ${active ? 'text-white/75' : 'text-white/40 group-hover/addsug:text-white/75'}`}>
                                   {directorLabel ? (
                                     <span className="inline-flex items-center">
                                       <span>{yearLabel}</span>
@@ -8498,6 +8685,61 @@ const OVERFLOW_MEASURE_TOLERANCE_PX = 1;
  */
 function isHorizontallyOverflowing(el: HTMLElement): boolean {
   return el.scrollWidth > el.clientWidth + OVERFLOW_MEASURE_TOLERANCE_PX;
+}
+
+/**
+ * Add Movie 建议行片名：溢出时复用 Poster View 卡片片名跑马灯（同 `marquee`
+ * keyframes 与 `gridStripMarqueeDurationSec` 线速），仅高亮行（hover / 键盘）滚动。
+ */
+function AddMovieSuggestionTitle({ title, active }: { title: string; active: boolean }) {
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [durationSec, setDurationSec] = useState(CAST_MARQUEE_REF_DURATION_SEC);
+
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const measure = () => setIsOverflowing(isHorizontallyOverflowing(el));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [title]);
+
+  useLayoutEffect(() => {
+    if (!isOverflowing || !stripRef.current) return;
+    setDurationSec(gridStripMarqueeDurationSec(stripRef.current.scrollWidth));
+  }, [isOverflowing, title]);
+
+  return (
+    <div className="relative h-5 min-w-0 flex-1 overflow-hidden">
+      <div
+        ref={measureRef}
+        className={`block min-w-0 w-full truncate text-sm font-medium leading-5 text-white ${
+          isOverflowing && active ? 'opacity-0' : ''
+        }`}
+      >
+        {title}
+      </div>
+      {isOverflowing && (
+        <div
+          className={`absolute inset-0 transition-opacity duration-300 ${
+            active ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          <div
+            ref={stripRef}
+            className="flex w-max whitespace-nowrap text-sm font-medium leading-5 text-white transform-gpu will-change-transform [backface-visibility:hidden]"
+            style={{ animation: `marquee ${durationSec}s linear infinite` }}
+          >
+            <span className="pr-8">{title}</span>
+            <span className="pr-8">{title}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -9522,7 +9764,7 @@ function MovieCard({
           isEditing
             ? 'group/posteredit rounded-[16px] group-hover/posteredit:rounded-none group-hover:rounded-none'
             : 'rounded-none group-hover:rounded-none'
-        } ${!isEditing ? 'group-hover:scale-115 group-hover:-translate-y-1' : ''}`}
+        } ${!isEditing ? 'group-hover:scale-115' : ''}`}
       >
         {isEditing && (
           <button
