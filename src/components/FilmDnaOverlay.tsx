@@ -2279,7 +2279,7 @@ function FilmDnaGraph({
               animate={{ opacity: 1 }}
               transition={{ duration: 0.2, delay: 0.15 }}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-0">
                 <FilmDnaGeneratingLoader size={64} />
                 <p className="whitespace-nowrap text-[14px] font-semibold text-white/60">
                   {loadingLabel ?? 'Generating Film DNA…'}

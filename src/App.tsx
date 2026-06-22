@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useLayoutEffect, useReducer, useCallback } from 'react';
 import { 
-  ChevronDown, 
   ChevronRight,
   Star, 
   Film,
@@ -983,18 +982,21 @@ function sortMoviesForInitialDisplay(list: Movie[]): Movie[] {
 }
 
 /**
- * 列表 sticky 表头 IMDb / RT 图标：仅用 SVG 区分状态，不用 `opacity` 压色深。
- * - 非当前排序列：`imdb-source-muted` / `rt-source-muted`
- * - 当前排序列（常态）：`imdb-source-header` / `rt-source-header`
- * - 列上 hover：`imdb-source-color` / `rt-source-white`
+ * 列表 sticky 表头 IMDb / RT 标签。IMDb 单独切换白色 wordmark 与彩色 badge。
  */
 const LIST_HEADER_RATINGS_ICON = {
-  imdbInactive: '/icons/ratings/imdb-source-muted.svg',
-  imdbNormal: '/icons/ratings/imdb-source-header.svg',
-  imdbHover: '/icons/ratings/imdb-source-color.svg',
-  rtInactive: '/icons/ratings/rt-source-muted.svg',
-  rtNormal: '/icons/ratings/rt-source-header.svg',
-  rtHover: '/icons/ratings/rt-source-white.svg',
+  imdbWordmark: '/icons/ratings/imdb-wordmark.svg',
+  imdbBadgeColor: '/icons/ratings/imdb-badge-color.svg',
+  rt: '/icons/ratings/rt-source-white.svg',
+} as const;
+
+/** List View 表头排序图标：SVG 保持纯白，所有亮度状态由按钮透明度控制。 */
+const LIST_HEADER_SORT_ICON = {
+  menuClosed: '/icons/sort/sort-menu-chevron-down.svg',
+  menuOpen: '/icons/sort/sort-menu-chevron-up.svg',
+  neutral: '/icons/sort/sort-neutral.svg',
+  descending: '/icons/sort/sort-descending.svg',
+  ascending: '/icons/sort/sort-ascending.svg',
 } as const;
 
 /** 网格海报尺寸 slider 最小值（px）；再小则 hover overlay 易破版。 */
@@ -6829,20 +6831,37 @@ export default function App() {
                   style={{ height: LIST_VIEW_TABLE_HEADER_HEIGHT_PX }}
                   aria-hidden={false}
                 >
-                  <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 py-4 backdrop-blur-md">
+                  <div className="pointer-events-auto flex h-full flex-col justify-center bg-[#121212]/70 backdrop-blur-md">
               <div
-                className={`filmbase-list-view-header-grid ${LIST_VIEW_TABLE_GRID_CLASS} w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
+                className={`filmbase-list-view-header-grid ${LIST_VIEW_TABLE_GRID_CLASS} h-full w-full min-w-0 px-0 text-[12px] leading-5 font-bold tracking-widest text-white/40 items-center`}
               >
                 <div className="flex min-h-5 min-w-0 shrink-0 items-center justify-center overflow-visible pl-8 leading-5">
                   <span className={`block w-[100px] max-w-full text-center transition-transform duration-300 ease-out ${isEditing ? 'translate-x-[44px]' : ''}`}>Poster</span>
                 </div>
-                <div className={`relative pl-10 transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
+                <div className={`relative h-full transition-[margin-left,width] duration-300 ease-out ${isEditing ? 'ml-[44px] w-[calc(100%-44px)]' : ''}`}>
                   <button
+                    type="button"
                     onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
-                    className={`flex min-h-5 items-center gap-1.5 leading-5 hover:text-white transition-colors group ${sortMode.startsWith('duration') || selectedGenres.length > 0 ? 'text-white' : ''}`}
+                    className={`group flex h-full w-full cursor-pointer items-center gap-1.5 pl-10 leading-5 text-white transition-opacity duration-300 active:opacity-80 ${isSortDropdownOpen ? 'opacity-40 hover:opacity-40' : 'opacity-40 hover:opacity-100'}`}
                   >
-                    <span>Title</span>
-                    <ChevronDown size={10} className={`transition-transform duration-300 ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
+                    <span>
+                      {sortMode === 'title-asc'
+                        ? 'Title · A–Z'
+                        : sortMode === 'title-desc'
+                          ? 'Title · Z–A'
+                          : sortMode === 'duration-desc'
+                            ? 'Duration · Longest'
+                            : sortMode === 'duration-asc'
+                              ? 'Duration · Shortest'
+                              : 'Title'}
+                    </span>
+                    <img draggable={false}
+                      src={isSortDropdownOpen ? LIST_HEADER_SORT_ICON.menuOpen : LIST_HEADER_SORT_ICON.menuClosed}
+                      alt=""
+                      width={10}
+                      height={10}
+                      className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                    />
                   </button>
 
                   <AnimatePresence>
@@ -6856,14 +6875,14 @@ export default function App() {
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute top-full left-0 z-50 mt-3 w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-[#1F1F1F] py-[10px] shadow-2xl"
+                          className="absolute top-full left-[25px] z-50 mt-3 w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-[#1F1F1F] py-[10px] shadow-2xl"
                         >
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Title
+                          <div className="px-3.5 pb-1.5 pt-2 text-[12px] font-bold uppercase tracking-wider text-white/35">
+                            TITLE
                           </div>
                           {[
-                            { id: 'title-asc', label: 'A-Z' },
-                            { id: 'title-desc', label: 'Z-A' },
+                            { id: 'title-asc', label: 'A–Z' },
+                            { id: 'title-desc', label: 'Z–A' },
                           ].map((opt) => (
                             <button
                               key={opt.id}
@@ -6872,10 +6891,10 @@ export default function App() {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] leading-normal tracking-normal transition-colors hover:bg-white/[0.06] ${
                                 sortMode === opt.id
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
+                                  ? 'font-bold text-white hover:text-white'
+                                  : 'font-medium text-white/65 hover:text-white/90'
                               }`}
                             >
                               {opt.label}
@@ -6886,8 +6905,8 @@ export default function App() {
                           ))}
 
                           <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Duration
+                          <div className="px-3.5 pb-1.5 pt-2 text-[12px] font-bold uppercase tracking-wider text-white/35">
+                            DURATION
                           </div>
                           {[
                             { id: 'duration-desc', label: 'Longest' },
@@ -6900,10 +6919,10 @@ export default function App() {
                                 setSortMode(opt.id as any);
                                 setIsSortDropdownOpen(false);
                               }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
+                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] leading-normal tracking-normal transition-colors hover:bg-white/[0.06] ${
                                 sortMode === opt.id
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
+                                  ? 'font-bold text-white hover:text-white'
+                                  : 'font-medium text-white/65 hover:text-white/90'
                               }`}
                             >
                               {opt.label}
@@ -6913,45 +6932,6 @@ export default function App() {
                             </button>
                           ))}
 
-                          <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                          <div className="px-3.5 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white/35">
-                            Genre filter
-                          </div>
-                          {allUniqueGenres.map((genre) => (
-                            <button
-                              key={genre}
-                              type="button"
-                              onClick={() => {
-                                setSelectedGenres([genre]);
-                                setIsSortDropdownOpen(false);
-                              }}
-                              className={`flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-white/[0.06] ${
-                                selectedGenres.length === 1 && selectedGenres[0] === genre
-                                  ? 'text-white hover:text-white'
-                                  : 'text-white/65 hover:text-white/90'
-                              }`}
-                            >
-                              {genre}
-                              {selectedGenres.length === 1 && selectedGenres[0] === genre ? (
-                                <Check size={12} className="shrink-0 text-white opacity-90" aria-hidden />
-                              ) : null}
-                            </button>
-                          ))}
-                          {selectedGenres.length > 0 && (
-                            <>
-                              <div className="my-1.5 border-t border-white/[0.08]" role="presentation" />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedGenres([]);
-                                  setIsSortDropdownOpen(false);
-                                }}
-                                className="flex h-9 min-h-[34px] w-full items-center justify-between px-3.5 text-left text-[13px] font-medium text-red-400/70 transition-colors hover:bg-white/[0.06] hover:text-red-400"
-                              >
-                                Clear genre filter
-                              </button>
-                            </>
-                          )}
                         </motion.div>
                       </>
                     )}
@@ -6962,60 +6942,80 @@ export default function App() {
                 <button 
                   type="button"
                   onClick={() => setSortMode(sortMode === 'imdb-desc' ? 'imdb-asc' : 'imdb-desc')}
-                  className="group relative flex min-h-5 items-center justify-center leading-5"
+                  className="group relative flex h-full min-h-5 cursor-pointer items-center justify-center gap-1.5 leading-5 text-white transition-opacity duration-300 active:opacity-80"
                   aria-label="Sort by IMDb rating"
                 >
                   {/** 与列表行 hover 同：18px 高、60×32 等比宽 */}
                   <span className="relative inline-block h-[18px] w-[calc(18px*60/32)] shrink-0">
                     <img draggable={false}
-                      src={sortMode.startsWith('imdb') ? LIST_HEADER_RATINGS_ICON.imdbNormal : LIST_HEADER_RATINGS_ICON.imdbInactive}
+                      src={LIST_HEADER_RATINGS_ICON.imdbWordmark}
                       alt=""
                       width={60}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain group-hover:hidden"
+                      className={`pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-0' : 'opacity-40 group-hover:opacity-0'}`}
                     />
                     <img draggable={false}
-                      src={LIST_HEADER_RATINGS_ICON.imdbHover}
+                      src={LIST_HEADER_RATINGS_ICON.imdbBadgeColor}
                       alt=""
                       width={60}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute left-1/2 top-1/2 hidden h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain group-hover:block"
+                      className={`pointer-events-none absolute left-1/2 top-1/2 h-[18px] w-auto max-w-none -translate-x-1/2 -translate-y-1/2 object-contain transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     />
                   </span>
+                  <img draggable={false}
+                    src={sortMode.startsWith('imdb')
+                      ? sortMode === 'imdb-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className={`pointer-events-none h-[10px] w-[10px] shrink-0 transition-opacity duration-300 ${sortMode.startsWith('imdb') ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}
+                  />
                 </button>
                 <button 
                   type="button"
                   onClick={() => setSortMode(sortMode === 'rt-desc' ? 'rt-asc' : 'rt-desc')}
-                  className="group relative flex min-h-5 items-center justify-center leading-5"
+                  className="group relative flex h-full min-h-5 cursor-pointer items-center justify-center gap-1.5 leading-5 text-white opacity-40 transition-opacity duration-300 hover:opacity-100 active:opacity-80"
                   aria-label="Sort by Rotten Tomatoes"
                 >
                   <span className="relative inline-block h-[18px] w-[18px] shrink-0">
                     <img draggable={false}
-                      src={sortMode.startsWith('rt') ? LIST_HEADER_RATINGS_ICON.rtNormal : LIST_HEADER_RATINGS_ICON.rtInactive}
+                      src={LIST_HEADER_RATINGS_ICON.rt}
                       alt=""
                       width={32}
                       height={32}
                       decoding="async"
-                      className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain group-hover:hidden"
-                    />
-                    <img draggable={false}
-                      src={LIST_HEADER_RATINGS_ICON.rtHover}
-                      alt=""
-                      width={32}
-                      height={32}
-                      decoding="async"
-                      className="pointer-events-none absolute inset-0 m-auto hidden h-[18px] w-[18px] object-contain group-hover:block"
+                      className="pointer-events-none absolute inset-0 m-auto h-[18px] w-[18px] object-contain"
                     />
                   </span>
+                  <img draggable={false}
+                    src={sortMode.startsWith('rt')
+                      ? sortMode === 'rt-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                  />
                 </button>
                 <button 
+                  type="button"
                   onClick={() => setSortMode(sortMode === 'personal-desc' ? 'personal-asc' : 'personal-desc')}
-                  className={`flex min-h-5 items-center gap-1.5 justify-start pr-8 leading-5 hover:text-white transition-colors ${sortMode.startsWith('personal') ? 'text-white' : ''}`}
+                  className="group flex h-full min-h-5 cursor-pointer items-center justify-start gap-1.5 leading-5 text-white opacity-40 transition-opacity duration-300 hover:opacity-100 active:opacity-80"
+                  aria-label="Sort by My Rating"
                 >
                   <span className="text-[12px] font-bold tracking-widest whitespace-nowrap leading-5">My Rating</span>
-                  <ChevronDown size={10} className={`transition-transform ${sortMode === 'personal-asc' ? 'rotate-180' : ''} ${sortMode.startsWith('personal') ? 'opacity-100' : 'opacity-0'}`} />
+                  <img draggable={false}
+                    src={sortMode.startsWith('personal')
+                      ? sortMode === 'personal-desc' ? LIST_HEADER_SORT_ICON.descending : LIST_HEADER_SORT_ICON.ascending
+                      : LIST_HEADER_SORT_ICON.neutral}
+                    alt=""
+                    width={10}
+                    height={10}
+                    className="pointer-events-none h-[10px] w-[10px] shrink-0"
+                  />
                 </button>
               </div>
                   </div>
