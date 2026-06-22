@@ -1951,6 +1951,17 @@ export default function App() {
   const previewPointerOverImgRef = useRef(false);
   /** 主内容滚动区（海报预览 overlay 仅覆盖此区域，用于量测可用宽高）。 */
   const mainPreviewHostRef = useRef<HTMLDivElement>(null);
+  const previewToolbarRef = useRef<HTMLDivElement>(null);
+  const previewToolbarLeftRef = useRef<HTMLDivElement>(null);
+  const previewToolbarRightRef = useRef<HTMLDivElement>(null);
+  const previewToolbarFullLabelMeasureRef = useRef<HTMLSpanElement>(null);
+  const previewToolbarHintMeasureRef = useRef<HTMLSpanElement>(null);
+  const [previewToolbarMetrics, setPreviewToolbarMetrics] = useState<{
+    toolbarW: number;
+    leftSafe: number;
+    rightSafe: number;
+    fullTextW: number;
+  } | null>(null);
   /** Preview 海报实际定位框；hero 的 source / target 均换算到此框的本地坐标。 */
   const posterPreviewFrameRef = useRef<HTMLDivElement>(null);
   /** Preview 海报 `img` 本体；返回 Library 收缩 FLIP 时量测其当前屏幕矩形为 source。 */
@@ -4921,6 +4932,100 @@ export default function App() {
     previewSliderMinPercent,
     previewSliderPercent,
   ]);
+  const posterPreviewZoomHintText = posterPreviewZoomHintSuffix.replace(/^, /, '');
+  const posterPreviewFullToolbarLabel =
+    previewNaturalSize && posterPreviewMovie
+      ? `${previewNaturalSize.w} × ${previewNaturalSize.h}, ${inferPosterImageFormatLabel(
+          posterPreviewMovie.posterUrl,
+        )}${posterPreviewZoomHintSuffix}`
+      : '';
+
+  useLayoutEffect(() => {
+    if (!isPosterPreviewOpen || !previewNaturalSize || !posterPreviewMovie) {
+      setPreviewToolbarMetrics(null);
+      return;
+    }
+
+    const toolbar = previewToolbarRef.current;
+    const left = previewToolbarLeftRef.current;
+    const right = previewToolbarRightRef.current;
+    const fullLabel = previewToolbarFullLabelMeasureRef.current;
+    const hintLabel = previewToolbarHintMeasureRef.current;
+    if (!toolbar || !left || !right || !fullLabel || !hintLabel) return;
+
+    const safeGapPx = 16;
+    let raf = 0;
+    const measure = () => {
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      const next = {
+        toolbarW: toolbarRect.width,
+        leftSafe: Math.max(0, leftRect.right - toolbarRect.left + safeGapPx),
+        rightSafe: Math.max(0, toolbarRect.right - rightRect.left + safeGapPx),
+        fullTextW: fullLabel.getBoundingClientRect().width,
+      };
+      setPreviewToolbarMetrics((prev) =>
+        prev &&
+        Math.abs(prev.toolbarW - next.toolbarW) < 0.5 &&
+        Math.abs(prev.leftSafe - next.leftSafe) < 0.5 &&
+        Math.abs(prev.rightSafe - next.rightSafe) < 0.5 &&
+        Math.abs(prev.fullTextW - next.fullTextW) < 0.5
+          ? prev
+          : next,
+      );
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+
+    measure();
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(toolbar);
+    resizeObserver.observe(left);
+    resizeObserver.observe(right);
+    resizeObserver.observe(fullLabel);
+    resizeObserver.observe(hintLabel);
+    window.addEventListener('resize', scheduleMeasure);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+    };
+  }, [
+    isPosterPreviewOpen,
+    previewNaturalSize,
+    posterPreviewMovie,
+    posterPreviewFullToolbarLabel,
+    posterPreviewZoomHintText,
+  ]);
+
+  const previewToolbarAvailableTextW = previewToolbarMetrics
+    ? Math.max(0, previewToolbarMetrics.toolbarW - previewToolbarMetrics.leftSafe - previewToolbarMetrics.rightSafe)
+    : 0;
+  const isPreviewToolbarCenterSafe = previewToolbarMetrics
+    ? previewToolbarMetrics.toolbarW / 2 - previewToolbarMetrics.fullTextW / 2 >= previewToolbarMetrics.leftSafe &&
+      previewToolbarMetrics.toolbarW / 2 + previewToolbarMetrics.fullTextW / 2 <=
+        previewToolbarMetrics.toolbarW - previewToolbarMetrics.rightSafe
+    : true;
+  const isPreviewToolbarInfoConstrained = Boolean(previewToolbarMetrics && !isPreviewToolbarCenterSafe);
+  const isPreviewToolbarInfoCompact = Boolean(
+    isPreviewToolbarInfoConstrained &&
+      posterPreviewZoomHintText &&
+      previewToolbarMetrics &&
+      previewToolbarMetrics.fullTextW > previewToolbarAvailableTextW,
+  );
+  const posterPreviewToolbarInfoClassName = isPreviewToolbarInfoConstrained
+    ? 'pointer-events-none absolute top-1/2 z-0 m-0 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums'
+    : 'pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums';
+  const posterPreviewToolbarInfoStyle = isPreviewToolbarInfoConstrained && previewToolbarMetrics
+    ? {
+        left: previewToolbarMetrics.leftSafe,
+        right: previewToolbarMetrics.rightSafe,
+      }
+    : undefined;
 
   /** 无缩放区间（max≤min）时锁定 Fit↔最大 控件。 */
   const isPreviewZoomSliderLocked = previewSliderMaxPercent <= previewSliderMinPercent;
@@ -6037,13 +6142,16 @@ export default function App() {
           </header>
 
           {/* Toolbar：海报预览打开时切换为预览模式控件；左右槽固定宽度使 slider 水平位置不变 */}
-          <div className="relative flex h-12 shrink-0 items-center justify-between px-8 [box-shadow:0px_2px_0px_0px_rgba(23,23,23,1)]">
+          <div
+            ref={previewToolbarRef}
+            className="relative flex h-12 shrink-0 items-center justify-between px-8 [box-shadow:0px_2px_0px_0px_rgba(23,23,23,1)]"
+          >
           {!isPosterPreviewOpen && activeFilterCount > 0 ? (
             <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums">
               {`${filteredMovies.length} ${filteredMovies.length === 1 ? 'film' : 'films'} found / ${activeFilterCount} ${activeFilterCount === 1 ? 'filter' : 'filters'}`}
             </p>
           ) : null}
-          <div className="relative z-10 flex shrink-0 items-center gap-8">
+          <div ref={previewToolbarLeftRef} className="relative z-10 flex shrink-0 items-center gap-8">
             {isPosterPreviewOpen ? (
               <>
                 <div className="flex h-9 min-w-[5.5rem] shrink-0 items-center justify-start gap-2">
@@ -6559,7 +6667,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="relative z-10 flex min-w-[5.5rem] shrink-0 items-center justify-end gap-2">
+          <div ref={previewToolbarRightRef} className="relative z-10 flex min-w-[5.5rem] shrink-0 items-center justify-end gap-2">
               {isPosterPreviewOpen && posterPreviewMovie ? (() => {
                 /**
                  * 仅当底部 action bar 真的可见时，按钮才作为「Close upload panel」toggle；
@@ -6744,7 +6852,7 @@ export default function App() {
           previewNaturalSize.w > 0 &&
           previewNaturalSize.h > 0 &&
           posterPreviewMovie ? (
-            <p className="pointer-events-none absolute left-1/2 top-1/2 z-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums">
+            <p className={posterPreviewToolbarInfoClassName} style={posterPreviewToolbarInfoStyle}>
               {isScopedPosterUploadOpen && isPosterApplying ? (
                 <span className="inline-block w-[11ch] text-left tabular-nums leading-5">
                   {`Applying${'.'.repeat(applyingDots)}`}
@@ -6759,6 +6867,8 @@ export default function App() {
                 </span>
               ) : isInfoMode ? (
                 <span className="leading-5">Press ESC to exit info</span>
+              ) : isPreviewToolbarInfoCompact ? (
+                <span className="leading-5">{posterPreviewZoomHintText}</span>
               ) : (
                 <>
                   {previewNaturalSize.w} × {previewNaturalSize.h},{' '}
@@ -6768,6 +6878,20 @@ export default function App() {
               )}
             </p>
           ) : null}
+          <span
+            ref={previewToolbarFullLabelMeasureRef}
+            className="pointer-events-none invisible absolute left-0 top-0 -z-10 whitespace-nowrap text-[13px] font-medium leading-5 tabular-nums"
+            aria-hidden
+          >
+            {posterPreviewFullToolbarLabel}
+          </span>
+          <span
+            ref={previewToolbarHintMeasureRef}
+            className="pointer-events-none invisible absolute left-0 top-0 -z-10 whitespace-nowrap text-[13px] font-medium leading-5 tabular-nums"
+            aria-hidden
+          >
+            {posterPreviewZoomHintText}
+          </span>
         </div>
         </div>
 
