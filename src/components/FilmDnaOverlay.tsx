@@ -58,7 +58,6 @@ const MAX_SERIES_VISIBLE = 10;
 const POSTER_W = 114;
 const POSTER_H = 171;
 
-
 /**
  * 系列链可视间距：上一格年份文字底边 → 下一格海报顶边（舞台 px）。
  * @see FilmDnaNodeCard — `mt-4` + `text-[14px] leading-normal` 标题/年份
@@ -1443,7 +1442,7 @@ function FilmDnaDirectionLabel({
 
   return (
     <motion.div
-      className="film-dna-direction-label absolute z-[25] text-[11px] font-[510] uppercase leading-none text-white/40"
+      className="film-dna-direction-label absolute z-[25] font-['Gochi_Hand'] text-[15px] font-normal uppercase leading-none text-white/40"
       style={{
         left,
         top,
@@ -1786,7 +1785,7 @@ function FilmDnaNodeCard({
                 decoding="async"
                 aria-hidden
               />
-              Add Movie
+              Add Film
             </button>
           </div>
         ) : null}

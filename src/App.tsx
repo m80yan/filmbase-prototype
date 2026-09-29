@@ -3947,7 +3947,7 @@ export default function App() {
 
     const supabase = supabaseRef.current;
     if (!supabase) {
-      setLibraryActionError('Could not delete movie: not connected to shared library.');
+      setLibraryActionError('Could not delete film: not connected to shared library.');
       setMovies(prevSnapshot);
       return;
     }
@@ -4336,7 +4336,7 @@ export default function App() {
       throw new Error(
         saveErr instanceof Error
           ? saveErr.message
-          : 'Failed to save movie to shared library. Please try again.',
+          : 'Failed to save film to shared library. Please try again.',
       );
     }
 
@@ -4352,7 +4352,7 @@ export default function App() {
     const imdbId = hit.imdbId.trim().toLowerCase();
     if (!imdbId) return;
     if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
-      setAddError('This movie is already in FilmBase.');
+      setAddError('This film is already in FilmBase.');
       return;
     }
     const userTrailerSnapshot = newMovieTrailerUrl.trim();
@@ -4385,7 +4385,7 @@ export default function App() {
         console.error('fast add enrich failed:', err);
         setMovies((prev) => prev.filter((m) => m.id !== imdbId));
         setLibraryActionError(
-          err instanceof Error ? err.message : 'Failed to add movie. It was removed from the list.',
+          err instanceof Error ? err.message : 'Failed to add film. It was removed from the list.',
         );
       }
     })();
@@ -4406,7 +4406,7 @@ export default function App() {
     }
 
     if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
-      setAddError('This movie is already in FilmBase.');
+      setAddError('This film is already in FilmBase.');
       return false;
     }
 
@@ -4430,7 +4430,7 @@ export default function App() {
       return true;
     } catch (err) {
       console.error('Error invoking enrich-movie-from-imdb:', err);
-      setAddError(err instanceof Error ? err.message : 'Failed to fetch movie data.');
+      setAddError(err instanceof Error ? err.message : 'Failed to fetch film data.');
       return false;
     } finally {
       setIsAdding(false);
@@ -5091,7 +5091,7 @@ export default function App() {
     : deleteMovieConfirm
       ? 'Finish delete confirmation first'
       : isAddModalOpen
-        ? 'Finish Add Movie first'
+        ? 'Finish Add Film first'
         : null;
   const isLibraryToolbarLocked = mainLibraryToolbarLockReason != null;
   /** 编辑库（含删除入口）期间禁用 Add Movie，避免与删片流程并行。 */
@@ -6277,8 +6277,8 @@ export default function App() {
                       if (isFilmDnaOpen) exitFilmDnaMode();
                       setIsInfoMode((v) => !v);
                     }}
-                    title={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                    aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    title={isInfoMode ? 'Exit info mode' : 'Film info'}
+                    aria-label={isInfoMode ? 'Exit info mode' : 'Film info'}
                     aria-pressed={isInfoMode}
                     className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
                       isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isFilmDnaOpen
@@ -6821,10 +6821,10 @@ export default function App() {
                     className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors enabled:hover:bg-white/5 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-100"
                     title={
                       isLibraryToolbarLocked
-                        ? (mainLibraryToolbarLockReason ?? 'Add Movie')
+                        ? (mainLibraryToolbarLockReason ?? 'Add Film')
                         : isEditing
                           ? 'Finish editing library first'
-                          : 'Add Movie'
+                          : 'Add Film'
                     }
                   >
                     <span className="relative block h-[20px] w-[20px] shrink-0">
@@ -7857,7 +7857,7 @@ export default function App() {
                   ) : isInfoMode ? (
                     <div
                       role="region"
-                      aria-label="Movie information"
+                      aria-label="Film information"
                       className="filmbase-scrollbar-subtle filmbase-selectable-text pointer-events-auto absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
@@ -7996,7 +7996,7 @@ export default function App() {
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">
-                Add New Movie
+                Add New Film
               </h2>
 
               <div className="space-y-2">
@@ -8007,7 +8007,7 @@ export default function App() {
                 )}
                 <div className="relative">
                   <label className="block text-xs font-medium text-white/50 mb-2">
-                    Search movies by title
+                    Search films by title
                   </label>
                   <div className="group/searchtitle relative w-full">
                     <img
@@ -8116,7 +8116,7 @@ export default function App() {
                         ref={addMovieSuggestionListRef}
                         className="filmbase-scrollbar-subtle absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
                         role="listbox"
-                        aria-label="Movie search suggestions"
+                        aria-label="Film search suggestions"
                       >
                         {addMovieSearchLoading && addMovieSearchHits.length === 0 ? (
                           <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-white/50">
@@ -8239,7 +8239,7 @@ export default function App() {
                     transition={{ duration: 0.26, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <label className="block text-xs font-medium text-white/50 mb-2">
-                      IMDb movie / TV URL
+                      IMDb film / TV URL
                     </label>
                     <input
                       ref={addMovieImdbUrlInputRef}
@@ -8345,7 +8345,7 @@ export default function App() {
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
-              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete movie</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete film</h2>
               <p className="text-sm leading-relaxed text-white/70">
                 Remove{' '}
                 <span className="font-medium text-white/90">{deleteMovieConfirm.title}</span>
@@ -9634,7 +9634,7 @@ function MovieCard({
                 onRequestDelete();
               }}
               className="flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
-              title="Delete movie"
+              title="Delete film"
             >
               <img draggable={false}
                 src="/icons/poster-delete.svg"
@@ -9906,7 +9906,7 @@ function MovieCard({
               onRequestDelete();
             }}
             className="absolute left-2 top-2 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
-            title="Delete movie"
+            title="Delete film"
           >
             <img draggable={false}
               src="/icons/poster-delete.svg"
