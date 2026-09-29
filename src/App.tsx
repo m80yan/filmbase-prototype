@@ -6140,12 +6140,11 @@ export default function App() {
                 {posterPreviewMovie.title}
               </h1>
             ) : !(isAddModalOpen || isDestructiveConfirmationOpen || isEditTrailerModalOpen || isTrailerOverlayInMain) ? (
-              <img
-                src="/icons/filmbase-wordmark.svg"
-                alt="FilmBase"
-                draggable={false}
-                className={`filmbase-wordmark ${isMoviesHydrated ? 'filmbase-wordmark--loaded' : 'filmbase-wordmark--loading'}`}
-              />
+              <h1
+                className={`filmbase-wordmark m-0 ${isMoviesHydrated ? 'filmbase-wordmark--loaded' : 'filmbase-wordmark--loading'}`}
+              >
+                FILMBASE
+              </h1>
             ) : null}
           </header>
 
