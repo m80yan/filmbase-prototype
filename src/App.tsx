@@ -67,6 +67,10 @@ type MovieSearchHit = {
 /** 海报预览 Info Mode：标签 / 演员名强调色（与工具栏 Edit 等 `#EA9794` 一致）。 */
 const POSTER_PREVIEW_INFO_ACCENT_CLASS = 'text-[#EA9794]';
 
+/** Info Mode 手写强调层：仅用于 Plot 标签、主创标签和演员名。 */
+const POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS =
+  `font-['Gochi_Hand'] text-[18px] font-normal ${POSTER_PREVIEW_INFO_ACCENT_CLASS}`;
+
 /**
  * Info Mode 卡司全量行（无条数截断、无「……」占位），优先 `castDetails`，否则退回 `cast` 纯名。
  *
@@ -313,7 +317,9 @@ function PosterPreviewInfoPlotBlock({ plot, genres }: { plot: string; genres: st
     <div className="flex w-full shrink-0 justify-center">
       <section className="w-full min-w-0 max-w-[420px]" aria-label="Plot">
         <p className={`text-left ${POSTER_PREVIEW_INFO_PLOT_CLASS} whitespace-pre-wrap`}>
-          <span className={POSTER_PREVIEW_INFO_ACCENT_CLASS}>PLOT:</span>
+          <span className={`${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} underline underline-offset-2`}>
+            PLOT:
+          </span>
           <span className="text-white">
             {' '}
             {body}
@@ -353,7 +359,7 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
     >
       <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-2 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
         <div
-          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} flex items-start justify-end gap-2`}
         >
           <img
             draggable={false}
@@ -369,7 +375,7 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
         </div>
         <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(director ?? '').trim() || '—'}</div>
         <div
-          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} flex items-start justify-end gap-2`}
         >
           <img
             draggable={false}
@@ -415,7 +421,9 @@ function PosterPreviewInfoCastBlock({ movie }: { movie: Movie }) {
           <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-1.5 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
             {rows.map((row, idx) => (
               <React.Fragment key={`cast-${idx}-${row.name}`}>
-                <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>{row.name}</div>
+                <div className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS}`}>
+                  {row.name}
+                </div>
                 <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>
                   {(row.character ?? '').trim() || '\u00A0'}
                 </div>
@@ -1007,8 +1015,8 @@ const GRID_POSTER_SIZE_MAX_PX = 240;
 const GRID_POSTER_SIZE_STEP_PX = 10;
 /** Poster View 网格横向间距；与 `gap-x-6` 一致。 */
 const GRID_POSTER_GAP_X_PX = 24;
-/** 离散 slider 总宽度与段间距；单段宽度按当前段数均分。 */
-const GRID_POSTER_SIZE_SLIDER_TRACK_W_PX = 128;
+/** 离散 slider 单段宽度与段间距；总宽度由当前可用段数决定。 */
+const GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX = 24;
 const GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX = 2;
 /** 首次测量前 / 无法产生至少两个有效布局时保留的安全刻度。 */
 const GRID_POSTER_SIZE_FALLBACK_LEVELS = [GRID_POSTER_SIZE_MIN_PX, GRID_POSTER_SIZE_MAX_PX] as const;
@@ -3939,7 +3947,7 @@ export default function App() {
 
     const supabase = supabaseRef.current;
     if (!supabase) {
-      setLibraryActionError('Could not delete movie: not connected to shared library.');
+      setLibraryActionError('Could not delete film: not connected to shared library.');
       setMovies(prevSnapshot);
       return;
     }
@@ -4328,7 +4336,7 @@ export default function App() {
       throw new Error(
         saveErr instanceof Error
           ? saveErr.message
-          : 'Failed to save movie to shared library. Please try again.',
+          : 'Failed to save film to shared library. Please try again.',
       );
     }
 
@@ -4344,7 +4352,7 @@ export default function App() {
     const imdbId = hit.imdbId.trim().toLowerCase();
     if (!imdbId) return;
     if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
-      setAddError('This movie is already in FilmBase.');
+      setAddError('This film is already in FilmBase.');
       return;
     }
     const userTrailerSnapshot = newMovieTrailerUrl.trim();
@@ -4377,7 +4385,7 @@ export default function App() {
         console.error('fast add enrich failed:', err);
         setMovies((prev) => prev.filter((m) => m.id !== imdbId));
         setLibraryActionError(
-          err instanceof Error ? err.message : 'Failed to add movie. It was removed from the list.',
+          err instanceof Error ? err.message : 'Failed to add film. It was removed from the list.',
         );
       }
     })();
@@ -4398,7 +4406,7 @@ export default function App() {
     }
 
     if (moviesRef.current.some((m) => m.id.toLowerCase() === imdbId)) {
-      setAddError('This movie is already in FilmBase.');
+      setAddError('This film is already in FilmBase.');
       return false;
     }
 
@@ -4422,7 +4430,7 @@ export default function App() {
       return true;
     } catch (err) {
       console.error('Error invoking enrich-movie-from-imdb:', err);
-      setAddError(err instanceof Error ? err.message : 'Failed to fetch movie data.');
+      setAddError(err instanceof Error ? err.message : 'Failed to fetch film data.');
       return false;
     } finally {
       setIsAdding(false);
@@ -5083,7 +5091,7 @@ export default function App() {
     : deleteMovieConfirm
       ? 'Finish delete confirmation first'
       : isAddModalOpen
-        ? 'Finish Add Movie first'
+        ? 'Finish Add Film first'
         : null;
   const isLibraryToolbarLocked = mainLibraryToolbarLockReason != null;
   /** 编辑库（含删除入口）期间禁用 Add Movie，避免与删片流程并行。 */
@@ -5102,9 +5110,10 @@ export default function App() {
   const posterSizeLevelIndex = nearestPosterSizeLevelIndex(posterSizeLevels, posterSize);
   const posterSizeSliderSegmentCount = Math.max(1, posterSizeLevels.length - 1);
   const posterSizeSliderSegmentWidthPx =
-    (GRID_POSTER_SIZE_SLIDER_TRACK_W_PX -
-      (posterSizeSliderSegmentCount - 1) * GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX) /
-    posterSizeSliderSegmentCount;
+    GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX;
+  const posterSizeSliderTrackWidthPx =
+    posterSizeSliderSegmentCount * GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX +
+    (posterSizeSliderSegmentCount - 1) * GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX;
   const isPosterSizeControlDisabled = viewMode === 'list' || isLibraryToolbarLocked;
 
   /**
@@ -6132,12 +6141,11 @@ export default function App() {
                 {posterPreviewMovie.title}
               </h1>
             ) : !(isAddModalOpen || isDestructiveConfirmationOpen || isEditTrailerModalOpen || isTrailerOverlayInMain) ? (
-              <img
-                src="/icons/filmbase-wordmark.svg"
-                alt="FilmBase"
-                draggable={false}
-                className={`filmbase-wordmark ${isMoviesHydrated ? 'filmbase-wordmark--loaded' : 'filmbase-wordmark--loading'}`}
-              />
+              <h1
+                className={`filmbase-wordmark m-0 ${isMoviesHydrated ? 'filmbase-wordmark--loaded' : 'filmbase-wordmark--loading'}`}
+              >
+                FILMBASE
+              </h1>
             ) : null}
           </header>
 
@@ -6269,8 +6277,8 @@ export default function App() {
                       if (isFilmDnaOpen) exitFilmDnaMode();
                       setIsInfoMode((v) => !v);
                     }}
-                    title={isInfoMode ? 'Exit info mode' : 'Movie info'}
-                    aria-label={isInfoMode ? 'Exit info mode' : 'Movie info'}
+                    title={isInfoMode ? 'Exit info mode' : 'Film info'}
+                    aria-label={isInfoMode ? 'Exit info mode' : 'Film info'}
                     aria-pressed={isInfoMode}
                     className={`group/infoprev relative p-1.5 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-100 ${
                       isPosterPreviewEnterAnimating || isAwaitingPosterApplyConfirm || isFilmDnaOpen
@@ -6565,7 +6573,7 @@ export default function App() {
                   </button>
                   <div
                     className="relative h-8 shrink-0"
-                    style={{ width: GRID_POSTER_SIZE_SLIDER_TRACK_W_PX }}
+                    style={{ width: posterSizeSliderTrackWidthPx }}
                     onPointerDownCapture={(e) => {
                       if (isPosterSizeControlDisabled) return;
                       if (e.button !== 0) return;
@@ -6813,10 +6821,10 @@ export default function App() {
                     className="group/addmov relative p-1.5 rounded-md text-white/40 transition-colors enabled:hover:bg-white/5 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-100"
                     title={
                       isLibraryToolbarLocked
-                        ? (mainLibraryToolbarLockReason ?? 'Add Movie')
+                        ? (mainLibraryToolbarLockReason ?? 'Add Film')
                         : isEditing
                           ? 'Finish editing library first'
-                          : 'Add Movie'
+                          : 'Add Film'
                     }
                   >
                     <span className="relative block h-[20px] w-[20px] shrink-0">
@@ -7849,7 +7857,7 @@ export default function App() {
                   ) : isInfoMode ? (
                     <div
                       role="region"
-                      aria-label="Movie information"
+                      aria-label="Film information"
                       className="filmbase-scrollbar-subtle filmbase-selectable-text pointer-events-auto absolute inset-0 z-[25] overflow-y-auto bg-black/85"
                       onClick={(e) => e.stopPropagation()}
                       onWheel={(e) => e.stopPropagation()}
@@ -7988,7 +7996,7 @@ export default function App() {
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
               <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">
-                Add New Movie
+                Add New Film
               </h2>
 
               <div className="space-y-2">
@@ -7999,7 +8007,7 @@ export default function App() {
                 )}
                 <div className="relative">
                   <label className="block text-xs font-medium text-white/50 mb-2">
-                    Search movies by title
+                    Search films by title
                   </label>
                   <div className="group/searchtitle relative w-full">
                     <img
@@ -8108,7 +8116,7 @@ export default function App() {
                         ref={addMovieSuggestionListRef}
                         className="filmbase-scrollbar-subtle absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[10px] border border-white/10 bg-[#1F1F1F] py-1 shadow-xl shadow-black/40"
                         role="listbox"
-                        aria-label="Movie search suggestions"
+                        aria-label="Film search suggestions"
                       >
                         {addMovieSearchLoading && addMovieSearchHits.length === 0 ? (
                           <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-white/50">
@@ -8231,7 +8239,7 @@ export default function App() {
                     transition={{ duration: 0.26, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <label className="block text-xs font-medium text-white/50 mb-2">
-                      IMDb movie / TV URL
+                      IMDb film / TV URL
                     </label>
                     <input
                       ref={addMovieImdbUrlInputRef}
@@ -8337,7 +8345,7 @@ export default function App() {
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-[420px] cursor-default bg-[#1F1F1F] border border-white/10 rounded-[24px] p-6 shadow-2xl"
             >
-              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete movie</h2>
+              <h2 className="text-[20px] font-semibold text-white mb-5 tracking-tight">Delete film</h2>
               <p className="text-sm leading-relaxed text-white/70">
                 Remove{' '}
                 <span className="font-medium text-white/90">{deleteMovieConfirm.title}</span>
@@ -9626,7 +9634,7 @@ function MovieCard({
                 onRequestDelete();
               }}
               className="flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
-              title="Delete movie"
+              title="Delete film"
             >
               <img draggable={false}
                 src="/icons/poster-delete.svg"
@@ -9898,7 +9906,7 @@ function MovieCard({
               onRequestDelete();
             }}
             className="absolute left-2 top-2 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-transparent p-0 shadow-[0_2px_4px_rgba(0,0,0,0.25)] transition-all duration-200 hover:scale-[1.5] active:brightness-90"
-            title="Delete movie"
+            title="Delete film"
           >
             <img draggable={false}
               src="/icons/poster-delete.svg"
