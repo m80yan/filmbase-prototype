@@ -1015,8 +1015,8 @@ const GRID_POSTER_SIZE_MAX_PX = 240;
 const GRID_POSTER_SIZE_STEP_PX = 10;
 /** Poster View 网格横向间距；与 `gap-x-6` 一致。 */
 const GRID_POSTER_GAP_X_PX = 24;
-/** 离散 slider 总宽度与段间距；单段宽度按当前段数均分。 */
-const GRID_POSTER_SIZE_SLIDER_TRACK_W_PX = 128;
+/** 离散 slider 单段宽度与段间距；总宽度由当前可用段数决定。 */
+const GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX = 24;
 const GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX = 2;
 /** 首次测量前 / 无法产生至少两个有效布局时保留的安全刻度。 */
 const GRID_POSTER_SIZE_FALLBACK_LEVELS = [GRID_POSTER_SIZE_MIN_PX, GRID_POSTER_SIZE_MAX_PX] as const;
@@ -5110,9 +5110,10 @@ export default function App() {
   const posterSizeLevelIndex = nearestPosterSizeLevelIndex(posterSizeLevels, posterSize);
   const posterSizeSliderSegmentCount = Math.max(1, posterSizeLevels.length - 1);
   const posterSizeSliderSegmentWidthPx =
-    (GRID_POSTER_SIZE_SLIDER_TRACK_W_PX -
-      (posterSizeSliderSegmentCount - 1) * GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX) /
-    posterSizeSliderSegmentCount;
+    GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX;
+  const posterSizeSliderTrackWidthPx =
+    posterSizeSliderSegmentCount * GRID_POSTER_SIZE_SLIDER_SEGMENT_W_PX +
+    (posterSizeSliderSegmentCount - 1) * GRID_POSTER_SIZE_SLIDER_SEGMENT_GAP_PX;
   const isPosterSizeControlDisabled = viewMode === 'list' || isLibraryToolbarLocked;
 
   /**
@@ -6572,7 +6573,7 @@ export default function App() {
                   </button>
                   <div
                     className="relative h-8 shrink-0"
-                    style={{ width: GRID_POSTER_SIZE_SLIDER_TRACK_W_PX }}
+                    style={{ width: posterSizeSliderTrackWidthPx }}
                     onPointerDownCapture={(e) => {
                       if (isPosterSizeControlDisabled) return;
                       if (e.button !== 0) return;
