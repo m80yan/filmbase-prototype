@@ -67,6 +67,10 @@ type MovieSearchHit = {
 /** 海报预览 Info Mode：标签 / 演员名强调色（与工具栏 Edit 等 `#EA9794` 一致）。 */
 const POSTER_PREVIEW_INFO_ACCENT_CLASS = 'text-[#EA9794]';
 
+/** Info Mode 手写强调层：仅用于 Plot 标签、主创标签和演员名。 */
+const POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS =
+  `font-['Gochi_Hand'] text-[18px] font-normal ${POSTER_PREVIEW_INFO_ACCENT_CLASS}`;
+
 /**
  * Info Mode 卡司全量行（无条数截断、无「……」占位），优先 `castDetails`，否则退回 `cast` 纯名。
  *
@@ -313,7 +317,9 @@ function PosterPreviewInfoPlotBlock({ plot, genres }: { plot: string; genres: st
     <div className="flex w-full shrink-0 justify-center">
       <section className="w-full min-w-0 max-w-[420px]" aria-label="Plot">
         <p className={`text-left ${POSTER_PREVIEW_INFO_PLOT_CLASS} whitespace-pre-wrap`}>
-          <span className={POSTER_PREVIEW_INFO_ACCENT_CLASS}>PLOT:</span>
+          <span className={`${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} underline underline-offset-2`}>
+            PLOT:
+          </span>
           <span className="text-white">
             {' '}
             {body}
@@ -353,7 +359,7 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
     >
       <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-2 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
         <div
-          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} flex items-start justify-end gap-2`}
         >
           <img
             draggable={false}
@@ -369,7 +375,7 @@ function PosterPreviewInfoCrewBlock({ director, writer }: { director: string; wr
         </div>
         <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>{(director ?? '').trim() || '—'}</div>
         <div
-          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} flex items-start justify-end gap-2`}
+          className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS} flex items-start justify-end gap-2`}
         >
           <img
             draggable={false}
@@ -415,7 +421,9 @@ function PosterPreviewInfoCastBlock({ movie }: { movie: Movie }) {
           <div className={`${POSTER_PREVIEW_INFO_ALIGNED_GRID_CLASS} gap-y-1.5 ${POSTER_PREVIEW_INFO_BODY_CLASS}`}>
             {rows.map((row, idx) => (
               <React.Fragment key={`cast-${idx}-${row.name}`}>
-                <div className={POSTER_PREVIEW_INFO_LABEL_COL_CLASS}>{row.name}</div>
+                <div className={`${POSTER_PREVIEW_INFO_LABEL_COL_CLASS} ${POSTER_PREVIEW_INFO_HANDWRITTEN_ACCENT_CLASS}`}>
+                  {row.name}
+                </div>
                 <div className={POSTER_PREVIEW_INFO_VALUE_COL_CLASS}>
                   {(row.character ?? '').trim() || '\u00A0'}
                 </div>
