@@ -1104,8 +1104,8 @@ const FILMBASE_MINIMIZE_TRANSITION_MS = 520;
 const FILMBASE_MINIMIZED_TRANSFORM = 'translate3d(0, 42vh, 0) scale(0.16)';
 
 const DESKTOP_WALLPAPER_SRC = '/images/desktop-bg.jpg';
-const DESKTOP_FILMBASE_ICON_SRC = '/icons/desktop-filmbase-icon.svg';
-const DESKTOP_FILMBASE_ICON_PRESSED_SRC = '/icons/desktop-filmbase-icon-pressed.svg';
+const DESKTOP_FILMBASE_ICON_SRC = '/icons/desktop-filmbase-icon.png';
+const DESKTOP_FILMBASE_ICON_PRESSED_SRC = '/icons/desktop-filmbase-icon-pressed.png';
 
 /** 桌面模式（非嵌入或未处于 CSS 全屏）下模拟窗口优选宽度（px）。 */
 const FILMBASE_DESKTOP_LAUNCH_PREF_WIDTH_PX = 1280;
@@ -1650,6 +1650,8 @@ function TrafficLightButton({
 
 interface DesktopFilmbaseRestoreButtonProps {
   onRestore: () => void;
+  selectionState: 'idle' | 'active' | 'disabled';
+  onSelectionStateChange: (state: 'idle' | 'active' | 'disabled') => void;
   /**
    * 仅在为 true 时接收指针事件（窗口置于前层时仍可挂载图标但不可点）。
    */
@@ -1657,23 +1659,30 @@ interface DesktopFilmbaseRestoreButtonProps {
 }
 
 /**
- * 模拟桌面右上角 Filmbase 桌面项：图标仅默认/按下两态（按下不改变标签样式），下方为 macOS 风格标签文案。
+ * 模拟桌面右上角 Filmbase 桌面项：图标默认/按下两态；点击后展示 macOS 风格选中描边与标签底色。
  *
  * @param props.onRestore 恢复主窗口回调
+ * @param props.selectionState 当前桌面图标选中态
+ * @param props.onSelectionStateChange 更新桌面图标选中态
  * @param props.interactive 是否可点击（关闭/最小化且非缩小动画、非恢复动画时为 true）
  */
-function DesktopFilmbaseRestoreButton({ onRestore, interactive }: DesktopFilmbaseRestoreButtonProps) {
+function DesktopFilmbaseRestoreButton({
+  onRestore,
+  selectionState,
+  onSelectionStateChange,
+  interactive,
+}: DesktopFilmbaseRestoreButtonProps) {
   const [pressed, setPressed] = useState(false);
+  const selected = selectionState !== 'idle';
 
-  /** Sequoia 桌面图标标签：系统字体栈 + 阴影提可读性（与按下态无关）。 */
+  /** Sequoia 桌面图标标签：系统字体栈 + 阴影提可读性。 */
   const desktopLabelStyle: React.CSSProperties = {
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif',
     fontSize: 12,
-    fontWeight: 600,
-    color: '#ffffff',
-    textShadow: '0 1px 3px rgba(0, 0, 0, 0.65)',
-    maxWidth: 64,
+    fontWeight: 700,
+    color: selectionState === 'disabled' ? '#666666' : '#ffffff',
+    textShadow: selected ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.65)',
   };
 
   return (
@@ -1686,10 +1695,19 @@ function DesktopFilmbaseRestoreButton({ onRestore, interactive }: DesktopFilmbas
       className={`absolute right-6 top-6 z-[1] flex flex-col items-center gap-0.5 border-none bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/60 ${
         interactive ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none cursor-default'
       }`}
-      onClick={onRestore}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.detail === 1) onSelectionStateChange('active');
+      }}
+      onDoubleClick={() => {
+        onSelectionStateChange('disabled');
+        onRestore();
+      }}
       onPointerDown={(e) => {
         if (!e.isPrimary) return;
+        e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
+        if (selectionState !== 'disabled') onSelectionStateChange('active');
         setPressed(true);
       }}
       onPointerUp={(e) => {
@@ -1698,19 +1716,31 @@ function DesktopFilmbaseRestoreButton({ onRestore, interactive }: DesktopFilmbas
       }}
       onPointerCancel={() => setPressed(false)}
     >
-      <img
-        draggable={false}
-        src={pressed ? DESKTOP_FILMBASE_ICON_PRESSED_SRC : DESKTOP_FILMBASE_ICON_SRC}
-        alt=""
-        width={64}
-        height={64}
-        className="pointer-events-none block h-16 w-16 shrink-0 select-none"
-        decoding="async"
+      <span
+        className={`pointer-events-none block h-16 w-16 shrink-0 select-none rounded-sm ${
+          selected ? 'outline outline-2 outline-offset-0 outline-white/35' : ''
+        }`}
         aria-hidden
-      />
+      >
+        <img
+          draggable={false}
+          src={pressed ? DESKTOP_FILMBASE_ICON_PRESSED_SRC : DESKTOP_FILMBASE_ICON_SRC}
+          alt=""
+          width={64}
+          height={64}
+          className="block h-16 w-16 select-none"
+          decoding="async"
+        />
+      </span>
       <span
         style={desktopLabelStyle}
-        className="pointer-events-none block w-full max-w-16 select-none text-center leading-tight tracking-tight"
+        className={`pointer-events-none block translate-y-[2px] select-none whitespace-nowrap rounded-sm px-1 text-center leading-tight tracking-tight ${
+          selectionState === 'disabled'
+            ? 'bg-[#C2C2C2]'
+            : selectionState === 'active'
+              ? 'bg-[#0E5DCE]'
+              : ''
+        }`}
         aria-hidden
       >
         FilmBase.app
@@ -1733,6 +1763,9 @@ export default function App() {
     if (typeof window === 'undefined') return 'open';
     return detectEmbeddedInIframe() ? 'fullscreen' : 'open';
   });
+  const [desktopIconSelectionState, setDesktopIconSelectionState] = useState<
+    'idle' | 'active' | 'disabled'
+  >('idle');
   const windowModeRef = useRef(windowMode);
   windowModeRef.current = windowMode;
   const [lastWindowAction, setLastWindowAction] = useState<LastWindowAction>(null);
@@ -5563,11 +5596,16 @@ export default function App() {
 
       {/* 恢复图标常驻：z-[40] 低于窗口壳 z-[50]，默认被遮住；缩小动画露出壁纸时可同时看到图标 */}
       <div
-        className="filmbase-desktop-restore-layer pointer-events-none absolute inset-0 z-[40]"
+        className={`filmbase-desktop-restore-layer absolute inset-0 z-[40] ${
+          isDesktopRestoreInteractive ? 'pointer-events-auto' : 'pointer-events-none'
+        }`}
         aria-hidden={false}
+        onClick={() => setDesktopIconSelectionState('idle')}
       >
         <DesktopFilmbaseRestoreButton
           onRestore={handleDesktopRestoreFilmbase}
+          selectionState={desktopIconSelectionState}
+          onSelectionStateChange={setDesktopIconSelectionState}
           interactive={isDesktopRestoreInteractive}
         />
       </div>
