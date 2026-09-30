@@ -6145,7 +6145,7 @@ export default function App() {
            * 两种 `h1` 用同一套 class 并 `m-0` 抵消浏览器默认 heading margin，
            * 让 FilmBase 与预览片名垂直 / 排版完全一致，无 Y 轴偏移。
             */}
-          <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-hidden px-8 text-center">
+          <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-visible px-8 text-center">
             {isPosterPreviewOpen && posterPreviewMovie ? (
               <h1 className="filmbase-preview-title m-0 max-w-full truncate">
                 {posterPreviewMovie.title}

@@ -351,7 +351,7 @@
   font-family: "Gochi Hand", "Inter", ui-sans-serif, system-ui, sans-serif;
   font-size: 18px;
   font-weight: 400;
-  line-height: 1;
+  line-height: 1.2;
   opacity: 0.4;
   pointer-events: none;
   transform: translateY(5px);
@@ -372,7 +372,7 @@
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   font-size: 18px;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.2;
   letter-spacing: 0;
   color: #ffffff;
   pointer-events: none;
