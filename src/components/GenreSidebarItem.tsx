@@ -33,9 +33,13 @@ export default function GenreSidebarItem({
 
   return (
     <div
-      className={`group/genreitem grid h-9 w-[200px] min-w-0 items-center rounded-md transition-colors ${
+      className={`group/genreitem relative grid h-9 w-[212px] min-w-0 items-center rounded-md before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[207px] before:rounded-md before:transition-opacity ${
         isDragging && !isInert ? 'opacity-50' : ''
-      } ${active ? 'bg-[#EB9692]/20' : 'hover:bg-white/5'}`}
+      } ${
+        active
+          ? 'before:bg-[#EB9692]/20 before:opacity-100'
+          : 'before:bg-white/5 before:opacity-0 hover:before:opacity-100'
+      }`}
       style={{
         gridTemplateColumns: `minmax(0, 1fr) ${GENRE_SIDEBAR_HANDLE_HIT_AREA_PX}px ${GENRE_SIDEBAR_SCROLLBAR_GUTTER}`,
       }}
@@ -43,7 +47,7 @@ export default function GenreSidebarItem({
       <button
         type="button"
         onClick={onClick}
-        className={`col-start-1 flex h-full min-w-0 items-center pl-3 pr-0 py-0 text-left text-[13px] transition-colors ${
+        className={`relative z-10 col-start-1 flex h-full min-w-0 items-center pl-3 pr-0 py-0 text-left text-[13px] transition-colors ${
           isInert
             ? `${active ? 'font-bold' : 'font-medium'} text-white/15`
             : active
@@ -77,7 +81,7 @@ export default function GenreSidebarItem({
         role="button"
         tabIndex={-1}
         aria-label={`Reorder ${label}`}
-        className={`col-start-2 flex h-8 w-8 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-end justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
+        className={`relative z-10 col-start-2 flex h-8 w-8 shrink-0 -translate-x-[3px] touch-none select-none items-center justify-end justify-self-end opacity-0 transition-opacity group-hover/genreitem:opacity-100 ${
           handleHovered || isDragging ? 'opacity-100' : ''
         } ${handleHovered || isDragging ? 'cursor-grab' : 'cursor-default'} active:cursor-grabbing`}
         onPointerDown={onHandlePointerDown}
