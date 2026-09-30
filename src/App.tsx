@@ -1263,7 +1263,7 @@ const FILMBASE_NONFULLSCREEN_OUTER_BOX_SHADOW =
   '0 24px 80px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.45)';
 
 const FILMBASE_NONFULLSCREEN_SHELL_DECORATION: React.CSSProperties = {
-  borderRadius: 12,
+  borderRadius: 27,
   boxShadow: FILMBASE_NONFULLSCREEN_OUTER_BOX_SHADOW,
 };
 
@@ -5460,7 +5460,7 @@ export default function App() {
         top: fullscreenGeom.to.top,
         width: fullscreenGeom.to.width,
         height: fullscreenGeom.to.height,
-        borderRadius: 12,
+        borderRadius: 27,
         ...filmbaseFullscreenGeomTransitionCss(),
         opacity: baseOpacity,
         visibility: baseVisibility,
@@ -5485,7 +5485,7 @@ export default function App() {
         top: fullscreenGeom.rect.top,
         width: fullscreenGeom.rect.width,
         height: fullscreenGeom.rect.height,
-        borderRadius: 12,
+        borderRadius: 27,
         transition: 'none',
         opacity: baseOpacity,
         visibility: baseVisibility,
@@ -5802,7 +5802,7 @@ export default function App() {
         >
           <div
             aria-hidden
-            className="pointer-events-none sticky top-0 z-20 -mb-6 h-6 w-[207px] bg-[var(--film-sidebar-bg)]"
+            className="pointer-events-none sticky top-0 z-20 -mb-6 h-6 w-[212px] bg-[var(--film-sidebar-bg)]"
           />
           <nav className="space-y-2">
             <motion.div
