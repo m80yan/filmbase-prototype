@@ -1578,6 +1578,7 @@ interface TrafficLightButtonProps {
   disabledSrc?: string;
   onClick: () => void;
   disabled?: boolean;
+  groupHovered?: boolean;
 }
 
 /**
@@ -1591,6 +1592,7 @@ function TrafficLightButton({
   disabledSrc,
   onClick,
   disabled,
+  groupHovered,
 }: TrafficLightButtonProps) {
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -1599,7 +1601,7 @@ function TrafficLightButton({
     ? disabledSrc!
     : pressed
       ? pressedSrc
-      : hovered
+      : hovered || groupHovered
         ? hoverSrc
         : defaultSrc;
 
@@ -1758,6 +1760,7 @@ export default function App() {
 
   /** CSS 全屏下悬停顶部 chrome 是否显示交通灯。 */
   const [fullscreenTrafficReveal, setFullscreenTrafficReveal] = useState(false);
+  const [trafficLightsHovered, setTrafficLightsHovered] = useState(false);
 
   /** 外壳 `filmbase-window-shell`：全屏切换 FLIP、`getBoundingClientRect` 快照 */
   const filmbaseWindowShellRef = useRef<HTMLDivElement | null>(null);
@@ -5654,6 +5657,8 @@ export default function App() {
               ? 'pointer-events-none opacity-0'
               : 'opacity-100'
           }`}
+          onPointerEnter={() => setTrafficLightsHovered(true)}
+          onPointerLeave={() => setTrafficLightsHovered(false)}
         >
           <TrafficLightButton
             label="Close window"
@@ -5665,6 +5670,7 @@ export default function App() {
             }
             onClick={handleTrafficClose}
             disabled={trafficLightsDisabled || isDestructiveConfirmationOpen}
+            groupHovered={trafficLightsHovered}
           />
           <TrafficLightButton
             label="Minimize window"
@@ -5676,6 +5682,7 @@ export default function App() {
             }
             onClick={handleTrafficMinimize}
             disabled={trafficLightsDisabled || windowMode === 'fullscreen'}
+            groupHovered={trafficLightsHovered}
           />
           <TrafficLightButton
             label={isFullscreenLayout ? 'Exit fullscreen' : 'Fullscreen window'}
@@ -5684,6 +5691,7 @@ export default function App() {
             pressedSrc="/icons/traffic-fullscreen-pressed.svg"
             onClick={handleTrafficFullscreen}
             disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null}
+            groupHovered={trafficLightsHovered}
           />
         </div>
         <button
