@@ -33,7 +33,7 @@ export default function GenreSidebarItem({
 
   return (
     <div
-      className={`group/genreitem relative grid h-9 w-[212px] min-w-0 items-center rounded-md before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[207px] before:rounded-md before:transition-opacity ${
+      className={`group/genreitem relative grid h-9 w-[203px] min-w-0 items-center rounded-md before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[198px] before:rounded-md before:transition-opacity ${
         isDragging && !isInert ? 'opacity-50' : ''
       } ${
         active

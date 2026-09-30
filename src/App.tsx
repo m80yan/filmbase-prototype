@@ -5029,8 +5029,8 @@ export default function App() {
       previewToolbarMetrics.fullTextW > previewToolbarAvailableTextW,
   );
   const posterPreviewToolbarInfoClassName = isPreviewToolbarInfoConstrained
-    ? 'pointer-events-none absolute top-1/2 z-0 m-0 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums'
-    : 'pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums';
+    ? 'pointer-events-none absolute top-1/2 z-0 m-0 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white/40 tabular-nums'
+    : 'pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white/40 tabular-nums';
   const posterPreviewToolbarInfoStyle = isPreviewToolbarInfoConstrained && previewToolbarMetrics
     ? {
         left: previewToolbarMetrics.leftSafe,
@@ -5738,7 +5738,7 @@ export default function App() {
 
       {/* Sidebar */}
 	      <aside
-          className={`${isSidebarOpen ? 'w-[232px] border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
+          className={`${isSidebarOpen ? 'w-[223px] border-r' : 'w-0 border-r-0'} flex h-full min-h-0 flex-col border-white/5 sidebar-gradient transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative z-10 ${
             isBackgroundInert ? 'pointer-events-none cursor-default' : ''
           }`}
           inert={isBackgroundInert ? true : undefined}
@@ -5748,7 +5748,7 @@ export default function App() {
         <div className="h-[42px] flex-shrink-0 w-full" />
         
         {/* Sidebar Header / Search (Axis B) */}
-        <div className="h-12 flex items-center pl-[9px] pr-4 min-w-[232px] flex-shrink-0">
+        <div className="h-12 flex items-center pl-[9px] pr-4 min-w-[223px] flex-shrink-0">
           <div className="relative group w-full">
             {/* 16×16 素材缩放到 14×14，与原先 lucide Search size={14} 一致。 */}
             <img draggable={false}
@@ -5788,7 +5788,7 @@ export default function App() {
           </div>
         </div>
         <div
-          className={`flex h-6 min-w-[232px] flex-shrink-0 items-center justify-between px-6 text-[11px] font-medium text-white/40 ${
+          className={`flex h-6 min-w-[223px] flex-shrink-0 items-center justify-between px-6 text-[11px] font-medium text-white/40 ${
             isBackgroundInert ? 'opacity-[0.2]' : ''
           }`}
         >
@@ -5804,13 +5804,13 @@ export default function App() {
         </div>
         <div
           ref={sidebarScrollRef}
-          className={`filmbase-scrollbar relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-1 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable] ${
+          className={`filmbase-scrollbar relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-1 pr-4 pb-2 min-w-[223px] [scrollbar-gutter:stable] ${
             isPosterPreviewOpen ? 'filmbase-sidebar-scrollbar-preview-hidden' : ''
           }`}
         >
           <div
             aria-hidden
-            className="pointer-events-none sticky top-0 z-20 -mb-6 h-6 w-[212px] bg-[var(--film-sidebar-bg)]"
+            className="pointer-events-none sticky top-0 z-20 -mb-6 h-6 w-[203px] bg-[var(--film-sidebar-bg)]"
           />
           <nav className="space-y-2">
             <motion.div
@@ -5827,7 +5827,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-30 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-30 flex h-6 w-[198px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Genre</span>
                 <motion.div
@@ -5845,12 +5845,12 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('genre') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[212px]"
+                className="overflow-hidden w-[203px]"
               >
                 <ul
                   id="genre-filter-list"
                   ref={genreListRef}
-                  className="space-y-0.5 w-[212px]"
+                  className="space-y-0.5 w-[203px]"
                   onPointerMove={onGenreListPointerMove}
                   onPointerUp={onGenreListPointerUp}
                   onPointerCancel={onGenreListPointerCancel}
@@ -5881,7 +5881,7 @@ export default function App() {
                       </ul>
                     </li>
                   ) : null}
-                  <li className={`w-[207px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
+                  <li className={`w-[198px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
                     {areGenreExtraRowsMounted ? (
                       <button
                         type="button"
@@ -5933,7 +5933,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[198px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Year</span>
                 <motion.div
@@ -5951,9 +5951,9 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('year') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[212px]"
+                className="overflow-hidden w-[203px]"
               >
-                <ul className="space-y-0.5 w-[212px]">
+                <ul className="space-y-0.5 w-[203px]">
                   {years.map((year, index) => {
                     const active = selectedYears.includes(year);
                     const nextActive = index < years.length - 1 && selectedYears.includes(years[index + 1]);
@@ -5968,7 +5968,7 @@ export default function App() {
                             ? 'short-before'
                             : 'normal';
                     return (
-                    <li key={year} className="w-[212px]">
+                    <li key={year} className="w-[203px]">
                       <SidebarYearTimelineFilterRow
                         label={year}
                         count={yearMovieCounts.get(year) ?? 0}
@@ -5994,7 +5994,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[198px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>My Rating</span>
                 <motion.div
@@ -6012,11 +6012,11 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('ratings') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[212px]"
+                className="overflow-hidden w-[203px]"
               >
-                <ul className="space-y-0.5 w-[212px]">
+                <ul className="space-y-0.5 w-[203px]">
                   {ratings.map((rating) => (
-                    <li key={rating} className="w-[212px]">
+                    <li key={rating} className="w-[203px]">
                       <SidebarMyRatingFilterRow
                         rating={rating}
                         count={ratingMovieCounts.get(rating) ?? 0}
@@ -6033,7 +6033,7 @@ export default function App() {
           </nav>
         </div>
 
-	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pb-4 pl-1 pr-4 pt-4 min-w-[251px]">
+	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pb-2 pl-1 pr-4 pt-4 min-w-[242px]">
           <button
             type="button"
             onClick={resetFilters}
@@ -6044,7 +6044,7 @@ export default function App() {
             } ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}
           >
             <span
-              className="grid h-full w-[207px] min-w-0 items-center"
+              className="grid h-full w-[198px] min-w-0 items-center"
               style={{
                 gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
               }}
@@ -6092,7 +6092,7 @@ export default function App() {
             } ${isBackgroundInert && !isRecentlyAddedDisabled ? 'opacity-[0.2]' : ''}`}
           >
             <span
-              className="grid h-full w-[207px] min-w-0 items-center"
+              className="grid h-full w-[198px] min-w-0 items-center"
               style={{
                 gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
               }}
@@ -6144,10 +6144,10 @@ export default function App() {
            * 标题行固定 `h-10`：预览与普通模式总高度一致，避免工具栏整体下移 8px；
            * 两种 `h1` 用同一套 class 并 `m-0` 抵消浏览器默认 heading margin，
            * 让 FilmBase 与预览片名垂直 / 排版完全一致，无 Y 轴偏移。
-           */}
-          <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-hidden px-8 text-center">
+            */}
+          <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-visible px-8 text-center">
             {isPosterPreviewOpen && posterPreviewMovie ? (
-              <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
+              <h1 className="filmbase-preview-title m-0 max-w-full truncate">
                 {posterPreviewMovie.title}
               </h1>
             ) : !(isAddModalOpen || isDestructiveConfirmationOpen || isEditTrailerModalOpen || isTrailerOverlayInMain) ? (
@@ -9028,10 +9028,10 @@ function SidebarYearTimelineFilterRow({
   onMouseLeave: () => void;
 }) {
   return (
-    <div className="relative h-9 w-[212px]">
+    <div className="relative h-9 w-[203px]">
       <span
         aria-hidden
-        className={`pointer-events-none absolute inset-y-0 left-[5px] z-0 w-[207px] rounded-md transition-opacity ${
+        className={`pointer-events-none absolute inset-y-0 left-[5px] z-0 w-[198px] rounded-md transition-opacity ${
           active
             ? 'bg-[#EB9692]/20 opacity-100'
             : hovered && !isInert
@@ -9112,7 +9112,7 @@ function SidebarMyRatingFilterRow({
       type="button"
       onClick={onClick}
       aria-label={aria}
-      className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[207px] before:rounded-md before:transition-opacity ${
+      className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[198px] before:rounded-md before:transition-opacity ${
         isInert
           ? `${active ? 'font-bold before:bg-[#EB9692]/20 before:opacity-100' : 'before:opacity-0'} text-white/15`
           : active
