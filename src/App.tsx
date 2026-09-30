@@ -5029,8 +5029,8 @@ export default function App() {
       previewToolbarMetrics.fullTextW > previewToolbarAvailableTextW,
   );
   const posterPreviewToolbarInfoClassName = isPreviewToolbarInfoConstrained
-    ? 'pointer-events-none absolute top-1/2 z-0 m-0 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums'
-    : 'pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white tabular-nums';
+    ? 'pointer-events-none absolute top-1/2 z-0 m-0 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white/40 tabular-nums'
+    : 'pointer-events-none absolute left-1/2 top-1/2 z-0 m-0 max-w-[min(90%,36rem)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[13px] font-medium leading-5 text-white/40 tabular-nums';
   const posterPreviewToolbarInfoStyle = isPreviewToolbarInfoConstrained && previewToolbarMetrics
     ? {
         left: previewToolbarMetrics.leftSafe,
@@ -6033,7 +6033,7 @@ export default function App() {
           </nav>
         </div>
 
-	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pb-4 pl-1 pr-4 pt-4 min-w-[242px]">
+	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pb-2 pl-1 pr-4 pt-4 min-w-[242px]">
           <button
             type="button"
             onClick={resetFilters}
@@ -6144,10 +6144,10 @@ export default function App() {
            * 标题行固定 `h-10`：预览与普通模式总高度一致，避免工具栏整体下移 8px；
            * 两种 `h1` 用同一套 class 并 `m-0` 抵消浏览器默认 heading margin，
            * 让 FilmBase 与预览片名垂直 / 排版完全一致，无 Y 轴偏移。
-           */}
+            */}
           <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-hidden px-8 text-center">
             {isPosterPreviewOpen && posterPreviewMovie ? (
-              <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
+              <h1 className="filmbase-preview-title m-0 max-w-full truncate">
                 {posterPreviewMovie.title}
               </h1>
             ) : !(isAddModalOpen || isDestructiveConfirmationOpen || isEditTrailerModalOpen || isTrailerOverlayInMain) ? (

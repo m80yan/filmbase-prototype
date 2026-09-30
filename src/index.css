@@ -368,6 +368,18 @@
   opacity: 0.4;
 }
 
+.filmbase-preview-title {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  color: #ffffff;
+  pointer-events: none;
+  transform: translateY(5px);
+  user-select: none;
+}
+
 @keyframes filmbaseWordmarkGlow {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
