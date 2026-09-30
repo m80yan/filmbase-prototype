@@ -932,9 +932,9 @@ function getPosterPreviewEnterVisual(isEnterAnimating: boolean, enterRun: boolea
 
 /**
  * 全屏且交通灯组视觉隐藏（透明不占交互）时，将「Toggle Sidebar」左移以供与侧栏搜索左缘对齐，
- * ≈ `3 × 12px` 圆点宽度 + `gap-2 × 2` + 与 toggle 间距 `gap-3`。
+ * ≈ `3 × 12px` 圆点宽度 + `gap-2 × 2` + 与 toggle 间距 `gap-3` + 搜索图标中心校正。
  */
-const FULLSCREEN_SIDEBAR_TOGGLE_ALIGN_SHIFT_PX = 64;
+const FULLSCREEN_SIDEBAR_TOGGLE_ALIGN_SHIFT_PX = 74;
 
 /**
  * 规范化标题相同且年份相差不超过 1 时，视为同一部影片（用于 seed 1993 vs public 1994 等）。
@@ -5639,9 +5639,7 @@ export default function App() {
         <div className="flex h-full w-full overflow-hidden relative">
           {/* Window Controls & Sidebar Toggle (Absolute Layer) */}
       <div
-        className={`absolute left-0 top-0 z-[200] flex cursor-default items-center gap-3 pl-4 pr-2 ${
-          isFullscreenLayout ? 'h-14 min-h-[52px] pb-2 pt-2' : 'h-10'
-        }`}
+        className="absolute left-0 top-[6px] z-[200] flex h-10 cursor-default items-center gap-3 pl-5 pr-2"
         onMouseEnter={() => {
           if (isFullscreenLayout) setFullscreenTrafficReveal(true);
         }}
@@ -5739,10 +5737,10 @@ export default function App() {
           onPointerDownCapture={isBackgroundInert ? undefined : onShellPointerDownCloseScopedOverlays}
         >
         {/* Spacer for Window Controls (Axis A) */}
-        <div className="h-10 flex-shrink-0 w-full" />
+        <div className="h-[42px] flex-shrink-0 w-full" />
         
         {/* Sidebar Header / Search (Axis B) */}
-        <div className="h-12 flex items-center px-4 min-w-[232px] flex-shrink-0">
+        <div className="h-12 flex items-center pl-[9px] pr-4 min-w-[232px] flex-shrink-0">
           <div className="relative group w-full">
             {/* 16×16 素材缩放到 14×14，与原先 lucide Search size={14} 一致。 */}
             <img draggable={false}
@@ -5798,10 +5796,14 @@ export default function App() {
         </div>
         <div
           ref={sidebarScrollRef}
-          className={`filmbase-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-4 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable] ${
+          className={`filmbase-scrollbar relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden pl-1 pr-4 pb-2 min-w-[232px] [scrollbar-gutter:stable] ${
             isPosterPreviewOpen ? 'filmbase-sidebar-scrollbar-preview-hidden' : ''
           }`}
         >
+          <div
+            aria-hidden
+            className="pointer-events-none sticky top-0 z-20 -mb-6 h-6 w-[207px] bg-[var(--film-sidebar-bg)]"
+          />
           <nav className="space-y-2">
             <motion.div
               className={`space-y-2 ease-out ${
@@ -5817,7 +5819,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-30 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Genre</span>
                 <motion.div
@@ -5835,12 +5837,12 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('genre') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[200px]"
+                className="overflow-hidden w-[212px]"
               >
                 <ul
                   id="genre-filter-list"
                   ref={genreListRef}
-                  className="space-y-0.5 w-[200px]"
+                  className="space-y-0.5 w-[212px]"
                   onPointerMove={onGenreListPointerMove}
                   onPointerUp={onGenreListPointerUp}
                   onPointerCancel={onGenreListPointerCancel}
@@ -5871,7 +5873,7 @@ export default function App() {
                       </ul>
                     </li>
                   ) : null}
-                  <li className={`w-[200px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
+                  <li className={`w-[207px] ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}>
                     {areGenreExtraRowsMounted ? (
                       <button
                         type="button"
@@ -5923,7 +5925,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>Year</span>
                 <motion.div
@@ -5941,9 +5943,9 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('year') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[200px]"
+                className="overflow-hidden w-[212px]"
               >
-                <ul className="space-y-0.5 w-[200px]">
+                <ul className="space-y-0.5 w-[212px]">
                   {years.map((year, index) => {
                     const active = selectedYears.includes(year);
                     const nextActive = index < years.length - 1 && selectedYears.includes(years[index + 1]);
@@ -5958,7 +5960,7 @@ export default function App() {
                             ? 'short-before'
                             : 'normal';
                     return (
-                    <li key={year} className="w-[200px]">
+                    <li key={year} className="w-[212px]">
                       <SidebarYearTimelineFilterRow
                         label={year}
                         count={yearMovieCounts.get(year) ?? 0}
@@ -5984,7 +5986,7 @@ export default function App() {
                 disabled={!isMoviesHydrated}
                 tabIndex={isMoviesHydrated ? 0 : -1}
                 aria-disabled={!isMoviesHydrated}
-                className="sticky top-0 z-10 flex h-6 w-[200px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
+                className="sticky top-0 z-10 flex h-6 w-[207px] items-center justify-between pl-2.5 pr-2 text-[12px] font-bold text-white/40 uppercase tracking-wider mb-1.5 group bg-[var(--film-sidebar-bg)] hover:text-white/60 transition-colors disabled:cursor-default"
               >
                 <span>My Rating</span>
                 <motion.div
@@ -6002,11 +6004,11 @@ export default function App() {
                   opacity: isSidebarDynamicFilterExpanded('ratings') ? 1 : 0,
                 }}
                 transition={{ duration: SIDEBAR_FILTER_SECTION_REVEAL_MS / 1000, ease: 'easeOut' }}
-                className="overflow-hidden w-[200px]"
+                className="overflow-hidden w-[212px]"
               >
-                <ul className="space-y-0.5 w-[200px]">
+                <ul className="space-y-0.5 w-[212px]">
                   {ratings.map((rating) => (
-                    <li key={rating} className="w-[200px]">
+                    <li key={rating} className="w-[212px]">
                       <SidebarMyRatingFilterRow
                         rating={rating}
                         count={ratingMovieCounts.get(rating) ?? 0}
@@ -6023,7 +6025,7 @@ export default function App() {
           </nav>
         </div>
 
-	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pt-4 p-4 min-w-[256px]">
+	        <div className="mt-auto flex-shrink-0 border-t border-white/5 pb-4 pl-1 pr-4 pt-4 min-w-[251px]">
           <button
             type="button"
             onClick={resetFilters}
@@ -6034,7 +6036,7 @@ export default function App() {
             } ${isBackgroundInert ? 'opacity-[0.2]' : ''}`}
           >
             <span
-              className="grid h-full w-[200px] min-w-0 items-center"
+              className="grid h-full w-[207px] min-w-0 items-center"
               style={{
                 gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
               }}
@@ -6082,7 +6084,7 @@ export default function App() {
             } ${isBackgroundInert && !isRecentlyAddedDisabled ? 'opacity-[0.2]' : ''}`}
           >
             <span
-              className="grid h-full w-[200px] min-w-0 items-center"
+              className="grid h-full w-[207px] min-w-0 items-center"
               style={{
                 gridTemplateColumns: 'minmax(0, 1fr) 16px var(--filmbase-scrollbar-gutter, 8px)',
               }}
@@ -6135,7 +6137,7 @@ export default function App() {
            * 两种 `h1` 用同一套 class 并 `m-0` 抵消浏览器默认 heading margin，
            * 让 FilmBase 与预览片名垂直 / 排版完全一致，无 Y 轴偏移。
            */}
-          <header className="relative flex h-10 shrink-0 items-center justify-center overflow-hidden px-8 text-center">
+          <header className="relative flex h-[42px] shrink-0 items-center justify-center overflow-hidden px-8 text-center">
             {isPosterPreviewOpen && posterPreviewMovie ? (
               <h1 className="m-0 max-w-full truncate text-[13px] font-bold leading-5 tracking-tight text-white/40">
                 {posterPreviewMovie.title}
@@ -9018,7 +9020,17 @@ function SidebarYearTimelineFilterRow({
   onMouseLeave: () => void;
 }) {
   return (
-    <div className="relative h-9 w-[200px]">
+    <div className="relative h-9 w-[212px]">
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-y-0 left-[5px] z-0 w-[207px] rounded-md transition-opacity ${
+          active
+            ? 'bg-[#EB9692]/20 opacity-100'
+            : hovered && !isInert
+              ? 'bg-white/5 opacity-100'
+              : 'bg-white/5 opacity-0'
+        }`}
+      />
       {connectorState ? (
         <span
           aria-hidden
@@ -9042,10 +9054,10 @@ function SidebarYearTimelineFilterRow({
         onMouseLeave={onMouseLeave}
         className={`relative z-10 flex h-9 w-full items-center rounded-md pl-[42px] pr-2.5 py-0 text-left text-[13px] transition-colors ${
           isInert
-            ? `${active ? 'bg-[#EB9692]/20 font-bold' : 'font-medium'} text-white/15`
+            ? `${active ? 'font-bold' : 'font-medium'} text-white/15`
             : active
-            ? 'bg-[#EB9692]/20 font-bold text-white'
-            : 'font-medium text-white/70 hover:bg-white/5 hover:text-white'
+            ? 'font-bold text-white'
+            : 'font-medium text-white/70 hover:text-white'
         }`}
       >
         <span
@@ -9092,15 +9104,15 @@ function SidebarMyRatingFilterRow({
       type="button"
       onClick={onClick}
       aria-label={aria}
-      className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors ${
+      className={`group/sidebarrow relative flex h-9 w-full min-w-0 items-center rounded-md pl-3 pr-2.5 py-0 text-left text-[13px] transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:left-[5px] before:w-[207px] before:rounded-md before:transition-opacity ${
         isInert
-          ? `${active ? 'bg-[#EB9692]/20 font-bold' : ''} text-white/15`
+          ? `${active ? 'font-bold before:bg-[#EB9692]/20 before:opacity-100' : 'before:opacity-0'} text-white/15`
           : active
-          ? 'bg-[#EB9692]/20 font-bold text-white'
-          : 'text-white/70 hover:bg-white/5 hover:text-white'
+          ? 'font-bold text-white before:bg-[#EB9692]/20 before:opacity-100'
+          : 'text-white/70 hover:text-white before:bg-white/5 before:opacity-0 hover:before:opacity-100'
       }`}
     >
-      <div className="flex min-h-0 min-w-0 flex-1 items-center">
+      <div className="relative z-10 flex min-h-0 min-w-0 flex-1 items-center">
         <span className="ml-[4.5px] mr-[10px] flex shrink-0 items-center gap-0.5" aria-hidden>
           {rating === 0
             ? [0, 1, 2, 3, 4].map((i) => (

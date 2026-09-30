@@ -354,6 +354,7 @@
   line-height: 1;
   opacity: 0.4;
   pointer-events: none;
+  transform: translateY(5px);
   user-select: none;
   transition: opacity 600ms ease-out;
 }
