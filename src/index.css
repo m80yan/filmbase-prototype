@@ -145,7 +145,7 @@
 .genre-show-more,
 .genre-show-fewer {
   display: flex;
-  width: 207px;
+  width: 198px;
   height: 32px;
   margin-top: 4px;
   align-items: center;
@@ -181,7 +181,7 @@
 }
 
 .genre-extra-rows {
-  width: 212px;
+  width: 203px;
   max-height: 0;
   overflow: hidden;
   opacity: 0;
