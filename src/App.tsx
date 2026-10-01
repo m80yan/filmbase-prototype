@@ -5725,8 +5725,16 @@ export default function App() {
           <TrafficLightButton
             label={isFullscreenLayout ? 'Exit fullscreen' : 'Fullscreen window'}
             defaultSrc="/icons/traffic-fullscreen.svg"
-            hoverSrc="/icons/traffic-fullscreen-hover.svg"
-            pressedSrc="/icons/traffic-fullscreen-pressed.svg"
+            hoverSrc={
+              isFullscreenLayout
+                ? '/icons/traffic-fullscreen-exit-hover.svg'
+                : '/icons/traffic-fullscreen-hover.svg'
+            }
+            pressedSrc={
+              isFullscreenLayout
+                ? '/icons/traffic-fullscreen-exit-pressed.svg'
+                : '/icons/traffic-fullscreen-pressed.svg'
+            }
             onClick={handleTrafficFullscreen}
             disabled={trafficLightsDisabled || filmbaseFullscreenShellAnim !== null}
             groupHovered={trafficLightsHovered}
